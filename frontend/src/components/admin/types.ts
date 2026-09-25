@@ -220,9 +220,11 @@ export interface CompteLigne {
   abonnement_statut: string | null;
   last_login: string | null;
   created_at: string;
-  solde_actuel: number;
-  mise_totale: number;
-  gain_net: number;
+  /** Défi du mois en cours (points, pas d'euros). */
+  defi_mois: string;
+  defi_solde: number;
+  defi_rang: number | null;
+  defi_points_nets: number;
   roi: number | null;
   nb_paris: number;
   nb_gagnes: number;
@@ -232,23 +234,29 @@ export interface UserDetail {
   user: {
     user_id: string; email: string; nom: string | null; prenom: string | null;
     plan: string; is_active: boolean; is_admin: boolean; profil_risque: string;
-    bankroll_initiale: number | null; email_verified: boolean; auth_method: string;
+    email_verified: boolean; auth_method: string;
     stripe_client: boolean; created_at: string; updated_at: string; last_login: string | null;
   };
-  portefeuille: {
-    capital_initial: number; solde_actuel: number; mise_totale: number; gain_net: number;
-    roi: number | null; nb_paris: number; nb_gagnes: number; nb_perdus: number;
-    nb_attente: number; nb_regles: number; win_rate: number | null; nb_predictions_used: number;
+  /** Défi du mois en cours. */
+  defi: DefiStatsAdmin & {
+    mois: string; rang: number | null; solde: number;
+    plan: DefiStatsAdmin; perso: DefiStatsAdmin;
   };
-  par_type: Array<{ type_pari: string; nb: number; mise: number; net: number; nb_gagnes: number; roi: number | null }>;
+  /** Tous les mois, paris gagnés/perdus seulement. */
+  par_type: Array<{ type_pari: string; nb: number; points: number; net: number; nb_gagnes: number; roi: number | null }>;
   subscriptions: Array<{ sub_id: string; plan: string; periodicite: string; statut: string; periode_debut: string | null; periode_fin: string | null }>;
   nb_bets: number;
+  /** Paris du Défi du mois, tous les mois, du plus récent au plus ancien. */
   bets: Array<{
-    entry_id: string; date: string; type_pari: string; chevaux: string | null;
-    mise: number; cote: number | null; resultat: string | null; gain_perte: number | null;
-    suivi_reco_ia: boolean; notes: string | null; course_code: string | null;
-    hippodrome: string | null; course_date: string | null; course_statut: string | null;
+    pari_id: string; mois: string; engage_at: string; type_pari: string; chevaux: number[];
+    points: number; origine: "plan" | "perso"; statut: "en_attente" | "gagne" | "perd" | "rembourse";
+    rapport: number | null; points_retour: number | null; course_id: string;
+    course_code: string | null; hippodrome: string | null; course_date: string | null;
   }>;
+}
+
+export interface DefiStatsAdmin {
+  nb_paris: number; nb_gagnes: number; nb_en_attente: number; points_nets: number; roi: number | null;
 }
 
 export interface PalmaresNet {

@@ -81,7 +81,8 @@ export default function Body() {
       <p>
         L&apos;abonnement ouvre le nom des chevaux sur davantage de courses, les{" "}
         <Link href="/guides/pari-de-valeur">paris de valeur</Link> en continu, le calculateur de
-        mise adossé à un budget et à un profil de risque, les alertes, et le suivi de capital. Le
+        mise adossé à un budget et à un profil de risque, et les alertes. Le Défi du mois, lui, est
+        ouvert à tous, compte gratuit compris. Le
         détail figure sur la <Link href="/tarifs">page des tarifs</Link>.
       </p>
 

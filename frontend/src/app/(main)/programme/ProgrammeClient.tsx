@@ -33,6 +33,7 @@ import { coursesApi, predictionsApi } from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
 import { formatTime, cn } from "@/lib/utils";
 import { jourParis } from "@/lib/seo";
+import { DefiClassementLive } from "@/components/defi/DefiClassementLive";
 import { BandeauOnglet, CARTE_CLS, IconeTuile, Pastille, PastilleDirect, SG } from "@/components/courses/course-ui";
 
 /* ─── Types ─────────────────────────────────────────────── */
@@ -1257,6 +1258,10 @@ export default function ProgrammeClient({
             </div>
           </div>
         )}
+
+        {/* Défi du mois : le classement en direct au-dessus des courses sur
+            lesquelles on peut justement jouer ses points. */}
+        <DefiClassementLive top={3} titre="Défi du mois : jouez vos points sur ces courses" className="mb-5" />
 
         {/* ── Contenu ── */}
         {loading ? (

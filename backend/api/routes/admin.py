@@ -136,17 +136,10 @@ async def list_users(
     db: AsyncSession = Depends(get_db),
     _=Depends(require_admin),
 ):
-    """Liste les utilisateurs : identité, plan, profil, PORTEFEUILLE (misé/gagné/net/
-    ROI/solde), nb paris, date création — tout ce qu'il faut pour suivre chaque compte.
-    Agrégats calculés en requêtes GROUPÉES (pas de N+1). Jamais le mot de passe."""
-    from db.models import Bankroll
-    # Règle d'abord les paris en attente de TOUS les users (courses terminées) →
-    # ROI/solde affichés à l'admin toujours réels et à jour. Best-effort.
-    try:
-        from api.routes.bankroll import settle_pending_bets
-        await settle_pending_bets(db, None)
-    except Exception as e:
-        log.warning("admin.settle_skip", err=str(e)[:120])
+    """Liste les utilisateurs : identité, plan, profil, Défi du mois en cours (solde en
+    points, rang, paris), date création. Agrégats groupés (pas de N+1). Jamais le
+    mot de passe."""
+    from services import defi as _defi
     q = select(User)
     if plan:
         q = q.where(User.plan == plan)
@@ -156,32 +149,8 @@ async def list_users(
     q = q.order_by(desc(User.created_at)).limit(limit).offset(offset)
     users = (await db.execute(q)).scalars().all()
     uids = [u.user_id for u in users]
-
-    # ── Agrégats bankroll par user (1 requête groupée) ──
-    agg: dict[str, dict] = {}
-    if uids:
-        rows = (await db.execute(
-            select(
-                BankrollEntry.user_id,
-                func.count(BankrollEntry.entry_id),
-                func.coalesce(func.sum(BankrollEntry.mise), 0.0),
-                func.coalesce(func.sum(BankrollEntry.gain_perte), 0.0),
-                func.sum(case((BankrollEntry.resultat == "gagne", 1), else_=0)),
-                func.sum(case((BankrollEntry.suivi_reco_ia == True, 1), else_=0)),
-            ).where(BankrollEntry.user_id.in_(uids)).group_by(BankrollEntry.user_id)
-        )).all()
-        for uid, nb, mise, net, gagnes, ia in rows:
-            agg[uid] = {"nb_paris": int(nb), "mise": float(mise), "net": float(net),
-                        "nb_gagnes": int(gagnes or 0), "nb_ia": int(ia or 0)}
-        # Solde = Σ montant_initial des portefeuilles + Σ gain_perte
-        sol = (await db.execute(
-            select(Bankroll.user_id, func.coalesce(func.sum(Bankroll.montant_initial), 0.0))
-            .where(Bankroll.user_id.in_(uids), Bankroll.est_supprime == False)
-            .group_by(Bankroll.user_id)
-        )).all()
-        for uid, init in sol:
-            agg.setdefault(uid, {}).setdefault("nb_paris", 0)
-            agg[uid]["capital_initial"] = float(init)
+    mois = _defi.mois_courant()
+    defi_par_user = await _defi.resume_admin(db, uids, mois)
 
     # ── Statut d'abonnement RÉEL par user (dernière Subscription, pas juste "a un
     # customer_id Stripe") — un customer Stripe est créé dès le clic sur "S'abonner",
@@ -200,10 +169,7 @@ async def list_users(
 
     result = []
     for u in users:
-        a = agg.get(u.user_id, {})
-        mise = a.get("mise", 0.0)
-        net = a.get("net", 0.0)
-        cap0 = a.get("capital_initial", 0.0) or (u.bankroll_initiale or 0.0)
+        d = defi_par_user.get(u.user_id)
         result.append({
             "user_id": u.user_id,
             "email": u.email,
@@ -219,16 +185,14 @@ async def list_users(
             "abonnement_statut": sub_status.get(u.user_id),
             "created_at": u.created_at,
             "last_login": u.last_login_at,
-            # Portefeuille
-            "bankroll_initiale": u.bankroll_initiale,
-            "capital_initial": round(cap0, 2),
-            "solde_actuel": round(cap0 + net, 2),
-            "nb_paris": a.get("nb_paris", 0),
-            "nb_gagnes": a.get("nb_gagnes", 0),
-            "nb_predictions_used": a.get("nb_ia", 0),
-            "mise_totale": round(mise, 2),
-            "gain_net": round(net, 2),
-            "roi": round(net / mise * 100, 1) if mise > 0 else None,
+            # Défi du mois en cours
+            "defi_mois": mois,
+            "defi_solde": d["solde"] if d else float(_defi.CAPITAL_MENSUEL),
+            "defi_rang": d["rang"] if d else None,
+            "nb_paris": d["nb_paris"] if d else 0,
+            "nb_gagnes": d["nb_gagnes"] if d else 0,
+            "defi_points_nets": d["points_nets"] if d else 0.0,
+            "roi": d["roi"] if d else None,
         })
     return result
 
@@ -239,104 +203,70 @@ async def get_user_detail(
     db: AsyncSession = Depends(get_db),
     _=Depends(require_admin),
 ):
-    """Détail COMPLET d'un utilisateur pour le back-office : identité, portefeuille,
-    abonnements et HISTORIQUE de jeu intégral (chaque pari joué/enregistré avec
-    course, chevaux, cote, mise, résultat, gain), + agrégats (misé/gagné/net/ROI/
-    win-rate, répartition par type de pari). Données réelles, paris réglés d'abord."""
-    from db.models import Bankroll
+    """Détail COMPLET d'un utilisateur pour le back-office : identité, abonnements,
+    Défi du mois en cours (solde, rang, plan / perso) et HISTORIQUE intégral de ses
+    paris du défi (tous les mois), avec la répartition par type de pari."""
+    from db.models import DefiPari
+    from services import defi as _defi
     result = await db.execute(select(User).where(User.user_id == user_id))
     user = result.scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=404, detail="Utilisateur introuvable")
 
-    # Règle les paris en attente de CE user (courses terminées) → gains à jour.
-    try:
-        from api.routes.bankroll import settle_pending_bets
-        await settle_pending_bets(db, user_id)
-    except Exception as e:
-        log.warning("admin.user_detail.settle_skip", err=str(e)[:120])
-
-    # Subscriptions
     subs = (await db.execute(
         select(Subscription).where(Subscription.user_id == user_id).order_by(desc(Subscription.created_at))
     )).scalars().all()
 
-    # ── Historique complet des paris (join course pour contexte) ──
+    mois = _defi.mois_courant()
+    resume = await _defi.resume_joueur(db, user_id, mois)
+    resume.pop("paris")
+    rang = (await _defi.resume_admin(db, [user_id], mois)).get(user_id, {}).get("rang")
+
     rows = (await db.execute(
-        select(
-            BankrollEntry, Course.hippodrome_nom, Course.numero_reunion,
-            Course.numero, Course.date_heure, Course.statut,
-        )
-        .outerjoin(Course, Course.course_id == BankrollEntry.course_id)
-        .where(BankrollEntry.user_id == user_id)
-        .order_by(desc(BankrollEntry.date))
+        select(DefiPari, Course.hippodrome_nom, Course.numero_reunion, Course.numero,
+               Course.date_heure)
+        .outerjoin(Course, Course.course_id == DefiPari.course_id)
+        .where(DefiPari.user_id == user_id)
+        .order_by(desc(DefiPari.engage_at))
         .limit(500)
     )).all()
-
     bets = []
-    for e, hippo, n_r, n_c, dh, c_statut in rows:
-        code = f"R{n_r}C{n_c}" if n_r and n_c else None
+    for p, hippo, n_r, n_c, dh in rows:
         bets.append({
-            "entry_id": e.entry_id,
-            "date": e.date,
-            "type_pari": e.type_pari,
-            "chevaux": e.chevaux,
-            "mise": e.mise,
-            "cote": e.cote,
-            "resultat": e.resultat,
-            "gain_perte": e.gain_perte,
-            "suivi_reco_ia": e.suivi_reco_ia,
-            "notes": e.notes,
-            "course_id": e.course_id,
-            "course_code": code,
+            "pari_id": p.pari_id,
+            "mois": p.mois,
+            "engage_at": p.engage_at,
+            "type_pari": p.type_pari,
+            "chevaux": list(p.chevaux),
+            "points": p.points,
+            "origine": p.origine,
+            "statut": p.statut,
+            "rapport": p.rapport,
+            "points_retour": p.points_retour,
+            "course_id": p.course_id,
+            "course_code": f"R{n_r}C{n_c}" if n_r and n_c else None,
             "hippodrome": hippo,
             "course_date": dh,
-            "course_statut": c_statut,
         })
+    nb_total = (await db.execute(
+        select(func.count(DefiPari.pari_id)).where(DefiPari.user_id == user_id))).scalar() or 0
 
-    # ── Agrégats portefeuille (toutes les entrées, pas seulement les 500) ──
-    agg = (await db.execute(
-        select(
-            func.count(BankrollEntry.entry_id),
-            func.coalesce(func.sum(BankrollEntry.mise), 0.0),
-            func.coalesce(func.sum(BankrollEntry.gain_perte), 0.0),
-            func.sum(case((BankrollEntry.resultat == "gagne", 1), else_=0)),
-            func.sum(case((BankrollEntry.resultat == "perd", 1), else_=0)),
-            func.sum(case((BankrollEntry.resultat.is_(None), 1), else_=0)),
-            func.sum(case((BankrollEntry.suivi_reco_ia == True, 1), else_=0)),
-        ).where(BankrollEntry.user_id == user_id)
-    )).one()
-    nb_total, mise_tot, net_tot, nb_gagnes, nb_perdus, nb_attente, nb_ia = agg
-    nb_total = int(nb_total or 0)
-    mise_tot = float(mise_tot or 0.0)
-    net_tot = float(net_tot or 0.0)
-    nb_gagnes = int(nb_gagnes or 0)
-    nb_perdus = int(nb_perdus or 0)
-    nb_attente = int(nb_attente or 0)
-    nb_regles = nb_gagnes + nb_perdus
-
-    # Capital initial = Σ portefeuilles actifs (fallback bankroll_initiale)
-    cap0 = (await db.execute(
-        select(func.coalesce(func.sum(Bankroll.montant_initial), 0.0))
-        .where(Bankroll.user_id == user_id, Bankroll.est_supprime == False)
-    )).scalar() or (user.bankroll_initiale or 0.0)
-    cap0 = float(cap0)
-
-    # ── Répartition par type de pari ──
+    # Répartition par type (tous les mois, paris réglés gagnés/perdus seulement).
     type_rows = (await db.execute(
         select(
-            BankrollEntry.type_pari,
-            func.count(BankrollEntry.entry_id),
-            func.coalesce(func.sum(BankrollEntry.mise), 0.0),
-            func.coalesce(func.sum(BankrollEntry.gain_perte), 0.0),
-            func.sum(case((BankrollEntry.resultat == "gagne", 1), else_=0)),
-        ).where(BankrollEntry.user_id == user_id).group_by(BankrollEntry.type_pari)
-        .order_by(desc(func.count(BankrollEntry.entry_id)))
+            DefiPari.type_pari,
+            func.count(DefiPari.pari_id),
+            func.coalesce(func.sum(DefiPari.points), 0),
+            func.coalesce(func.sum(func.coalesce(DefiPari.points_retour, 0) - DefiPari.points), 0.0),
+            func.sum(case((DefiPari.statut == "gagne", 1), else_=0)),
+        ).where(DefiPari.user_id == user_id, DefiPari.statut.in_(("gagne", "perd")))
+        .group_by(DefiPari.type_pari)
+        .order_by(desc(func.count(DefiPari.pari_id)))
     )).all()
     par_type = [
-        {"type_pari": t or "—", "nb": int(n), "mise": round(float(m), 2),
-         "net": round(float(g), 2), "nb_gagnes": int(win or 0),
-         "roi": round(float(g) / float(m) * 100, 1) if m and m > 0 else None}
+        {"type_pari": t, "nb": int(n), "points": int(m), "net": round(float(g), 1),
+         "nb_gagnes": int(win or 0),
+         "roi": round(float(g) / float(m) * 100, 1) if m else None}
         for t, n, m, g, win in type_rows
     ]
 
@@ -350,7 +280,6 @@ async def get_user_detail(
             "is_active": user.is_active,
             "is_admin": user.is_admin,
             "profil_risque": user.profil_risque,
-            "bankroll_initiale": user.bankroll_initiale,
             "email_verified": user.email_verified,
             "auth_method": "google" if user.google_id else "email",
             "stripe_client": bool(user.stripe_customer_id),
@@ -358,20 +287,7 @@ async def get_user_detail(
             "updated_at": user.updated_at,
             "last_login": user.last_login_at,
         },
-        "portefeuille": {
-            "capital_initial": round(cap0, 2),
-            "solde_actuel": round(cap0 + net_tot, 2),
-            "mise_totale": round(mise_tot, 2),
-            "gain_net": round(net_tot, 2),
-            "roi": round(net_tot / mise_tot * 100, 1) if mise_tot > 0 else None,
-            "nb_paris": nb_total,
-            "nb_gagnes": nb_gagnes,
-            "nb_perdus": nb_perdus,
-            "nb_attente": nb_attente,
-            "nb_regles": nb_regles,
-            "win_rate": round(nb_gagnes / nb_regles * 100, 1) if nb_regles > 0 else None,
-            "nb_predictions_used": int(nb_ia or 0),
-        },
+        "defi": {"mois": mois, "rang": rang, **resume},
         "par_type": par_type,
         "subscriptions": [
             {
@@ -438,46 +354,6 @@ async def update_user(
     log.info("admin.update_user", admin_id=admin.user_id, user_id=user_id,
              changes={k: body[k] for k in body if k in allowed})
     return {"ok": True}
-
-
-@router.post("/users/{user_id}/bankroll-adjust")
-async def adjust_bankroll(
-    user_id: str,
-    body: dict,
-    db: AsyncSession = Depends(get_db),
-    _=Depends(require_admin),
-):
-    """Crédite/débite le portefeuille d'un utilisateur (ajustement admin).
-    body: {montant: float (delta, +crédit / -débit), note?: str}. Ajuste le capital
-    initial du portefeuille principal + bankroll_initiale. Tracé dans les logs."""
-    from db.models import Bankroll
-    try:
-        delta = float(body.get("montant"))
-    except (TypeError, ValueError):
-        raise HTTPException(status_code=400, detail="Montant invalide")
-    user = (await db.execute(select(User).where(User.user_id == user_id))).scalar_one_or_none()
-    if not user:
-        raise HTTPException(status_code=404, detail="Utilisateur introuvable")
-
-    main = (await db.execute(
-        select(Bankroll).where(and_(
-            Bankroll.user_id == user_id, Bankroll.est_principale == True, Bankroll.est_supprime == False,
-        ))
-    )).scalar_one_or_none()
-    if main:
-        main.montant_initial = round((main.montant_initial or 0.0) + delta, 2)
-        nouveau = main.montant_initial
-    else:
-        import uuid as _u
-        main = Bankroll(bankroll_id=str(_u.uuid4()), user_id=user_id, nom="Principal",
-                        montant_initial=round(delta, 2), est_principale=True)
-        db.add(main)
-        nouveau = main.montant_initial
-    user.bankroll_initiale = round((user.bankroll_initiale or 0.0) + delta, 2)
-    await db.commit()
-    log.info("admin.bankroll_adjust", user_id=user_id, delta=delta, nouveau_capital=nouveau,
-             note=str(body.get("note") or "")[:200])
-    return {"ok": True, "delta": delta, "nouveau_capital_initial": nouveau}
 
 
 @router.delete("/users/{user_id}")
@@ -574,34 +450,16 @@ async def export_users_csv(
     db: AsyncSession = Depends(get_db),
     _=Depends(require_admin),
 ):
-    """Export CSV de TOUS les comptes + portefeuille (données réelles)."""
+    """Export CSV de TOUS les comptes + leur Défi du mois en cours."""
     import csv as _csv
     import io
     from fastapi.responses import StreamingResponse
-    from db.models import Bankroll
-    try:
-        from api.routes.bankroll import settle_pending_bets
-        await settle_pending_bets(db, None)
-    except Exception:
-        pass
+    from services import defi as _defi
 
     users = (await db.execute(select(User).order_by(desc(User.created_at)).limit(5000))).scalars().all()
     uids = [u.user_id for u in users]
-    agg: dict = {}
-    if uids:
-        for uid, nb, mise, net, gagnes in (await db.execute(
-            select(BankrollEntry.user_id, func.count(BankrollEntry.entry_id),
-                   func.coalesce(func.sum(BankrollEntry.mise), 0.0),
-                   func.coalesce(func.sum(BankrollEntry.gain_perte), 0.0),
-                   func.sum(case((BankrollEntry.resultat == "gagne", 1), else_=0)))
-            .where(BankrollEntry.user_id.in_(uids)).group_by(BankrollEntry.user_id)
-        )).all():
-            agg[uid] = {"nb": int(nb), "mise": float(mise), "net": float(net), "gagnes": int(gagnes or 0)}
-        for uid, init in (await db.execute(
-            select(Bankroll.user_id, func.coalesce(func.sum(Bankroll.montant_initial), 0.0))
-            .where(Bankroll.user_id.in_(uids), Bankroll.est_supprime == False).group_by(Bankroll.user_id)
-        )).all():
-            agg.setdefault(uid, {})["cap"] = float(init)
+    mois = _defi.mois_courant()
+    defi_par_user = await _defi.resume_admin(db, uids, mois)
 
     sub_status: dict[str, str] = {}
     if uids:
@@ -616,12 +474,9 @@ async def export_users_csv(
     w = _csv.writer(out)
     w.writerow(["Email", "Nom", "Prenom", "Plan", "Profil", "Auth", "Email verifie", "Actif",
                 "Admin", "Inscrit le", "Derniere connexion", "Client Stripe", "Statut abonnement",
-                "Capital", "Solde", "Mise totale", "Gain net", "ROI %", "Paris", "Gagnes"])
+                f"Defi {mois} solde (pts)", "Rang", "Paris", "Gagnes", "ROI %"])
     for u in users:
-        a = agg.get(u.user_id, {})
-        mise = a.get("mise", 0.0); net = a.get("net", 0.0)
-        cap = a.get("cap", 0.0) or (u.bankroll_initiale or 0.0)
-        roi = round(net / mise * 100, 1) if mise > 0 else ""
+        d = defi_par_user.get(u.user_id) or {}
         w.writerow([u.email, u.nom or "", u.prenom or "", u.plan, u.profil_risque,
                     "google" if u.google_id else "email", "oui" if u.email_verified else "non",
                     "oui" if u.is_active else "non", "oui" if u.is_admin else "non",
@@ -629,8 +484,9 @@ async def export_users_csv(
                     u.last_login_at.strftime("%Y-%m-%d %H:%M") if u.last_login_at else "jamais",
                     "oui" if u.stripe_customer_id else "non",
                     sub_status.get(u.user_id) or ("checkout abandonne" if u.stripe_customer_id else ""),
-                    round(cap, 2), round(cap + net, 2), round(mise, 2), round(net, 2), roi,
-                    a.get("nb", 0), a.get("gagnes", 0)])
+                    d.get("solde", _defi.CAPITAL_MENSUEL), d.get("rang") or "",
+                    d.get("nb_paris", 0), d.get("nb_gagnes", 0),
+                    "" if d.get("roi") is None else d["roi"]])
     out.seek(0)
     return StreamingResponse(iter([out.getvalue()]), media_type="text/csv",
                              headers={"Content-Disposition": "attachment; filename=blackturf_comptes.csv"})

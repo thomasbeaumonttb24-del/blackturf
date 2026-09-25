@@ -61,50 +61,6 @@ AGREGAT_2409 = {"e_quinte_plus": 4703.3}
 
 # ── 1. Lignes de capital écrites par « Enregistrer ce plan » ─────────────────
 
-def test_enregistrer_le_plan_ecrit_aussi_le_ticket_quinte():
-    from api.routes.courses import lignes_capital_du_plan
-    plan = _plan_dict(100, "equilibre")          # champ 6 : 6 combinaisons à 2 € = 12 €
-    lignes = lignes_capital_du_plan(plan, "equilibre")
-    quinte = [l for l in lignes if l.get("_quinte")]
-    principal = [l for l in lignes if not l.get("_quinte")]
-
-    assert len(quinte) == 1, "une ligne Quinté+ et une seule"
-    q = quinte[0]
-    assert q["type_pari"] == "Quinté+ Désordre"
-    assert q["mise"] == plan["module_quinte"]["cout_total"] == 12.0
-    assert [int(n) for n in q["chevaux"].replace("N°", "").split(" + ")] == [
-        c["numero"] for c in plan["module_quinte"]["chevaux"]]
-    assert est_ligne_module_quinte(q["notes"])
-    assert "champ 6 chevaux" in q["notes"]
-    # Le plan principal garde ses lignes, inchangées, et le total = montant saisi.
-    assert principal and all(not est_ligne_module_quinte(l["notes"]) for l in principal)
-    assert sum(l["mise"] for l in principal) == pytest.approx(plan["montant_joue"])
-    assert sum(l["mise"] for l in lignes) == pytest.approx(100.0)
-
-
-@pytest.mark.parametrize("profil", ("conservateur", "equilibre"))
-def test_ticket_quinte_ajoute_au_montant_sous_4_euros_est_enregistre(profil):
-    from api.routes.courses import lignes_capital_du_plan
-    plan = _plan_dict(3, profil)
-    lignes = lignes_capital_du_plan(plan, profil)
-    q = [l for l in lignes if l.get("_quinte")]
-    assert len(q) == 1 and q[0]["mise"] == 2.0
-    assert sum(l["mise"] for l in lignes) == pytest.approx(plan["montant_total"]) == 5.0
-
-
-def test_hors_course_quinte_aucune_ligne_quinte():
-    from api.routes.courses import lignes_capital_du_plan
-    lignes = lignes_capital_du_plan(_plan_dict(20, "agressif", _INFO_SANS_QUINTE), "agressif")
-    assert lignes and not any(l.get("_quinte") for l in lignes)
-    assert not any(est_ligne_module_quinte(l["notes"]) for l in lignes)
-
-
-def test_module_indisponible_aucune_ligne_quinte():
-    from api.routes.courses import lignes_capital_du_plan
-    plan = {"niveaux": [], "module_quinte": {"disponible": False, "cout_total": 0.0}}
-    assert lignes_capital_du_plan(plan, "equilibre") == []
-
-
 def test_note_du_ticket_quinte():
     assert note_ligne_module_quinte("agressif", "tendue") == f"{MARQUEUR_MODULE_QUINTE} · agressif · tendue"
     assert not est_ligne_module_quinte("Plan de mise IA · agressif")
@@ -128,33 +84,6 @@ async def _course_quinte_a_venir(db, course_id="QUINTE1"):
                           course_id=course_id, proba_top1=p["proba_top1"],
                           proba_top3=p["proba_top3"], rang_predit=p["numero"]))
     await db.commit()
-
-
-@pytest.mark.asyncio
-async def test_route_enregistrer_paris_ecrit_et_remplace_le_ticket_quinte(client, db, admin_headers):
-    from sqlalchemy import select
-    from db.models import BankrollEntry
-    await _course_quinte_a_venir(db)
-
-    for _ in range(2):   # ré-enregistrer le même profil remplace, ne cumule pas
-        resp = await client.post("/api/v1/courses/QUINTE1/enregistrer-paris",
-                                 json={"montant": 100, "profil_risque": "equilibre"},
-                                 headers=admin_headers)
-        assert resp.status_code == 200, resp.text
-    body = resp.json()
-    assert body["quinte_enregistre"] is True and body["montant_quinte"] == 12.0
-    assert body["montant_total"] == pytest.approx(100.0)
-
-    db.expire_all()
-    lignes = (await db.execute(select(BankrollEntry).where(
-        BankrollEntry.course_id == "QUINTE1"))).scalars().all()
-    quinte = [l for l in lignes if est_ligne_module_quinte(l.notes)]
-    assert len(quinte) == 1
-    assert quinte[0].type_pari == "Quinté+ Désordre" and quinte[0].mise == 12.0
-    assert quinte[0].suivi_reco_ia is True and quinte[0].resultat is None
-    assert len(quinte[0].chevaux.split(" + ")) == 6
-    assert body["enregistres"] == len(lignes)
-    assert sum(l.mise for l in lignes) == pytest.approx(100.0)
 
 
 # ── 1. Règlement d'une ligne Quinté+ du capital ──────────────────────────────
@@ -248,32 +177,6 @@ async def _course_terminee(db, course_id="24092026R1C1"):
     db.add(Resultat(course_id=course_id, classement=ARRIVEE_2409, rapports=AGREGAT_2409,
                     rapports_detail=DETAIL_2409))
     await db.commit()
-
-
-@pytest.mark.asyncio
-async def test_settle_pending_bets_regle_la_ligne_quinte_du_capital(db):
-    from api.routes.bankroll import settle_pending_bets
-    from db.models import BankrollEntry
-    await _course_terminee(db)
-    now = datetime(2026, 9, 24, 11, 0, tzinfo=timezone.utc)
-    champ = BankrollEntry(entry_id="q1", user_id="u1", course_id="24092026R1C1", date=now,
-                          type_pari="Quinté+ Désordre",
-                          chevaux="N°8 + N°7 + N°4 + N°16 + N°10 + N°6", mise=12.0,
-                          suivi_reco_ia=True,
-                          notes=note_ligne_module_quinte("equilibre", "champ 6 chevaux"))
-    principal = BankrollEntry(entry_id="p1", user_id="u1", course_id="24092026R1C1",
-                              date=now, type_pari="Simple Gagnant", chevaux="N°8",
-                              mise=8.0, suivi_reco_ia=True, notes="Plan de mise IA · equilibre")
-    db.add_all([champ, principal])
-    await db.commit()
-
-    await settle_pending_bets(db, None)
-    await db.refresh(champ)
-    await db.refresh(principal)
-    assert champ.resultat == "gagne"
-    assert champ.gain_perte == pytest.approx(2 * 2.0 * 2.4 - 12.0)
-    assert champ.cote == pytest.approx(0.8)
-    assert principal.resultat == "perd" and principal.gain_perte == -8.0
 
 
 # ── 1. Hors de l'apprentissage des poids par type ────────────────────────────
@@ -484,21 +387,6 @@ async def test_palmares_public_quinte_sans_roi_ni_montants(client):
     for champ in ("roi", "net", "mise_totale", "retour", "par_profil"):
         assert champ not in q, champ
     assert {"nb_tickets", "nb_bonus", "nb_tickets_gagnants"} <= set(q)
-
-
-@pytest.mark.parametrize("montant,total", [(3, 13.0), (20, 20.0)])
-def test_risque_cinq_lignes_de_capital_une_par_ticket(montant, total):
-    """Plan risqué enregistré : cinq lignes Quinté+ (une par ticket tendu, 2 €),
-    chacune avec ses cinq chevaux, réglables comme un tendu."""
-    from api.routes.courses import lignes_capital_du_plan
-    plan = _plan_dict(montant, "agressif")
-    lignes = lignes_capital_du_plan(plan, "agressif")
-    q = [l for l in lignes if l.get("_quinte")]
-    assert len(q) == 5 and all(l["mise"] == 2.0 for l in q)
-    assert [l["chevaux"] for l in q] == [
-        " + ".join(f"N°{n}" for n in c) for c in plan["module_quinte"]["combinaisons"]]
-    assert all(est_ligne_module_quinte(l["notes"]) for l in q)
-    assert sum(l["mise"] for l in lignes) == pytest.approx(plan["montant_total"]) == total
 
 
 @pytest.mark.asyncio

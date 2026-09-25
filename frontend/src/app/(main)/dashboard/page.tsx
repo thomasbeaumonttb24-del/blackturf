@@ -12,7 +12,7 @@
 import Link from "next/link";
 import useSWR from "swr";
 import {
-  Activity, ArrowRight, ArrowUpRight, Medal, BarChart3, Calendar, CheckCircle2, Clock, Cpu, LockKeyhole,
+  Activity, ArrowRight, ArrowUpRight, Medal, Calendar, CheckCircle2, Clock, Cpu, LockKeyhole,
   Radio, Target, TrendingDown, TrendingUp, Trophy,
 } from "lucide-react";
 import { format } from "date-fns";
@@ -20,10 +20,11 @@ import { fr } from "date-fns/locale";
 import { Button } from "@/components/ui/button";
 import { CasaqueNumero, IdentiteCheval } from "@/components/courses/identite-cheval";
 import { Reveal, Tilt, useReveal } from "@/components/track-record/effets";
-import { Anneau, Compteur, CourbeCapital, Etoiles, Plan3D, SectionTitre, nf } from "@/components/espace/kit";
+import { Anneau, Compteur, Etoiles, Plan3D, SectionTitre, nf } from "@/components/espace/kit";
 import { useRequireAuth } from "@/hooks/useAuth";
-import { bankrollApi, predictionsApi, coursesApi, statsApi, defiApi } from "@/lib/api";
-import { formatPts } from "@/components/defi/kit";
+import { defiApi, predictionsApi, coursesApi, statsApi, type DefiMoi } from "@/lib/api";
+import { ResultatPari, formatPts, moisLabel } from "@/components/defi/kit";
+import { DefiClassementLive } from "@/components/defi/DefiClassementLive";
 import { RUBRIQUES } from "@/lib/navigation";
 import { cn, planLabel } from "@/lib/utils";
 import { disciplineLabel, heureParis, titleCase } from "@/lib/seo";
@@ -104,12 +105,6 @@ interface ValueBet {
   niveau: number;
   cote?: number;
   course_id: string;
-}
-
-interface Entree {
-  date: string;
-  gain_perte: number | null;
-  resultat: string | null;
 }
 
 const euros = (n?: number | null, d = 0) => (n == null ? "—" : `${nf(n, d)}\u00a0€`);
@@ -217,13 +212,11 @@ export default function DashboardPage() {
   const plan = user?.plan ?? "free";
   const isPaid = !!user && !["free", "decouverte"].includes(plan);
 
-  const { data: bankrollStats } = useSWR("bankroll-stats", () => bankrollApi.stats().then((r) => r.data), { refreshInterval: 60_000 });
+  const { data: defi } = useSWR<DefiMoi>(user ? ["/defi/moi", user.user_id] : null, () => defiApi.moi().then((r) => r.data), { refreshInterval: 60_000 });
   const { data: summary } = useSWR("dashboard-summary", () => statsApi.dashboardSummary().then((r) => r.data), { refreshInterval: 120_000 });
   const { data: programme } = useSWR("programme-today", () => coursesApi.programme().then((r) => r.data), { refreshInterval: 180_000 });
   const { data: pariDuJour } = useSWR<PariDuJour | null>("pari-du-jour", () => predictionsApi.pariDuJour().then((r) => r.data), { refreshInterval: 120_000 });
   const { data: parisProfils } = useSWR<{ profils?: PariProfil[] }>("pari-du-jour-profils", () => predictionsApi.pariDuJourProfils().then((r) => r.data), { refreshInterval: 120_000 });
-  // Même clé et même requête que la page « Suivi du capital » : le cache est partagé.
-  const { data: entrees } = useSWR<Entree[]>("/bankroll/entries", () => bankrollApi.entries().then((r) => r.data));
 
   // Prochaines courses : à venir / en cours d'abord, triées par heure.
   // Si tout est terminé (soirée), on retombe sur les dernières courses.
@@ -238,25 +231,7 @@ export default function DashboardPage() {
   const topVbs: ValueBet[] = summary?.top_vbs ?? [];
   const profils = parisProfils?.profils ?? [];
 
-  const capital: number | null = bankrollStats
-    ? (bankrollStats.bankroll_initiale ?? 0) + (bankrollStats.gains_totaux ?? 0) - (bankrollStats.pertes_totales ?? 0)
-    : null;
-  const roi: number = bankrollStats?.roi_global ?? 0;
-  const roiAlgo: number | null = bankrollStats ? bankrollStats.roi_ia_only ?? 0 : null;
-
-  // Courbe : capital après chacun des derniers paris réglés. L'API renvoie les 50
-  // plus récents ; on part du capital actuel et on remonte le temps pour que le
-  // dernier point tombe exactement sur le chiffre affiché.
-  const regles = (entrees ?? [])
-    .filter((e) => e.gain_perte != null && e.resultat && e.resultat !== "en_attente")
-    .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-  let courbe: number[] = [];
-  if (capital != null && regles.length >= 2) {
-    const somme = regles.reduce((s, e) => s + (e.gain_perte ?? 0), 0);
-    let c = capital - somme;
-    courbe = [c, ...regles.map((e) => (c += e.gain_perte ?? 0))];
-  }
-  const variationCourbe = courbe.length ? courbe[courbe.length - 1] - courbe[0] : 0;
+  const roiDefi: number | null = defi?.roi ?? null;
 
   return (
     <div className="min-h-screen bg-background">
@@ -322,21 +297,20 @@ export default function DashboardPage() {
           <Reveal delay={200}>
             <div className="esp-panneau mt-12 grid grid-cols-2 overflow-hidden rounded-2xl lg:grid-cols-4 [&>*]:border-stone-100 [&>*:nth-child(odd)]:border-r [&>*:nth-child(-n+2)]:border-b lg:[&>*:nth-child(-n+2)]:border-b-0 lg:[&>*:nth-child(-n+3)]:border-r">
               <Chiffre
-                libelle="Capital"
-                note={bankrollStats && (
-                  <span className={cn("inline-flex items-center gap-1 font-medium", roi >= 0 ? "text-emerald-700" : "text-rose-700")}>
-                    {roi >= 0 ? <TrendingUp className="h-3 w-3" aria-hidden="true" /> : <TrendingDown className="h-3 w-3" aria-hidden="true" />}
-                    {roi > 0 ? "+" : ""}{nf(roi, 1)} % de rendement
-                  </span>
-                )}
+                libelle="Solde du défi"
+                note={defi && (defi.rang != null
+                  ? <span className="font-medium text-amber-800">{defi.rang}{defi.rang === 1 ? "er" : "e"} sur {defi.nb_classes}</span>
+                  : `encore ${Math.max(0, 10 - defi.nb_paris)} paris pour être classé`)}
               >
-                <Compteur valeur={capital} suffixe={" €"} />
+                <Compteur valeur={defi?.solde ?? null} suffixe={" pts"} />
               </Chiffre>
-              <Chiffre libelle="Paris suivis" note={bankrollStats ? `${bankrollStats.nb_paris ?? 0} paris enregistrés` : null}>
-                <Compteur
-                  valeur={roiAlgo} decimales={1} suffixe={" %"} signe
-                  className={roiAlgo == null ? undefined : roiAlgo >= 0 ? "text-emerald-800" : "text-rose-800"}
-                />
+              <Chiffre libelle="Paris du défi" note={defi && roiDefi != null && (
+                <span className={cn("inline-flex items-center gap-1 font-medium", roiDefi >= 0 ? "text-emerald-700" : "text-rose-700")}>
+                  {roiDefi >= 0 ? <TrendingUp className="h-3 w-3" aria-hidden="true" /> : <TrendingDown className="h-3 w-3" aria-hidden="true" />}
+                  {roiDefi > 0 ? "+" : ""}{nf(roiDefi, 1)} % de rendement
+                </span>
+              )}>
+                <Compteur valeur={defi?.nb_paris ?? null} />
               </Chiffre>
               <Chiffre libelle={RUBRIQUES.parisDeValeur.label} note={(summary?.nb_vbs_premium ?? 0) > 0 ? `dont ${summary.nb_vbs_premium} de niveau 3 ou plus` : null}>
                 <Compteur valeur={summary?.nb_vbs_actifs} />
@@ -360,10 +334,10 @@ export default function DashboardPage() {
           </section>
         )}
 
-        {/* ══ Capital + outils ════════════════════════════════════════ */}
+        {/* ══ Défi du mois + outils ═════════════════════════════════════ */}
         <section className="grid grid-cols-1 gap-6 lg:grid-cols-5">
           <Reveal className="lg:col-span-3">
-            <PanneauCapital capital={capital} courbe={courbe} variation={variationCourbe} stats={bankrollStats} />
+            <PanneauDefi defi={defi} />
           </Reveal>
           <Reveal className="lg:col-span-2" delay={120}>
             <Outils modele={summary} />
@@ -459,81 +433,68 @@ function CarteProfil({ p, i }: { p: PariProfil; i: number }) {
   );
 }
 
-// ─── Capital ────────────────────────────────────────────────────
-function PanneauCapital({ capital, courbe, variation, stats }: {
-  capital: number | null;
-  courbe: number[];
-  variation: number;
-  stats?: {
-    nb_paris?: number; nb_gagnants?: number; nb_perdants?: number; taux_reussite?: number;
-    bankroll_initiale?: number | null; mise_totale?: number; gains_totaux?: number; pertes_totales?: number;
-  };
-}) {
-  const taux = stats?.taux_reussite ?? 0;
+// ─── Défi du mois ───────────────────────────────────────────────
+function PanneauDefi({ defi }: { defi?: DefiMoi }) {
+  const derniers = (defi?.paris ?? []).slice(0, 4);
   return (
     <div className="esp-panneau h-full rounded-3xl p-5 sm:p-8">
       <div className="flex flex-wrap items-start justify-between gap-5">
         <div>
           <span className="flex items-center gap-2 text-[11px] font-medium uppercase tracking-[0.2em] text-stone-500">
-            <span className="h-px w-5 bg-amber-600/70" aria-hidden="true" /> {RUBRIQUES.suiviCapital.label}
+            <span className="h-px w-5 bg-amber-600/70" aria-hidden="true" /> {RUBRIQUES.defi.label}
+            {defi && <span className="normal-case tracking-normal text-stone-400">· {moisLabel(defi.mois)}</span>}
           </span>
           <div className="mt-3 font-display text-4xl font-medium tracking-tight text-stone-900 sm:text-5xl">
-            <Compteur valeur={capital} suffixe={" €"} />
+            <Compteur valeur={defi?.solde ?? null} suffixe={" pts"} />
           </div>
-          {courbe.length > 0 && (
-            <div className={cn("mt-2 text-sm", variation >= 0 ? "text-emerald-700" : "text-rose-700")}>
-              <span className="font-semibold tabular-nums">{variation >= 0 ? "+" : ""}{nf(variation, 2)} €</span>
-              <span className="text-stone-500"> sur vos {courbe.length - 1} derniers paris</span>
-            </div>
-          )}
+          <p className="mt-2 text-sm text-stone-500">
+            {!defi ? "\u00a0" : defi.rang != null
+              ? <><span className="font-semibold text-amber-800">{defi.rang}{defi.rang === 1 ? "er" : "e"}</span> sur {defi.nb_classes} joueurs classés</>
+              : defi.nb_paris === 0 ? "Vos points du mois vous attendent : engagez votre premier pari."
+              : `Encore ${Math.max(0, 10 - defi.nb_paris)} paris pour entrer au classement.`}
+          </p>
         </div>
-
-        <Anneau pct={taux} taille={84} epaisseur={4} couleur={["#047857", "#10B981"]} fond="rgba(120,113,108,.14)">
-          <span className="font-display text-lg font-medium leading-none text-stone-900">{nf(taux, 0)} %</span>
-          <span className="mt-0.5 text-[9px] font-medium uppercase tracking-wider text-stone-500">réussite</span>
-        </Anneau>
+        <Link href={RUBRIQUES.coursesDuJour.href}
+          className="press inline-flex h-11 items-center gap-2 rounded-xl bg-amber-800 px-4 text-sm font-semibold text-white">
+          <Medal className="h-4 w-4" aria-hidden="true" /> Parier mes points
+        </Link>
       </div>
 
-      <div className="mt-8">
-        {courbe.length > 0 ? (
-          <CourbeCapital points={courbe} hauteur={150} />
-        ) : (
-          <div className="flex h-[150px] flex-col items-center justify-center rounded-2xl border border-dashed border-stone-200 text-center">
-            <p className="text-sm font-medium text-stone-700">Votre courbe apparaîtra ici</p>
-            <p className="mt-1 text-xs text-stone-500">Enregistrez au moins deux paris réglés pour la tracer.</p>
-          </div>
-        )}
-      </div>
-
-      <dl className="mt-6 grid grid-cols-2 gap-x-6 gap-y-3 border-t border-stone-100 pt-5 text-sm sm:grid-cols-4">
-        {[
-          { l: "Capital de départ", v: euros(stats?.bankroll_initiale ?? (stats ? 0 : null)), c: "text-stone-900" },
-          { l: "Total misé", v: euros(stats?.mise_totale, 2), c: "text-stone-900" },
-          { l: "Gains", v: stats ? `+${euros(stats.gains_totaux, 2)}` : "—", c: "text-emerald-700" },
-          { l: "Pertes", v: stats ? `−${euros(stats.pertes_totales, 2)}` : "—", c: "text-rose-700" },
-        ].map((k) => (
-          <div key={k.l}>
-            <dt className="text-[11px] text-stone-500">{k.l}</dt>
-            <dd className={cn("font-display text-base font-medium tabular-nums", k.c)}>{k.v}</dd>
-          </div>
-        ))}
-      </dl>
-
-      <div className="mt-5 flex items-center justify-between gap-4 border-t border-stone-100 pt-5">
-        <dl className="flex gap-6 text-sm sm:gap-8">
-          {[
-            { l: "Paris", v: stats?.nb_paris, c: "text-stone-900" },
-            { l: "Gagnés", v: stats?.nb_gagnants, c: "text-emerald-700" },
-            { l: "Perdus", v: stats?.nb_perdants, c: "text-rose-700" },
-          ].map((k) => (
-            <div key={k.l}>
-              <dt className="text-[11px] text-stone-500">{k.l}</dt>
-              <dd className={cn("font-display text-lg font-medium", k.c)}><Compteur valeur={k.v} /></dd>
+      {defi && defi.nb_paris > 0 && (
+        <div className="mt-6 grid grid-cols-2 gap-3">
+          {([["Plan de mise", defi.plan], ["Mes choix perso", defi.perso]] as const).map(([l, st]) => (
+            <div key={l} className="rounded-2xl bg-stone-50 p-4 ring-1 ring-stone-100">
+              <div className="text-[11px] font-medium uppercase tracking-[0.14em] text-stone-500">{l}</div>
+              <div className={cn("mt-1 font-display text-xl font-medium tabular-nums", st.points_nets >= 0 ? "text-emerald-700" : "text-rose-700")}>
+                {formatPts(st.points_nets, true)}
+              </div>
+              <div className="text-xs text-stone-500">{st.nb_paris} pari{st.nb_paris > 1 ? "s" : ""}</div>
             </div>
           ))}
-        </dl>
-        <Link href={RUBRIQUES.suiviCapital.href} className={cn(lienDiscret, "shrink-0")}>
-          Détail <ArrowUpRight className="h-4 w-4 transition-transform group-hover:-translate-y-0.5 group-hover:translate-x-0.5" aria-hidden="true" />
+        </div>
+      )}
+
+      <div className="mt-6 border-t border-stone-100 pt-5">
+        <div className="text-[11px] font-medium uppercase tracking-[0.14em] text-stone-500">Derniers paris</div>
+        {derniers.length === 0 ? (
+          <p className="mt-2 text-sm text-stone-500">
+            Aucun pari ce mois-ci. Sur chaque course, l&apos;onglet « Défi du mois » permet de jouer vos chevaux ou ceux du plan de mise.
+          </p>
+        ) : (
+          <ul className="mt-2 divide-y divide-stone-100">
+            {derniers.map((p) => (
+              <li key={p.pari_id} className="flex items-center justify-between gap-3 py-2.5">
+                <Link href={`/courses/${p.course_id}#defi`} className="min-w-0 text-sm text-stone-800 hover:underline">
+                  <span className="font-medium">{p.type_pari}</span> {p.chevaux.map((n) => `n°${n}`).join(" + ")}
+                  <span className="block truncate text-xs text-stone-500">{p.course_label}</span>
+                </Link>
+                <ResultatPari p={p} />
+              </li>
+            ))}
+          </ul>
+        )}
+        <Link href={RUBRIQUES.defi.href} className={cn(lienDiscret, "mt-3")}>
+          Classement et règlement <ArrowUpRight className="h-4 w-4 transition-transform group-hover:-translate-y-0.5 group-hover:translate-x-0.5" aria-hidden="true" />
         </Link>
       </div>
     </div>
@@ -544,7 +505,6 @@ function PanneauCapital({ capital, courbe, variation, stats }: {
 const OUTILS = [
   { r: RUBRIQUES.assistant, icone: Cpu },
   { r: RUBRIQUES.strategies, icone: Target },
-  { r: RUBRIQUES.statistiques, icone: BarChart3 },
   { r: RUBRIQUES.resultats, icone: Radio },
 ];
 
@@ -555,28 +515,6 @@ interface EtatModele {
   drift_severity?: string;
 }
 
-/** Encart « Défi du mois » : solde et rang du joueur, pour le faire revenir parier. */
-function EncartDefi() {
-  const { data } = useSWR("/defi/moi", () => defiApi.moi().then((r) => r.data), { refreshInterval: 120_000 });
-  return (
-    <Link href={RUBRIQUES.defi.href}
-      className="group mt-5 flex items-center gap-4 rounded-2xl bg-gradient-to-b from-amber-50 to-amber-100/60 p-4 ring-1 ring-inset ring-amber-200">
-      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white text-amber-700 ring-1 ring-amber-200">
-        <Medal className="h-[18px] w-[18px]" aria-hidden="true" />
-      </span>
-      <span className="min-w-0 flex-1">
-        <span className="block text-sm font-medium text-stone-900">{RUBRIQUES.defi.label}</span>
-        <span className="block truncate text-xs text-stone-600">
-          {!data ? RUBRIQUES.defi.description
-            : data.nb_paris === 0 ? "Vos points du mois vous attendent : 1er pari ?"
-            : `${formatPts(data.solde)} · ${data.rang != null ? `${data.rang}${data.rang === 1 ? "er" : "e"} sur ${data.nb_classes}` : `${data.nb_paris} pari${data.nb_paris > 1 ? "s" : ""}`}`}
-        </span>
-      </span>
-      <ArrowRight className="h-4 w-4 shrink-0 text-amber-700 transition-transform group-hover:translate-x-0.5" aria-hidden="true" />
-    </Link>
-  );
-}
-
 function Outils({ modele }: { modele?: EtatModele }) {
   const derive = modele?.drift_severity && modele.drift_severity !== "none";
   return (
@@ -585,7 +523,7 @@ function Outils({ modele }: { modele?: EtatModele }) {
         <span className="h-px w-5 bg-amber-600/70" aria-hidden="true" /> Accès rapide
       </span>
       <h2 className="mt-3 font-display text-xl font-medium tracking-tight text-stone-900 sm:text-[1.65rem]">Vos outils</h2>
-      <EncartDefi />
+      <DefiClassementLive top={3} className="mt-5" />
       <ul className="mt-5 divide-y divide-stone-100">
         {OUTILS.map(({ r, icone: Icone }) => (
           <li key={r.href}>

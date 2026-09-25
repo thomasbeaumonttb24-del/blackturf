@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * Comptes — portefeuilles, abonnements, actions par compte.
+ * Comptes — Défi du mois, abonnements, actions par compte.
  *
  * Le tableau d'origine tenait sur 900 px minimum, avec une colonne « Actions »
  * de deux boutons de 10 px de haut. Ce qui change :
@@ -21,14 +21,14 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
 import {
-  Ban, Download, Medal, RotateCcw, Search, Trash2, Users, Wallet,
+  Ban, Download, Medal, RotateCcw, Search, Trash2, Users,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { adminApi } from "@/lib/api";
 import { cn, formatDateTime } from "@/lib/utils";
 import {
   Carte, CartesOuTableau, Champ, DefilementX, EnTetePage, GrilleTuiles, Panneau, Puce,
-  Segments, Squelette, TD, TH, Tuile, Vide, eur, num, signedEur, signedPct, tone,
+  Segments, Squelette, TD, TH, Tuile, Vide, num, signedPct, tone,
 } from "@/components/admin/ui";
 import { useComptes } from "@/components/admin/data";
 import FicheCompte from "@/components/admin/vues/FicheCompte";
@@ -38,10 +38,16 @@ import { PROFIL_NET_LABELS, type CompteLigne } from "@/components/admin/types";
  *  pari gagné se lisait comme une performance. En dessous, il reste grisé. */
 const MIN_PARIS_ROI = 5;
 
+/** Points du Défi du mois : « 1 155 pts », « +84 pts ». */
+function pts(v: number, signe = false): string {
+  const n = Math.round(v * 10) / 10;
+  return `${signe && n > 0 ? "+" : ""}${n.toLocaleString("fr-FR")} pts`;
+}
+
 const FILTRES = [
   { key: "tous", label: "Tous" },
   { key: "abonnes", label: "Abonnés" },
-  { key: "actifs", label: "Ont parié" },
+  { key: "actifs", label: "Joueurs du défi" },
   { key: "suspendus", label: "Suspendus" },
 ] as const;
 type Filtre = (typeof FILTRES)[number]["key"];
@@ -99,7 +105,7 @@ function roiCellule(u: CompteLigne) {
   return (
     <span
       className={cn("tabular-nums", fiable ? tone(u.roi) : "text-muted-foreground/60")}
-      title={fiable ? "Retour sur investissement" : `ROI sur ${u.nb_paris} pari${u.nb_paris > 1 ? "s" : ""} — non significatif`}
+      title={fiable ? "Rendement au Défi du mois" : `Rendement sur ${u.nb_paris} pari${u.nb_paris > 1 ? "s" : ""} — non significatif`}
     >
       {signedPct(u.roi, 0)}
     </span>
@@ -127,7 +133,7 @@ export default function ComptesPage() {
       abonnes: tous.filter((u) => ["active", "trialing"].includes(u.abonnement_statut ?? "")).length,
       parieurs: tous.filter((u) => u.nb_paris > 0).length,
       suspendus: tous.filter((u) => !u.is_active).length,
-      capital: tous.reduce((s, u) => s + (u.solde_actuel ?? 0), 0),
+      classes: tous.filter((u) => u.defi_rang != null).length,
     };
   }, [comptes]);
 
@@ -143,32 +149,12 @@ export default function ComptesPage() {
     }
   }
 
-  async function ajusterPortefeuille(u: CompteLigne) {
-    const v = window.prompt(
-      `Ajuster le portefeuille de ${u.email}\nMontant à créditer (+) ou débiter (−), en € :`,
-      "",
-    );
-    if (v == null) return;
-    const m = parseFloat(v.replace(",", "."));
-    if (isNaN(m) || m === 0) {
-      toast.error("Montant invalide");
-      return;
-    }
-    try {
-      await adminApi.adjustBankroll(u.user_id, m);
-      toast.success(`Portefeuille ajusté de ${signedEur(m, 2)}`);
-      mutate();
-    } catch {
-      toast.error("Ajustement impossible");
-    }
-  }
-
   async function supprimerCompte(u: CompteLigne) {
     // Confirmation par recopie de l'adresse : un « OK » réflexe ne doit pas
     // suffire à effacer un compte, et la ligne d'à côté a le même bouton.
     const saisie = window.prompt(
       `SUPPRESSION DÉFINITIVE de ${u.email}\n\n` +
-      "Seront effacés : le compte, ses paris, portefeuilles, stratégies et alertes.\n" +
+      "Seront effacés : le compte, ses paris du défi, son ancien historique de capital, ses stratégies et alertes.\n" +
       "Sera conservé : l'historique d'abonnement (pièce comptable), détaché du compte.\n\n" +
       "Recopiez l'adresse e-mail pour confirmer :", "");
     if (saisie == null) return;
@@ -179,7 +165,7 @@ export default function ComptesPage() {
     try {
       const res = await adminApi.deleteUser(u.user_id);
       const n = (res.data?.supprime ?? {}) as Record<string, number>;
-      toast.success(`${u.email} supprimé — ${n.paris ?? 0} pari(s), ${n.portefeuilles ?? 0} portefeuille(s).`);
+      toast.success(`${u.email} supprimé — ${n.defi_paris ?? 0} pari(s) du défi.`);
       mutate();
     } catch (e: unknown) {
       const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
@@ -206,7 +192,7 @@ export default function ComptesPage() {
       <EnTetePage
         titre="Comptes"
         icone={<Users className="h-4 w-4" />}
-        desc="Portefeuilles, abonnements et actions par compte. Cliquer un nom ouvre sa fiche complète."
+        desc="Défi du mois, abonnements et actions par compte. Cliquer un nom ouvre sa fiche complète."
         actions={
           <div className="flex flex-wrap gap-2">
             <Link
@@ -228,13 +214,13 @@ export default function ComptesPage() {
       <GrilleTuiles colonnes={5}>
         <Tuile label="Comptes" valeur={num(resume.total)} icone={<Users className="h-3.5 w-3.5" />} />
         <Tuile label="Abonnés" valeur={num(resume.abonnes)} ton={resume.abonnes > 0 ? "ok" : "neutre"} />
-        <Tuile label="Ont parié" valeur={num(resume.parieurs)} sub="au moins un pari enregistré" />
+        <Tuile label="Joueurs du défi" valeur={num(resume.parieurs)} sub="au moins un pari ce mois-ci" />
         <Tuile label="Suspendus" valeur={num(resume.suspendus)} ton={resume.suspendus > 0 ? "attention" : "neutre"} />
         <Tuile
-          label="Capital cumulé"
-          valeur={eur(resume.capital)}
-          icone={<Wallet className="h-3.5 w-3.5" />}
-          aide="Somme des soldes déclarés par les utilisateurs. Ce n'est pas de l'argent détenu par BlackTurf."
+          label="Classés au défi"
+          valeur={num(resume.classes)}
+          icone={<Medal className="h-3.5 w-3.5" />}
+          aide="Joueurs ayant atteint le minimum de paris du mois pour entrer au classement."
         />
       </GrilleTuiles>
 
@@ -307,14 +293,14 @@ export default function ComptesPage() {
                   </div>
 
                   <div className="mt-2 space-y-1 border-t border-border/60 pt-2">
-                    <Champ label="Portefeuille">
-                      {eur(u.solde_actuel)}
+                    <Champ label="Défi du mois">
+                      {pts(u.defi_solde)}
                       <span className="ml-1 text-xs font-normal text-muted-foreground">
-                        {u.mise_totale ? `· ${eur(u.mise_totale)} misés` : "· aucune mise"}
+                        {u.defi_rang != null ? `· ${u.defi_rang}e` : "· non classé"}
                       </span>
                     </Champ>
                     <Champ label="Résultat">
-                      <span className={tone(u.gain_net)}>{signedEur(u.gain_net)}</span>
+                      <span className={tone(u.defi_points_nets)}>{pts(u.defi_points_nets, true)}</span>
                       <span className="ml-1.5">{roiCellule(u)}</span>
                     </Champ>
                     <Champ label="Paris">{u.nb_paris === 0 ? "—" : `${u.nb_gagnes} / ${u.nb_paris}`}</Champ>
@@ -339,12 +325,6 @@ export default function ComptesPage() {
                       {u.is_active ? "Suspendre" : "Réactiver"}
                     </button>
                     <button
-                      onClick={() => ajusterPortefeuille(u)}
-                      className="flex min-h-[2.5rem] flex-1 items-center justify-center gap-1.5 rounded-xl border border-border text-xs font-semibold text-muted-foreground transition-colors hover:border-brand-gold/50 hover:text-brand-gold-dark"
-                    >
-                      <Wallet className="h-3.5 w-3.5" /> Ajuster
-                    </button>
-                    <button
                       onClick={() => supprimerCompte(u)}
                       aria-label={`Supprimer définitivement ${u.email}`}
                       title="Supprimer définitivement le compte"
@@ -364,7 +344,7 @@ export default function ComptesPage() {
                       <th className={TH}>Utilisateur</th>
                       <th className={cn(TH, "text-center")}>Plan</th>
                       <th className={cn(TH, "text-center")}>Abonnement</th>
-                      <th className={cn(TH, "text-right")}>Portefeuille</th>
+                      <th className={cn(TH, "text-right")}>Défi du mois</th>
                       <th className={cn(TH, "text-right")}>Résultat</th>
                       <th className={cn(TH, "text-center")}>Paris</th>
                       <th className={cn(TH, "text-right")}>Activité</th>
@@ -408,13 +388,13 @@ export default function ComptesPage() {
                           <td className={cn(TD, "text-center")}>{badgePlan(u.plan)}</td>
                           <td className={cn(TD, "text-center")}>{badgeAbonnement(u.abonnement_statut, u.stripe_client)}</td>
                           <td className={cn(TD, "text-right")}>
-                            <div className="tabular-nums">{eur(u.solde_actuel)}</div>
+                            <div className="tabular-nums">{pts(u.defi_solde)}</div>
                             <div className="text-[11px] tabular-nums text-muted-foreground">
-                              {u.mise_totale ? `${eur(u.mise_totale)} misés` : "aucune mise"}
+                              {u.defi_rang != null ? `${u.defi_rang}e du mois` : "non classé"}
                             </div>
                           </td>
                           <td className={cn(TD, "text-right")}>
-                            <div className={cn("font-semibold tabular-nums", tone(u.gain_net))}>{signedEur(u.gain_net)}</div>
+                            <div className={cn("font-semibold tabular-nums", tone(u.defi_points_nets))}>{pts(u.defi_points_nets, true)}</div>
                             <div className="text-[11px]">{roiCellule(u)}</div>
                           </td>
                           <td className={cn(TD, "text-center tabular-nums")}>
@@ -443,13 +423,6 @@ export default function ComptesPage() {
                               >
                                 {u.is_active ? <Ban className="h-3.5 w-3.5" /> : <RotateCcw className="h-3.5 w-3.5" />}
                                 {u.is_active ? "Suspendre" : "Réactiver"}
-                              </button>
-                              <button
-                                onClick={() => ajusterPortefeuille(u)}
-                                title="Créditer / débiter le portefeuille"
-                                className="inline-flex h-8 items-center gap-1 rounded-lg border border-border px-2 text-[11px] font-semibold text-muted-foreground transition-colors hover:border-brand-gold/50 hover:text-brand-gold-dark"
-                              >
-                                <Wallet className="h-3.5 w-3.5" /> Ajuster
                               </button>
                               <button
                                 onClick={() => supprimerCompte(u)}

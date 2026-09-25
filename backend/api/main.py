@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 
 from api.config import get_settings
-from api.routes import auth, courses, predictions, bankroll, admin, ws
+from api.routes import auth, courses, predictions, admin, ws
 from api.routes import assistant, stripe_routes, strategies, stats, notifications
 from api.routes import telegram, newsletter, integrations, presence, chat, pronostic_email, defi
 from db.database import engine, Base
@@ -149,7 +149,6 @@ async def _unhandled_exception_handler(request: Request, exc: Exception):
 app.include_router(auth.router, prefix="/api/v1/auth", tags=["auth"])
 app.include_router(courses.router, prefix="/api/v1", tags=["courses"])
 app.include_router(predictions.router, prefix="/api/v1", tags=["predictions"])
-app.include_router(bankroll.router, prefix="/api/v1", tags=["bankroll"])
 app.include_router(admin.router, prefix="/admin/api", tags=["admin"])
 app.include_router(ws.router, prefix="/ws", tags=["websocket"])
 app.include_router(assistant.router, prefix="/api/v1", tags=["assistant"])

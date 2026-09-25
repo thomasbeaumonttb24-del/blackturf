@@ -27,6 +27,8 @@ import {
 import { PronosticEmailPopup } from "@/components/courses/PronosticEmailPopup";
 import { CX, PROFILS_MISE, PlanMiseDisplay, type MisePlan } from "@/components/courses/plan-mise";
 import { DefiCourseCard, type DefiPrefill } from "@/components/defi/DefiCourseCard";
+import { DefiClassementLive } from "@/components/defi/DefiClassementLive";
+import { DefiConcept } from "@/components/defi/DefiConcept";
 import type { DefiTypePari } from "@/lib/api";
 import { Anneau, PartantsSection } from "@/components/courses/partants";
 import { BandeauOnglet, CARTE_CLS, CARTE_STYLE, IconeTuile, LienOnglet, Pastille, PastilleDirect, SuiteOnglets, difficulteCourse } from "@/components/courses/course-ui";
@@ -555,28 +557,6 @@ function MiseCalculatorWidget({
     await generate(p);
   }
 
-  async function saveBets(): Promise<number> {
-    // Suivi de capital = fonctionnalité Standard+ (backend 403 sur /enregistrer-paris
-    // pour free/decouverte, cf. courses.py:1112). L'essai gratuit du calculateur laisse
-    // VOIR le plan, mais pas le SUIVRE — message honnête plutôt qu'un 403 générique.
-    if (isFreeTier) {
-      toast.error("Le suivi de capital est réservé aux abonnés Standard et Expert.");
-      throw new Error("save_requires_subscription");
-    }
-    const m = parseFloat(montant);
-    try {
-      const res = await api.post(`/courses/${courseId}/enregistrer-paris`, {
-        montant: m, profil_risque: profilChoisi,
-      });
-      const n = res.data?.enregistres ?? 0;
-      toast.success(`${n} pari${n > 1 ? "s" : ""} enregistré${n > 1 ? "s" : ""} dans votre capital${res.data?.quinte_enregistre ? ", dont le ticket Quinté+" : ""}`);
-      return n;
-    } catch {
-      toast.error("Erreur lors de l'enregistrement");
-      throw new Error("save_failed");
-    }
-  }
-
   // RAFRAÎCHISSEMENT LIVE des gains estimés : tant qu'un plan est affiché et que la course
   // n'est PAS terminée, on recalcule le plan en silence toutes les ~15 s → les gains
   // potentiels suivent les cotes EN DIRECT du marché (sinon l'utilisateur voit un gain figé
@@ -662,7 +642,6 @@ function MiseCalculatorWidget({
       switching={loading}
       onChangeProfil={switchProfil}
       onClose={() => setPlan(null)}
-      onSave={saveBets}
       onJouerDefi={statut === "a_venir" ? onJouerDefi : undefined}
     />
   );
@@ -3259,6 +3238,11 @@ export default function CoursePage({
               </details>
             )}
           </div>
+          {/* Défi du mois : rappel en bas de synthèse, là où l'on vient de se
+              faire un avis sur la course. Seulement si l'on peut encore y parier. */}
+          {course.statut === "a_venir" && (
+            <DefiClassementLive top={3} ctaCourse={() => allerA("defi")} />
+          )}
           </>
         )}
 
@@ -3365,12 +3349,14 @@ export default function CoursePage({
               titre="Défi du mois"
               sousTitre="Pariez vos points sur cette course : le meilleur solde du mois gagne un abonnement"
             />
+            <DefiConcept variante="ligne" />
             <DefiCourseCard
               courseId={id}
               partants={course.partants}
               connecte={!!user}
               prefill={defiPrefill}
             />
+            <DefiClassementLive top={5} />
           </>
         )}
 

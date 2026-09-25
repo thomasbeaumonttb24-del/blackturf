@@ -24,7 +24,7 @@ from db.database import get_db
 from services.temps_courses import jour_courses
 from db.models import (
     User, Course, Prediction, ValueBet, Participation, Cheval,
-    ModelVersion, BankrollEntry, RaceLearningLog
+    ModelVersion, RaceLearningLog
 )
 from services.valuebets_visibilite import filtres_sql as _vb_filtres_sql
 
@@ -93,8 +93,8 @@ TOOLS = [
         "input_schema": {"type": "object", "properties": {}, "required": []},
     },
     {
-        "name": "get_bankroll_stats",
-        "description": "Retourne les statistiques bankroll de l'utilisateur.",
+        "name": "get_defi_stats",
+        "description": "Retourne la situation de l'utilisateur au Défi du mois (concours en points) : solde, rang, paris, rendement, plan de mise vs choix perso.",
         "input_schema": {"type": "object", "properties": {}, "required": []},
     },
 ]
@@ -207,19 +207,14 @@ async def _execute_tool(
                 out["roi_simule"] = f"{m['roi_simule'] * 100:+.1f}%"
             return json.dumps(out)
 
-        elif tool_name == "get_bankroll_stats":
-            entries = (await db.execute(
-                select(BankrollEntry).where(BankrollEntry.user_id == user.user_id)
-            )).scalars().all()
-            mise = sum(e.mise for e in entries)
-            net = sum(e.gain_perte or 0 for e in entries)
-            roi = (net / mise * 100) if mise > 0 else 0
-            return json.dumps({
-                "nb_paris": len(entries),
-                "mise_totale": round(mise, 2),
-                "gain_net": round(net, 2),
-                "roi": f"{roi:+.1f}%",
-            })
+        elif tool_name == "get_defi_stats":
+            from services import defi as _defi
+            mois = _defi.mois_courant()
+            resume = await _defi.resume_joueur(db, user.user_id, mois)
+            resume.pop("paris")
+            rang = (await _defi.resume_admin(db, [user.user_id], mois)).get(user.user_id, {}).get("rang")
+            return json.dumps({"mois": mois, "rang": rang,
+                               "min_paris_classement": _defi.MIN_PARIS_CLASSEMENT, **resume})
 
     except Exception as e:
         log.error("assistant.tool_error", tool=tool_name, error=str(e))
@@ -355,19 +350,24 @@ async def _answer_metrics(db: AsyncSession, user: User) -> str:
     return "\n".join(lines) + DISCLAIMER
 
 
-async def _answer_bankroll(db: AsyncSession, user: User) -> str:
-    data = json.loads(await _execute_tool("get_bankroll_stats", {}, db, user))
+async def _answer_defi(db: AsyncSession, user: User) -> str:
+    data = json.loads(await _execute_tool("get_defi_stats", {}, db, user))
     if isinstance(data, dict) and data.get("error"):
-        return "Impossible de lire ta bankroll pour le moment." + DISCLAIMER
+        return "Impossible de lire ta situation au Défi du mois pour le moment." + DISCLAIMER
     if data.get("nb_paris", 0) == 0:
-        return ("Aucun pari enregistré dans ta bankroll. Ajoute tes paris depuis la page Capital "
-                "pour suivre ton ROI réel." + DISCLAIMER)
+        return ("Tu n'as pas encore joué au **Défi du mois** : tes points t'attendent. "
+                "Ouvre une course, onglet « Défi du mois », et engage ton premier pari." + DISCLAIMER)
+    rang = (f"**{data['rang']}{'er' if data['rang'] == 1 else 'e'}**" if data.get("rang")
+            else f"pas encore classé ({data['min_paris_classement']} paris requis)")
+    roi = "—" if data.get("roi") is None else f"{data['roi']:+g} %"
     return (
-        "💰 **Ta bankroll** :\n"
-        f"• Paris enregistrés : {data['nb_paris']}\n"
-        f"• Mise totale : {data['mise_totale']}€\n"
-        f"• Gain net : {data['gain_net']}€\n"
-        f"• ROI : **{data['roi']}**" + DISCLAIMER
+        "🏆 **Ton Défi du mois** :\n"
+        f"• Solde : **{data['solde']:g} points**\n"
+        f"• Rang : {rang}\n"
+        f"• Paris : {data['nb_paris']} dont {data['nb_gagnes']} gagnés\n"
+        f"• Rendement : {roi}\n"
+        f"• Plan de mise : {data['plan']['points_nets']:+g} pts · tes choix perso : "
+        f"{data['perso']['points_nets']:+g} pts" + DISCLAIMER
     )
 
 
@@ -393,7 +393,7 @@ def _answer_help() -> str:
         "• **« Le programme »** — courses du jour\n"
         "• **« Analyse R1C3 »** — pronostics IA d'une course\n"
         "• **« Les métriques du modèle »** — fiabilité de l'IA\n"
-        "• **« Ma bankroll »** — ton ROI et tes paris\n"
+        "• **« Mon défi »** — ton solde et ton rang au Défi du mois\n"
         "• **« Comment répartir mes mises ? »** — stratégie de staking\n"
         "• **« Explique le critère de Kelly »** / **« Comment lire la musique ? »**\n\n"
         "Pose ta question en langage naturel." + DISCLAIMER
@@ -421,8 +421,9 @@ async def _rule_based_answer(messages: list[dict], db: AsyncSession, user: User)
         return await _answer_programme(db, user)
     if any(k in q for k in ("modèle", "modele", "auc", "précision", "precision", "fiab", "performance", "perf ia", "roi simul")):
         return await _answer_metrics(db, user)
-    if any(k in q for k in ("bankroll", "capital", "mon roi", "mes paris", "mes gains", "mon solde")):
-        return await _answer_bankroll(db, user)
+    if any(k in q for k in ("défi", "defi", "concours", "classement", "mes points", "mon rang",
+                            "mes paris", "mes gains", "mon solde", "mon roi")):
+        return await _answer_defi(db, user)
     if any(k in q for k in ("répart", "repart", "miser", "mise", "combien jouer", "combien miser", "staking", "stratégie de mise")):
         return _answer_mise()
     if m:  # code course détecté sans mot-clé explicite

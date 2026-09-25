@@ -2,7 +2,7 @@
 
 /**
  * Briques visuelles de « Mon espace » : compteur animé, anneau de jauge,
- * courbe du capital et titres de section.
+ * et titres de section.
  *
  * Même règle que le palmarès (`components/track-record/effets.tsx`) : la valeur
  * affichée par défaut est la VRAIE valeur ; l'animation n'est qu'un bonus, sautée
@@ -100,60 +100,6 @@ export function Anneau({ pct, taille = 96, epaisseur = 9, couleur = "#F59E0B", f
         />
       </svg>
       <div className="absolute inset-0 flex flex-col items-center justify-center text-center">{children}</div>
-    </div>
-  );
-}
-
-/**
- * Courbe du capital sur les derniers paris réglés. `points` = capital après
- * chaque pari, dans l'ordre chronologique.
- */
-export function CourbeCapital({ points, hauteur = 140 }: { points: number[]; hauteur?: number }) {
-  const id = useId().replace(/:/g, "");
-  // Le SVG est dessiné à la largeur réelle du cadre : sans déformation, le trait
-  // garde son épaisseur et le point final reste rond.
-  const cadre = useRef<HTMLDivElement>(null);
-  const [L, setL] = useState(600);
-  useEffect(() => {
-    const el = cadre.current;
-    if (!el || typeof ResizeObserver === "undefined") return;
-    const maj = () => setL(Math.max(120, Math.round(el.clientWidth)));
-    maj();
-    const ro = new ResizeObserver(maj);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
-  const H = hauteur;
-  const min = Math.min(...points);
-  const max = Math.max(...points);
-  const etendue = max - min || 1;
-  const pas = L / (points.length - 1);
-  const xy = points.map((v, i) => [i * pas, H - 10 - ((v - min) / etendue) * (H - 24)] as const);
-  const d = xy.map(([x, y], i) => `${i ? "L" : "M"}${x.toFixed(1)} ${y.toFixed(1)}`).join(" ");
-  const trait = "#1C1917";
-  const aire = "#D97706";
-  const [xf, yf] = xy[xy.length - 1];
-
-  return (
-    <div ref={cadre} className="w-full" style={{ height: H }}>
-    <svg width={L} height={H} viewBox={`0 0 ${L} ${H}`} className="block overflow-visible" aria-hidden="true">
-      <defs>
-        <linearGradient id={`a${id}`} x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor={aire} stopOpacity=".16" />
-          <stop offset="100%" stopColor={aire} stopOpacity="0" />
-        </linearGradient>
-      </defs>
-      {[0.25, 0.5, 0.75].map((f) => (
-        <line key={f} x1="0" x2={L} y1={H * f} y2={H * f} stroke="rgba(120,113,108,.12)" />
-      ))}
-      <path d={`${d} L${L} ${H} L0 ${H} Z`} fill={`url(#a${id})`} className="esp-aire" />
-      <path
-        d={d} fill="none" stroke={trait} strokeWidth="1.75" strokeLinejoin="round" strokeLinecap="round"
-        pathLength={1} className="esp-trace"
-      />
-      <circle cx={xf} cy={yf} r="9" fill={aire} opacity=".15" className="esp-aire" />
-      <circle cx={xf} cy={yf} r="4" fill="#fff" stroke={aire} strokeWidth="2" className="esp-aire" />
-    </svg>
     </div>
   );
 }

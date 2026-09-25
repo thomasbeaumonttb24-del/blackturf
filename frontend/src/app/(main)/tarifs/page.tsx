@@ -91,7 +91,7 @@ const FEATURES_COMPARISON: { label: string; free: Cellule; standard: Cellule; ex
   { label: "Paris de valeur", free: false, standard: "Délai 15 min", expert: "Temps réel" },
   { label: "Calculateur de mise personnalisé", free: false, standard: true, expert: true },
   { label: "Alertes e-mail + notifications", free: false, standard: true, expert: true },
-  { label: "Suivi de capital", free: false, standard: true, expert: true },
+  { label: "Défi du mois (concours en points)", free: true, standard: true, expert: true },
   { label: "Historique 6 mois", free: false, standard: true, expert: true },
   { label: "Indicateur de mouvement de cote (SPI)", free: false, standard: false, expert: true },
   { label: "Assistant IA (Claude Opus)", free: false, standard: false, expert: true },
@@ -160,7 +160,7 @@ export default function TarifsPage() {
                 { label: "Paris de valeur illimités (délai 15 min)", icon: null },
                 { label: "Calculateur de mise", icon: <Calculator className="h-3 w-3" /> },
                 { label: "Alertes e-mail + notifications", icon: null },
-                { label: "Suivi de capital", icon: null },
+                { label: "Défi du mois (concours en points)", icon: null },
                 { label: "Historique 6 mois", icon: null },
               ].map((f) => (
                 <li key={f.label} className="flex items-center gap-2 text-sm">

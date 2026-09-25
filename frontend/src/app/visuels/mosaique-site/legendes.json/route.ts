@@ -85,7 +85,7 @@ export async function GET() {
         `Programme PMU complet, cotes comparées entre opérateurs, arrivées et rapports ` +
         `officiels. Et un plan de mise par jour.\n\n` +
         `STANDARD — 12 €/mois\n` +
-        `Cinq plans de mise par jour, suivi de votre capital réglé aux vrais rapports, ` +
+        `Cinq plans de mise par jour, paris de valeur, ` +
         `alertes sur les courses que vous suivez.\n\n` +
         `EXPERT — 19 €/mois\n` +
         `Plans illimités et paris de valeur en temps réel : les chevaux dont la cote paie ` +
@@ -151,8 +151,8 @@ export async function GET() {
         `03 — JOUEZ OÙ VOUS VOULEZ. Au comptoir ou en ligne, chez l'opérateur de votre ` +
         `choix. Aucune commission n'est prise sur vos gains.\n\n` +
         `Ce que vous obtenez, chaque jour : tout le programme analysé, les cotes du PMU et ` +
-        `des principaux opérateurs côte à côte, les paris de valeur signalés, votre capital ` +
-        `suivi sans triche — les paris perdus sont affichés aussi — et une alerte dès qu'un ` +
+        `des principaux opérateurs côte à côte, les paris de valeur signalés, le Défi du mois ` +
+        `pour jouer vos pronostics en points contre les autres membres, et une alerte dès qu'un ` +
         `signal sort sur une course que vous suivez.\n\n` +
         `Toutes les disciplines : plat, trot attelé, monté, obstacle.\n\n` +
         `Vous y passez combien de temps chaque jour, vous, sur le programme ?\n` +

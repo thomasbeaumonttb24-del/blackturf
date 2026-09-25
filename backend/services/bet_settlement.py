@@ -569,8 +569,9 @@ def _rang_quinte(note: Optional[str]) -> str:
 # ─────────────────────────────────────────────────────────────
 # Ticket Quinté+ ENREGISTRÉ dans le capital (bankroll_entries)
 # ─────────────────────────────────────────────────────────────
-# « Enregistrer ce plan » écrit le ticket Quinté+ du plan comme UNE ligne de
-# capital : type « Quinté+ Désordre », tous les chevaux du champ, mise = coût
+# « Enregistrer ce plan » (retiré le 2026-09-25 au profit du Défi du mois ; ne
+# sert plus qu'à régler les lignes historiques) écrivait le ticket Quinté+ du plan
+# comme UNE ligne de capital : type « Quinté+ Désordre », tous les chevaux du champ, mise = coût
 # total du ticket. Le préfixe de `notes` le distingue des lignes du plan
 # principal : `ml.bet_performance.compute_type_roi_weights` exclut ces lignes de
 # l'apprentissage des poids par type (le Quinté+ systématique est une couverture

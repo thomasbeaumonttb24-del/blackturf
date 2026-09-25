@@ -17,7 +17,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from sqlalchemy import select
 
-from db.models import (AlerteLog, BankrollEntry, Cheval, Course, Hippodrome,
+from db.models import (AlerteLog, Cheval, DefiPari, Course, Hippodrome,
                        Participation, Prediction, Resultat, Reunion, User, ValueBet)
 from services.alerts import (PREFS_DEFAUT, notify_resultats_course,
                              notify_value_bets, prefs_utilisateur)
@@ -199,24 +199,24 @@ async def test_value_bet_non_place_notifie_aussi(db, monkeypatch):
     assert a.payload["rapport_simple_gagnant"] is None  # aucun gain inventé
 
 
-async def test_pari_personnel_prime_sur_le_value_bet(db, monkeypatch):
-    """Un seul message par course : le pari RÉEL de l'utilisateur passe devant."""
+async def test_pari_du_defi_prime_sur_le_value_bet(db, monkeypatch):
+    """Un seul message par course : le pari du Défi du mois passe devant."""
     monkeypatch.setattr("services.alerts.send_inapp", _ok)
     user = await _user(db, prefs={"vb_niveau_min": 2})
     cid = await _seed_course_terminee(db)
     await _seed_value_bet(db, cid, numero=7, nom="LOUBRALTAR")
-    db.add(BankrollEntry(entry_id=str(uuid.uuid4()), user_id=user.user_id, course_id=cid,
-                         date=datetime.now(timezone.utc), type_pari="simple_gagnant",
-                         chevaux="7", mise=10.0, cote=6.4, resultat="gagne",
-                         gain_perte=54.0))
+    db.add(DefiPari(user_id=user.user_id, mois="2026-09", course_id=cid,
+                    type_pari="Simple Gagnant", chevaux=[7], points=10, origine="perso",
+                    engage_at=datetime.now(timezone.utc), statut="gagne", rapport=6.4,
+                    points_retour=64.0))
     await db.commit()
 
     cr = await notify_resultats_course(db, cid)
 
     assert cr["paris"] == 1
     assert await _alertes(db, user.user_id, "resultat_value_bet") == []
-    a = (await _alertes(db, user.user_id, "resultat_pari"))[0]
-    assert a.payload["gain_net"] == 54.0
+    a = (await _alertes(db, user.user_id, "resultat_defi"))[0]
+    assert a.payload["points_nets"] == 54.0
     assert a.payload["nb_gagnes"] == 1
 
 

@@ -36,7 +36,7 @@ export default function AssistantPage() {
       id: "welcome",
       role: "assistant",
       content:
-        "Bonjour ! Je suis BlackTurf IA, votre expert en courses hippiques. Posez-moi n'importe quelle question sur les courses du jour, les paris de valeur, ou la gestion de votre capital.\n\n⚠️ Je suis un outil d'aide à la décision — aucune garantie de gain.",
+        "Bonjour ! Je suis BlackTurf IA, votre expert en courses hippiques. Posez-moi n'importe quelle question sur les courses du jour, les paris de valeur, la gestion de votre budget de jeu ou votre Défi du mois.\n\n⚠️ Je suis un outil d'aide à la décision — aucune garantie de gain.",
     },
   ]);
   const [input, setInput] = useState("");

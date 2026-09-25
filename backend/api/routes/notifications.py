@@ -77,6 +77,8 @@ CATEGORIES: dict[str, str] = {
     "digest_matin": "value_bet",
     "weekly_best_vb": "value_bet",
     "resultat_pari": "resultat",
+    "resultat_defi": "resultat",
+    "defi_recompense": "systeme",
     "resultat_value_bet": "resultat",
     "free_plan_announcement": "systeme",
     "systeme": "systeme",
@@ -182,6 +184,24 @@ def _rendu(type_alerte: str, p: dict) -> tuple[str, str]:
         return "Meilleur pari de la semaine", ""
 
     # ── Résultats (suivi post-course) ─────────────────────────
+    if type_alerte == "resultat_defi":
+        gagne = int(p.get("nb_gagnes") or 0)
+        perdu = int(p.get("nb_perdus") or 0)
+        try:
+            net = f"{float(p.get('points_nets') or 0):+g}".replace(".", ",") + " pts"
+        except (TypeError, ValueError):
+            net = ""
+        if gagne and not perdu:
+            titre = f"Défi : pari gagné — {net}"
+        elif perdu and not gagne:
+            titre = f"Défi : pari perdu — {net}"
+        else:
+            titre = f"Défi : {gagne + perdu} paris réglés — {net}"
+        bouts = [b for b in (p.get("hippodrome"), p.get("course_nom"),
+                             p.get("arrivee")) if b]
+        return titre, " · ".join(str(b) for b in bouts)
+
+    # Ancien suivi du capital (retiré) : les notifications déjà envoyées restent lisibles.
     if type_alerte == "resultat_pari":
         gagne = int(p.get("nb_gagnes") or 0)
         perdu = int(p.get("nb_perdus") or 0)

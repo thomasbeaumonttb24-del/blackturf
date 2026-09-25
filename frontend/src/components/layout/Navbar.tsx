@@ -5,7 +5,7 @@ import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
 import { useState, useEffect, useRef, useCallback } from "react";
 import useSWR from "swr";
-import { LucideIcon, Menu, X, Bell, User, LogOut, ChevronDown, Zap, LayoutDashboard, Gauge, Search, BarChart2, MessagesSquare, Wallet, Bot } from "lucide-react";
+import { LucideIcon, Menu, X, Bell, User, LogOut, ChevronDown, Zap, LayoutDashboard, Gauge, Search, MessagesSquare, Bot, Medal } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/hooks/useAuth";
@@ -17,7 +17,7 @@ import { RUBRIQUES, type Rubrique } from "@/lib/navigation";
 
 /**
  * `prive` → `rel="nofollow"`, même raison qu'au pied de page : ces destinations sont
- * soit interdites d'exploration par robots.txt (`/assistant`, `/bankroll`), soit en
+ * soit interdites d'exploration par robots.txt (`/assistant`), soit en
  * `noindex` (`/value-bets`). Les lier depuis la barre de navigation de CHAQUE page, sans
  * marque, revient à insister auprès de Google sur des adresses qu'il n'a pas le droit de
  * lire — c'est ainsi qu'une URL finit « indexée malgré le blocage », sans contenu.
@@ -359,14 +359,11 @@ export function Navbar() {
                           <User className="h-4 w-4 text-gray-600" /> {R.profil.label}
                         </Link>
                         <Link
-                          href="/statistiques"
+                          href="/defi"
                           className="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
                           onClick={() => setUserMenuOpen(false)}
                         >
-                          <BarChart2 className="h-4 w-4 text-blue-400" /> {R.statistiques.label}
-                        </Link>
-                        <Link href="/bankroll" rel="nofollow" className="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-gray-700 hover:bg-gray-50" onClick={() => setUserMenuOpen(false)}>
-                          <Wallet className="h-4 w-4 text-gray-600" /> {R.suiviCapital.label}
+                          <Medal className="h-4 w-4 text-amber-700" /> {R.defi.label}
                         </Link>
                         <Link href="/assistant" rel="nofollow" className="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-gray-700 hover:bg-gray-50" onClick={() => setUserMenuOpen(false)}>
                           <Bot className="h-4 w-4 text-gray-600" /> {R.assistant.label}
@@ -513,7 +510,6 @@ export function Navbar() {
           {user && (
             <div className="mt-3 border-t border-gray-100 pt-3">
               <p className="px-4 pb-2 text-[10px] font-bold uppercase tracking-[.14em] text-gray-500">Mes outils</p>
-              <Link href="/bankroll" rel="nofollow" className="block rounded-lg px-4 py-2 text-sm font-medium text-gray-700" onClick={() => setMenuOpen(false)}>{R.suiviCapital.label}</Link>
               <Link href="/assistant" rel="nofollow" className="block rounded-lg px-4 py-2 text-sm font-medium text-gray-700" onClick={() => setMenuOpen(false)}>{R.assistant.label}</Link>
             </div>
           )}

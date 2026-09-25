@@ -3,7 +3,7 @@ import Link from "next/link";
 import {
   ArrowRight, TrendingUp, Zap, Shield, Trophy,
   Bell, Calculator, ChevronRight, Check, Target,
-  Sparkles, Database, AlertTriangle, BarChart3, Wallet, Search, Star, Users, ChevronDown,
+  Sparkles, Database, AlertTriangle, BarChart3, Search, Star, Users, ChevronDown,
 } from "lucide-react";
 import { Reveal, Tilt } from "@/components/track-record/effets";
 import { PreuvesCockpit } from "@/components/home/PreuvesCockpit";
@@ -15,6 +15,9 @@ import { ScrollReveal } from "@/components/ui/ScrollReveal";
 import { LiveTicker } from "@/components/ui/LiveTicker";
 import { CalculatorDemo } from "@/components/home/CalculatorDemo";
 import { LivePalmares } from "@/components/home/LivePalmares";
+import { DefiBandeau } from "@/components/defi/DefiBandeau";
+import { DefiClassementLive } from "@/components/defi/DefiClassementLive";
+import { DefiConcept } from "@/components/defi/DefiConcept";
 import { HeroStats } from "@/components/home/HeroStats";
 import { NewsletterForm } from "@/components/newsletter/NewsletterForm";
 
@@ -61,18 +64,6 @@ const PROFILS = [
   },
 ];
 
-// Suivi de capital — exemple de paris RÉGLÉS (mix gagné/perdu : transparence, pas de promesse).
-const CAPITAL_DEPART = 100;
-const CAPITAL_DEMO = [
-  { type: "Couplé Placé", chevaux: "2 · 4", mise: 6, won: true, net: 12 },
-  { type: "Simple Placé", chevaux: "N°6", mise: 4, won: false, net: -4 },
-  { type: "2 sur 4", chevaux: "1 · 3 · 5 · 8", mise: 4, won: true, net: 24 },
-  { type: "Couplé Gagnant", chevaux: "4 · 7", mise: 4, won: false, net: -4 },
-  { type: "Simple Placé", chevaux: "N°3", mise: 4, won: true, net: 6 },
-];
-const CAPITAL_NET = CAPITAL_DEMO.reduce((s, b) => s + b.net, 0);
-const CAPITAL_WINS = CAPITAL_DEMO.filter((b) => b.won).length;
-
 const ICON_GOLD = { color: "#B45309", bg: "#FFFBEB", border: "rgba(180,83,9,0.16)" };
 const FEATURE_MAIN = {
   icon: Target,
@@ -88,7 +79,7 @@ const FEATURE_MAIN = {
 const FEATURES = [
   { icon: Zap, title: "Seulement la vraie valeur", desc: "Un pari n'est signalé que si la probabilité réelle dépasse ce que paie la cote. Des chiffres, pas un coup de cœur.", ...ICON_GOLD },
   { icon: Calculator, title: "Plan de mise sur mesure", desc: "Vous donnez votre budget, vous recevez une répartition sécurité / rendement / coup selon votre profil.", ...ICON_GOLD },
-  { icon: Wallet, title: "Votre capital, sans enjolivure", desc: "Chaque pari réglé aux vrais rapports PMU. Votre rendement réel, suivi au centime.", ...ICON_GOLD },
+  { icon: Trophy, title: "Le Défi du mois", desc: "Pariez vos points sur les courses, réglés aux vrais rapports PMU. Le meilleur solde du mois gagne un abonnement.", ...ICON_GOLD },
   { icon: Bell, title: "Alertes & assistant", desc: "Push, e-mail, digest matinal. Et vos questions sur une course, en langage naturel.", ...ICON_GOLD },
   { icon: Database, title: "100 % données réelles", desc: "Programme et résultats PMU officiels. Aucun chiffre inventé : une donnée inconnue reste « — ».", ...ICON_GOLD },
 ];
@@ -98,7 +89,7 @@ const PLANS = [
     features: ["Programme du jour", "Marché des cotes en direct", "1 pronostic/jour", "Statistiques publiques vérifiées"],
     cta: "Commencer gratuitement", href: "/inscription", popular: false },
   { name: "Standard", price: "12€", period: "/mois", desc: "L'essentiel pour parier mieux",
-    features: ["5 pronostics/jour", "Top 3 paris de valeur (délai 15 min)", "Calculateur de mise", "Suivi du capital + statistiques", "Alertes push & e-mail", "Historique des résultats"],
+    features: ["5 pronostics/jour", "Top 3 paris de valeur (délai 15 min)", "Calculateur de mise", "Défi du mois (concours en points)", "Alertes push & e-mail", "Historique des résultats"],
     cta: "Essayer 7 jours gratuit", href: "/inscription?plan=standard", popular: false },
   // Expert = plan mis en avant (aligné sur /tarifs, qui le marque « Recommandé »).
   // CTA « Essayer 7 jours gratuit » comme Standard : depuis le 2026-08-17 l'essai de
@@ -244,6 +235,7 @@ export default async function HomePage() {
         Aller au contenu principal
       </a>
       <Navbar />
+      <DefiBandeau />
 
       <main id="contenu">
 
@@ -466,6 +458,32 @@ export default async function HomePage() {
       {/* ═══════════ PALMARÈS EN DIRECT (paris gagnés réels) ═══════════ */}
       <LivePalmares />
 
+      {/* ═══════════ DÉFI DU MOIS — le concept et le classement en direct ═══════════ */}
+      <section id="defi" className="scroll-mt-20 bg-[#FBF8F1] py-20">
+        <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
+          <div className="grid items-start gap-8 lg:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)]">
+            <div>
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-800">
+                <Trophy className="h-3.5 w-3.5" aria-hidden="true" /> Nouveau · gratuit
+              </span>
+              <h2 className="mt-4 font-display text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">
+                Le Défi du mois : vos pronostics contre ceux des autres
+              </h2>
+              <p className="mt-3 max-w-xl text-base leading-relaxed text-slate-600">
+                Chaque mois, 1 000 points pour parier sur les courses, avec vos propres chevaux ou ceux de nos plans de mise.
+                Les gains se calculent au rapport PMU officiel, et le meilleur solde remporte 30 jours Expert.
+                Aucun argent réel n&apos;est en jeu.
+              </p>
+              <DefiConcept className="mt-6 lg:grid-cols-2" />
+              <Link href="/defi" className="press mt-6 inline-flex min-h-12 items-center gap-1.5 rounded-full bg-amber-800 px-6 text-sm font-semibold text-white shadow-lg shadow-amber-900/20">
+                Découvrir le défi <ArrowRight className="h-4 w-4" aria-hidden="true" />
+              </Link>
+            </div>
+            <DefiClassementLive top={5} className="lg:sticky lg:top-24" />
+          </div>
+        </div>
+      </section>
+
       <div className="section-divider" />
 
       {/* ═══════════ PRONOSTICS PAR PROFIL DE RISQUE (vrai outil) ═══════════ */}
@@ -596,7 +614,7 @@ export default async function HomePage() {
                   sécurité, rendement, coup — et calcule le gain net potentiel de chaque ligne.
                 </p>
                 <ul className="space-y-2.5 mb-7">
-                  {["Répartition automatique par palier de risque", "Gain net potentiel calculé en direct", "Adapté à votre capital et à votre profil"].map((f) => (
+                  {["Répartition automatique par palier de risque", "Gain net potentiel calculé en direct", "Adapté à votre budget et à votre profil"].map((f) => (
                     <li key={f} className="flex items-start gap-2.5 text-sm text-gray-600">
                       <Check className="h-4 w-4 mt-0.5 flex-shrink-0 text-emerald-700" /> {f}
                     </li>
@@ -731,72 +749,6 @@ export default async function HomePage() {
         </div>
       </section>
 
-      {/* ═══════════ GESTION DU CAPITAL (vrai outil, image) ═══════════ */}
-      <section className="relative py-24 overflow-hidden bg-gray-950">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src="/img/value.webp" width={1600} height={1067} alt="Chevaux sur la piste au soleil couchant" loading="lazy" decoding="async" className="absolute inset-0 h-full w-full object-cover ken-burns opacity-40" />
-        <div className="absolute inset-0 bg-gradient-to-br from-gray-950 via-gray-950/80 to-gray-950/60" />
-        <div className="relative mx-auto max-w-5xl px-4 sm:px-6 lg:px-8">
-          <div className="grid lg:grid-cols-2 gap-12 items-center">
-            <ScrollReveal direction="right">
-              <span className="inline-flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.18em] text-amber-300 mb-3">
-                <Wallet className="h-3.5 w-3.5" /> Gestion du capital
-              </span>
-              <h2 className="font-display text-3xl sm:text-4xl font-bold text-white mb-4">
-                Votre bankroll,{" "}
-                <span className="text-gradient-animated">suivie sans triche</span>
-              </h2>
-              <p className="text-gray-200 leading-relaxed mb-6">
-                Chaque pari validé est réglé automatiquement aux vrais rapports PMU. Vous voyez votre rendement
-                réel — les gains comme les pertes. Pas de chiffre maquillé : c'est ce qui vous permet de savoir
-                si vous gagnez vraiment.
-              </p>
-              <ul className="space-y-2.5">
-                {["Règlement automatique aux rapports officiels", "Rendement réel, gains ET pertes", "Critère de Kelly pour doser vos mises"].map((f) => (
-                  <li key={f} className="flex items-start gap-2.5 text-sm text-gray-200">
-                    <Check className="h-4 w-4 mt-0.5 flex-shrink-0 text-emerald-400" /> {f}
-                  </li>
-                ))}
-              </ul>
-            </ScrollReveal>
-
-            <ScrollReveal direction="left">
-              <Tilt max={6} className="rounded-3xl bg-white/95 backdrop-blur p-5 shadow-2xl">
-                <div className="flex items-center justify-between mb-3">
-                  <span className="text-xs font-semibold text-gray-700">Suivi du capital</span>
-                  <span className="text-[9px] font-bold uppercase tracking-wider text-gray-600 border border-gray-200 rounded-full px-2 py-0.5">Exemple</span>
-                </div>
-
-                {/* Capital départ → actuel (comme le vrai suivi) */}
-                <div className="flex items-end justify-between rounded-xl bg-gradient-to-r from-emerald-50 to-white border border-emerald-100 px-4 py-3 mb-3">
-                  <div>
-                    <div className="text-[10px] uppercase tracking-wide text-gray-600">Capital</div>
-                    <div className="num-display text-lg font-extrabold text-gray-900">{CAPITAL_DEPART}€ <span className="text-gray-600 font-normal">→</span> {CAPITAL_DEPART + CAPITAL_NET}€</div>
-                  </div>
-                  <div className="num-display text-lg font-extrabold text-emerald-700">{CAPITAL_NET >= 0 ? "+" : ""}{CAPITAL_NET}€</div>
-                </div>
-
-                <div className="space-y-1.5">
-                  {CAPITAL_DEMO.map((b, i) => (
-                    <div key={i} className="flex items-center gap-2 rounded-lg bg-gray-50 px-3 py-2 text-xs">
-                      <span className={`h-1.5 w-1.5 rounded-full flex-shrink-0 ${b.won ? "bg-emerald-500" : "bg-gray-300"}`} />
-                      <span className="font-semibold text-gray-800 flex-1 truncate">{b.type} <span className="font-mono font-normal text-gray-600">{b.chevaux}</span></span>
-                      <span className="text-gray-600 font-mono mr-2 hidden sm:inline">{b.mise}€</span>
-                      <span className={`num-display font-bold tabular-nums ${b.won ? "text-emerald-700" : "text-gray-600"}`}>{b.net >= 0 ? "+" : ""}{b.net}€</span>
-                    </div>
-                  ))}
-                </div>
-
-                <div className="mt-3 pt-3 border-t border-gray-100 flex items-center justify-between text-xs">
-                  <span className="text-gray-600"><span className="font-semibold text-gray-700">{CAPITAL_WINS}/{CAPITAL_DEMO.length}</span> gagnés · réglé aux vrais rapports PMU</span>
-                  <span className="inline-flex items-center gap-1 text-emerald-700 font-semibold"><span className="live-dot inline-block w-1.5 h-1.5 rounded-full bg-emerald-500" /> temps réel</span>
-                </div>
-              </Tilt>
-            </ScrollReveal>
-          </div>
-        </div>
-      </section>
-
       {/* ═══════════ CE QUE VOUS OBTENEZ ═══════════ */}
       <section className="py-24 bg-brand-warm">
         <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
@@ -906,11 +858,11 @@ export default async function HomePage() {
               {
                 icon: Zap,
                 titre: "Vous jouez sérieusement",
-                profil: "Tous les jours, avec un capital à faire tourner",
+                profil: "Tous les jours, avec un budget de jeu défini",
                 points: [
                   "Pronostics illimités et paris de valeur en temps réel",
                   "Créateur de stratégies : 30+ filtres, testés sur l'historique",
-                  "Suivi du capital réglé aux rapports officiels, export des données",
+                  "Plans de mise estimés en euros, à jouer chez votre opérateur",
                 ],
                 plan: "Expert · 19€/mois",
                 href: "/inscription?plan=expert",

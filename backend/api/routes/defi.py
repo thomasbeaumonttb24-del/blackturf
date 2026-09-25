@@ -103,24 +103,31 @@ async def regles():
     }
 
 
+def _ligne_publique(l: dict, moi: Optional[str]) -> dict:
+    return {k: v for k, v in l.items() if k not in ("user_id", "premier_pari_at")} \
+        | {"moi": l["user_id"] == moi}
+
+
 @router.get("/defi/classement")
 async def get_classement(
     mois: Optional[str] = Query(None),
+    top: Optional[int] = Query(None, ge=1, le=50),
     db: AsyncSession = Depends(get_db),
     user: Optional[User] = Depends(_utilisateur_optionnel),
 ):
+    """Classement public. ``top`` : les N premiers classés seulement, plus la
+    ligne du joueur connecté dans ``ma_ligne`` (widgets de l'accueil, des courses…)."""
     m = _mois(mois)
-    await defi.regler_en_attente(db)
-    lignes = await defi.classement(db, m)
+    lignes = await defi.classement_en_cache(db, m)
     moi = user.user_id if user else None
+    ma = next((l for l in lignes if l["user_id"] == moi), None)
+    affichees = [l for l in lignes if l["classe"]][:top] if top else lignes
     return {
         "mois": m,
         "nb_joueurs": len(lignes),
-        "lignes": [
-            {k: v for k, v in l.items() if k not in ("user_id", "premier_pari_at")}
-            | {"moi": l["user_id"] == moi}
-            for l in lignes
-        ],
+        "nb_classes": sum(1 for l in lignes if l["classe"]),
+        "lignes": [_ligne_publique(l, moi) for l in affichees],
+        "ma_ligne": _ligne_publique(ma, moi) if ma else None,
     }
 
 

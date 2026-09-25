@@ -77,6 +77,15 @@ def test_rendu_resultat_pari_gagnant():
     assert "3 - 1 - 7" in desc
 
 
+def test_rendu_resultat_defi_en_points():
+    titre, desc = _rendu("resultat_defi", {
+        "nb_gagnes": 1, "nb_perdus": 0, "points_nets": 74.5,
+        "hippodrome": "HIPPODROME DE VINCENNES", "arrivee": "3 - 1 - 7",
+    })
+    assert titre == "Défi : pari gagné — +74,5 pts"
+    assert "3 - 1 - 7" in desc
+
+
 def test_rendu_resultat_value_bet_selon_la_place():
     t1, _ = _rendu("resultat_value_bet", {"nom_cheval": "ALPHA", "position": 1,
                                           "rapport_simple_gagnant": 6.4})

@@ -1409,19 +1409,27 @@ async def run_post_course(course_id: str) -> None:
     # (2-30 min). On purge les clés → recalcul à la volée sur données RÉELLES.
     await _invalidate_stats_caches(course_id)
 
-    # ── 6c. Régler les paris enregistrés (TOUS les utilisateurs) de la course qui
-    # vient de finir → bankroll + back-office admin à jour immédiatement, sans
-    # attendre que chaque utilisateur consulte son compte. Vrais rapports PMU.
+    # ── 6c. Régler les paris du Défi du mois de la course, AVANT la notification
+    # de résultat (6c-bis), qui annonce leur issue. Puis les dernières lignes de
+    # l'ancien suivi du capital encore en attente (historique, plus alimenté).
     try:
-        from api.routes.bankroll import settle_pending_bets
+        from services.defi import regler_course as _regler_defi
+        async with AsyncSessionLocal() as defi_session:
+            _nd = await _regler_defi(defi_session, course_id)
+            if _nd:
+                log.info("pipeline.defi_settled", course_id=course_id, n=_nd)
+    except Exception as e:
+        log.warning("pipeline.defi_settle_skip", course_id=course_id, err=str(e)[:140])
+    try:
+        from services.capital_historique import settle_pending_bets
         async with AsyncSessionLocal() as settle_session:
-            await settle_pending_bets(settle_session, None)  # None = tous les users
+            await settle_pending_bets(settle_session, None)
     except Exception as e:
         log.warning("pipeline.settle_all_skip", course_id=course_id, err=str(e)[:140])
 
     # ── 6c-bis. Notifier le RÉSULTAT à ceux que la course concerne (paris
     # enregistrés réglés, ou value bet dont on les avait alertés). APRÈS le
-    # règlement : c'est lui qui remplit bankroll_entries.resultat / gain_perte, donc
+    # règlement : c'est lui qui remplit defi_paris.statut / points_retour, donc
     # l'inverse annoncerait « 0 pari réglé ». Sans cet appel l'onglet « Résultats »
     # du centre de notifications restait structurellement vide et le suivi
     # s'arrêtait au signal (cf. services/alerts.notify_resultats_course).
@@ -1466,17 +1474,6 @@ async def run_post_course(course_id: str) -> None:
                 log.info("pipeline.bet_plans_settled", course_id=course_id, **_bp)
     except Exception as e:
         log.warning("pipeline.bet_plan_settle_skip", course_id=course_id, err=str(e)[:140])
-
-    # ── 6f. Défi du mois : régler les paris en points de la course sur la même
-    # arrivée officielle, pour que le classement bouge dès l'arrivée.
-    try:
-        from services.defi import regler_course as _regler_defi
-        async with AsyncSessionLocal() as defi_session:
-            _nd = await _regler_defi(defi_session, course_id)
-            if _nd:
-                log.info("pipeline.defi_settled", course_id=course_id, n=_nd)
-    except Exception as e:
-        log.warning("pipeline.defi_settle_skip", course_id=course_id, err=str(e)[:140])
 
     # 7. Retrain déclenché en JOURNÉE — désactivé par défaut depuis le 25/08/2026.
     #

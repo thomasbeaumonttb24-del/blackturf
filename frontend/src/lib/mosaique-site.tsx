@@ -461,8 +461,8 @@ export function PlanSite({ d }: { d: DonneesSite }) {
           texte="Signalés seulement quand la cote paie plus que le risque réel du cheval."
         />
         <Atout
-          titre="Votre capital suivi sans triche"
-          texte="Réglé aux vrais rapports PMU. Les paris perdus sont affichés aussi."
+          titre="Le Défi du mois"
+          texte="Vos paris en points, réglés aux vrais rapports PMU. Le meilleur solde gagne un abonnement."
         />
         <Atout
           titre="Alerté dès qu'un signal sort"
@@ -764,7 +764,7 @@ export function PlanSite({ d }: { d: DonneesSite }) {
             illimité. Annoncer autre chose se verrait dès le premier essai. */}
         {[
           ["Découverte", "0 €", "1 plan de mise par jour, cotes et arrivées"],
-          ["Standard", "12 €/mois", "5 plans par jour, suivi du capital, alertes"],
+          ["Standard", "12 €/mois", "5 plans par jour, paris de valeur, alertes"],
           ["Expert", "19 €/mois", "illimité, paris de valeur en temps réel"],
         ].map(([nom, prix, quoi]) => (
           <div

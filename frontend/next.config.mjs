@@ -81,6 +81,10 @@ const nextConfig = {
       { source: "/quinte", destination: "/quinte-du-jour", permanent: true },
       { source: "/resultats-pmu", destination: "/resultats", permanent: true },
       { source: "/arrivees", destination: "/resultats", permanent: true },
+      // Suivi du capital et statistiques personnelles retirés au profit du Défi du
+      // mois (paris enregistrés en points) : les anciens liens et favoris y mènent.
+      { source: "/bankroll", destination: "/defi", permanent: true },
+      { source: "/statistiques", destination: "/defi", permanent: true },
     ];
   },
   async rewrites() {

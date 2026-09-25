@@ -16,6 +16,14 @@ pytestmark = pytest.mark.asyncio
 MAINTENANT = datetime.now(timezone.utc)
 
 
+@pytest.fixture(autouse=True)
+def _cache_classement_vide():
+    """Le cache du classement vit dans le processus : chaque test part d'une base neuve."""
+    defi.invalider_classement()
+    yield
+    defi.invalider_classement()
+
+
 async def _user(db, email="joueur@blackturf.fr", **champs) -> User:
     u = User(user_id=str(uuid.uuid4()), email=email, email_verified=True,
              plan=champs.pop("plan", "free"), **champs)
@@ -377,3 +385,25 @@ async def test_suppression_compte_efface_ses_paris_du_defi(client, db, admin_hea
     assert resp.status_code == 200, resp.text
     assert (await db.execute(select(DefiPari))).scalars().all() == []
     assert (await db.execute(select(DefiRecompense))).scalars().all() == []
+
+
+async def test_api_classement_top_et_ma_ligne(client, db, auth_headers):
+    moi = (await db.execute(select(User).where(User.email == "test@blackturf.fr"))).scalar_one()
+    for i in range(4):
+        u = await _user(db, email=f"j{i}@x.fr", pseudo=f"J{i}")
+        await _paris_regles(db, u, 10, gagnant=i % 2 == 0, prefixe=f"T{i}")
+    await _paris_regles(db, moi, 3, prefixe="M")
+
+    resp = (await client.get("/api/v1/defi/classement?top=2", headers=auth_headers)).json()
+    assert [l["rang"] for l in resp["lignes"]] == [1, 2]
+    assert resp["nb_classes"] == 4 and resp["nb_joueurs"] == 5
+    assert resp["ma_ligne"]["moi"] is True and resp["ma_ligne"]["rang"] is None
+    assert resp["ma_ligne"]["nb_paris"] == 3
+
+
+async def test_classement_invalide_des_qu_un_pari_est_engage(db):
+    u = await _user(db)
+    await _course(db)
+    assert await defi.classement_en_cache(db, defi.mois_courant()) == []
+    await defi.engager_pari(db, u, "C1", "Simple Gagnant", [3], 10)
+    assert len(await defi.classement_en_cache(db, defi.mois_courant())) == 1

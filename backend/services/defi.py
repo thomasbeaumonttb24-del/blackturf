@@ -63,6 +63,16 @@ TYPES_DEFI: dict[str, tuple[int, str]] = {
 
 STATUTS_COURSE_SANS_ARRIVEE = {"annule", "sans_resultat"}
 
+# Le classement s'affiche sur l'accueil, le programme et chaque course : on le
+# recalcule au plus toutes les CACHE_CLASSEMENT secondes par processus, et tout
+# pari engagé ou réglé l'invalide aussitôt dans le processus qui l'a écrit.
+CACHE_CLASSEMENT = 30.0
+_cache_classement: dict[str, tuple[float, list[dict]]] = {}
+
+
+def invalider_classement() -> None:
+    _cache_classement.clear()
+
 
 class DefiErreur(ValueError):
     """Pari refusé : le message est destiné au joueur."""
@@ -207,6 +217,7 @@ async def engager_pari(session, user: User, course_id: str, type_pari: str,
     )
     session.add(pari)
     await session.commit()
+    invalider_classement()
     await session.refresh(pari)
     return pari
 
@@ -228,6 +239,7 @@ async def regler_course(session, course_id: str) -> int:
         for p in paris:
             p.statut, p.rapport, p.points_retour, p.regle_at = "rembourse", 1.0, float(p.points), now
         await session.commit()
+        invalider_classement()
         return len(paris)
 
     if course.statut != "termine":
@@ -260,6 +272,7 @@ async def regler_course(session, course_id: str) -> int:
         n += 1
     if n:
         await session.commit()
+        invalider_classement()
     return n
 
 
@@ -328,6 +341,18 @@ async def classement(session, mois: str) -> list[dict]:
             l["rang"] = rang
         else:
             l["rang"] = None
+    return lignes
+
+
+async def classement_en_cache(session, mois: str) -> list[dict]:
+    import time
+
+    vu = _cache_classement.get(mois)
+    if vu is not None and time.monotonic() - vu[0] < CACHE_CLASSEMENT:
+        return vu[1]
+    await regler_en_attente(session)
+    lignes = await classement(session, mois)
+    _cache_classement[mois] = (time.monotonic(), lignes)
     return lignes
 
 
@@ -475,3 +500,18 @@ async def palmares(session, limite: int = 24) -> list[dict]:
     )).scalars().all()
     return [{"mois": r.mois, "rang": r.rang, "nom": r.nom_public, "solde": r.solde,
              "plan_offert": r.plan_offert} for r in rows]
+
+
+async def resume_admin(session, user_ids: list[str], mois: str) -> dict[str, dict]:
+    """Défi du mois par compte, pour le back-office : solde, rang, paris, rendement.
+
+    Un compte sans pari dans le mois est absent du dict : l'appelant affiche le
+    capital de départ et « aucun pari »."""
+    if not user_ids:
+        return {}
+    voulus = set(user_ids)
+    return {
+        l["user_id"]: {k: l[k] for k in ("solde", "rang", "nb_paris", "nb_gagnes",
+                                          "nb_en_attente", "points_nets", "roi", "classe")}
+        for l in await classement(session, mois) if l["user_id"] in voulus
+    }

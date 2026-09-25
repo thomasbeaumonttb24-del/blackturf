@@ -70,7 +70,6 @@ const EXEMPLE_TICKETS: WinningBet[] = [
 ];
 
 const rien = () => {};
-const rienAsync = async () => 0;
 
 // ─── Scène en relief ────────────────────────────────────────────
 function mouvementReduit() {
@@ -293,7 +292,6 @@ export function EtapesFonctionnement() {
                   switching={false}
                   onChangeProfil={rien}
                   onClose={rien}
-                  onSave={rienAsync}
                 />
               </div>
             </Fenetre>
@@ -303,8 +301,8 @@ export function EtapesFonctionnement() {
         <Etape
           n={3}
           titre="Pariez où vous voulez"
-          desc="Vous jouez chez votre opérateur habituel. À l'arrivée, chaque pari est réglé au rapport PMU officiel et votre capital est mis à jour, gains comme pertes."
-          points={["Pronostic figé avant le départ", "Règlement au rapport officiel", "Capital suivi au centime"]}
+          desc="Vous jouez chez votre opérateur habituel, et vous enregistrez vos paris au Défi du mois : réglés au rapport PMU officiel, ils vous rapportent des points et vous font grimper au classement."
+          points={["Pronostic figé avant le départ", "Règlement au rapport officiel", "Classement du Défi du mois"]}
         >
           <Scene
             sens={1}

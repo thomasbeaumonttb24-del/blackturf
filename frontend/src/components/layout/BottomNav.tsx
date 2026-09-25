@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, CalendarDays, Star, Trophy, Wallet } from "lucide-react";
+import { LayoutDashboard, CalendarDays, Star, Trophy, Medal } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { cn } from "@/lib/utils";
 import { RUBRIQUES as R } from "@/lib/navigation";
@@ -14,7 +14,7 @@ const ITEMS = [
   { ...R.coursesDuJour, icon: CalendarDays },
   { ...R.parisDeValeur, icon: Star },
   { ...R.performances, icon: Trophy },
-  { ...R.suiviCapital, icon: Wallet },
+  { ...R.defi, icon: Medal },
 ];
 
 /** Barre de navigation mobile (pouce) — utilisateurs connectés uniquement. */

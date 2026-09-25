@@ -454,8 +454,8 @@ async def notify_resultats_course(session: AsyncSession, course_id: str) -> dict
 
     Deux cas, un seul message par utilisateur et par course (le plus pertinent
     d'abord) :
-      1. `resultat_pari`        — l'utilisateur a enregistré des paris sur la course
-                                  (bankroll_entries réglées) → gagné/perdu + net réel ;
+      1. `resultat_defi`        — l'utilisateur a joué la course au Défi du mois
+                                  (defi_paris réglés) → gagné/perdu + points nets ;
       2. `resultat_value_bet`   — sinon, il avait été alerté d'un value bet sur cette
                                   course → ce que le cheval a fait à l'arrivée.
 
@@ -463,7 +463,7 @@ async def notify_resultats_course(session: AsyncSession, course_id: str) -> dict
     catchup de règlement), elle ne renvoie rien. Respecte `prefs.resultats_suivis`.
     """
     from sqlalchemy import select as _select
-    from db.models import (BankrollEntry, Cheval, Course, Participation,
+    from db.models import (Cheval, Course, DefiPari, Participation,
                            Resultat, ValueBet)
 
     cr = {"paris": 0, "value_bets": 0, "ignores_prefs": 0}
@@ -493,7 +493,9 @@ async def notify_resultats_course(session: AsyncSession, course_id: str) -> dict
     # annoncé avant la course, et sans cette borne on scanne toute la table
     # (200 000+ lignes) à chaque fin de course.
     q_deja = _select(AlerteLog.user_id).where(
-        AlerteLog.type_alerte.in_(("resultat_pari", "resultat_value_bet")),
+        # `resultat_pari` : ancien type (capital, retiré) — gardé pour l'idempotence
+        # des courses notifiées juste avant le changement.
+        AlerteLog.type_alerte.in_(("resultat_defi", "resultat_pari", "resultat_value_bet")),
         AlerteLog.canal == "in-app",
         AlerteLog.payload["course_id"].as_string() == course_id,
     )
@@ -511,11 +513,11 @@ async def notify_resultats_course(session: AsyncSession, course_id: str) -> dict
             await _log_alerte(session, user.user_id, type_alerte, "push", payload,
                                   ok_push, _raison(ok_push))
 
-    # ── 1. Paris personnels réglés ────────────────────────────
+    # ── 1. Paris du Défi du mois réglés ───────────────────────
     entries = (await session.execute(
-        _select(BankrollEntry).where(
-            BankrollEntry.course_id == course_id,
-            BankrollEntry.resultat.is_not(None),
+        _select(DefiPari).where(
+            DefiPari.course_id == course_id,
+            DefiPari.statut != "en_attente",
         )
     )).scalars().all()
 
@@ -535,20 +537,21 @@ async def notify_resultats_course(session: AsyncSession, course_id: str) -> dict
             traites.add(user_id)
             continue
 
-        nb_gagnes = sum(1 for e in lot if e.resultat == "gagne")
-        nb_perdus = sum(1 for e in lot if e.resultat == "perd")
-        gain_net = round(sum((e.gain_perte or 0.0) for e in lot), 2)
+        nb_gagnes = sum(1 for e in lot if e.statut == "gagne")
+        nb_perdus = sum(1 for e in lot if e.statut == "perd")
+        points_nets = round(sum((e.points_retour or 0.0) - e.points for e in lot), 1)
         payload = {
             **contexte,
             "nb_gagnes": nb_gagnes,
             "nb_perdus": nb_perdus,
-            "gain_net": gain_net,
-            "mise_totale": round(sum(e.mise for e in lot), 2),
+            "points_nets": points_nets,
+            "points_mises": sum(e.points for e in lot),
+            "lien": f"/courses/{course_id}#defi",
         }
-        titre = "Pari gagné" if (nb_gagnes and not nb_perdus) else (
-            "Pari perdu" if (nb_perdus and not nb_gagnes) else "Paris réglés")
-        await _envoyer(user, "resultat_pari", payload, f"🏁 {titre}",
-                       f"{course.hippodrome_nom} — {gain_net:+.2f} €")
+        titre = "Défi : pari gagné" if (nb_gagnes and not nb_perdus) else (
+            "Défi : pari perdu" if (nb_perdus and not nb_gagnes) else "Défi : paris réglés")
+        await _envoyer(user, "resultat_defi", payload, f"🏁 {titre}",
+                       f"{course.hippodrome_nom} — {points_nets:+g} pts")
         traites.add(user_id)
         cr["paris"] += 1
 

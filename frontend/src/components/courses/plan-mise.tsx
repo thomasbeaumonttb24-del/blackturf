@@ -6,9 +6,8 @@
  * page course et l'accueil, qui le montre tel quel sur un exemple.
  */
 
-import { useState } from "react";
 import {
-  AlertTriangle, CheckCircle2, ChevronDown, Flame, Gauge, Info, Loader2,
+  AlertTriangle, ChevronDown, Flame, Gauge, Info, Loader2,
   LockKeyhole, Medal, Pencil, Radio, ShieldCheck, TrendingUp, WalletCards, Zap,
 } from "lucide-react";
 import { CasaqueNumero } from "@/components/courses/identite-cheval";
@@ -140,26 +139,15 @@ export const CX = {
   sg: "var(--font-space-grotesk), sans-serif",
 } as const;
 
-export function PlanMiseDisplay({ plan, profil, switching, onChangeProfil, onClose, onSave, onJouerDefi }: {
+export function PlanMiseDisplay({ plan, profil, switching, onChangeProfil, onClose, onJouerDefi }: {
   plan: MisePlan;
   profil: string;
   switching: boolean;
   onChangeProfil: (profil: string) => void;
   onClose: () => void;
-  onSave: () => Promise<number>;
   /** Envoie un ticket vers le Défi du mois (types du défi seulement). */
   onJouerDefi?: (type: DefiTypePari, chevaux: number[]) => void;
 }) {
-  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved">("idle");
-  const handleSave = async () => {
-    setSaveState("saving");
-    try {
-      await onSave();
-      setSaveState("saved");
-    } catch {
-      setSaveState("idle");
-    }
-  };
   const profilDesc = PROFILS_MISE.find((p) => p.key === profil)?.desc;
   // Teinte par niveau : Sécurité=émeraude, Rendement=or, Coup à tenter=rose.
   const nivStyle = (niveau: string) =>
@@ -395,18 +383,15 @@ export function PlanMiseDisplay({ plan, profil, switching, onChangeProfil, onClo
         </details>
       )}
 
-      {saveState === "saved" ? (
-        <div role="status" style={{ minHeight: 48, marginTop: 12, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, borderRadius: 12, border: `1px solid ${CX.emBd}`, background: CX.emBg, padding: "10px 12px", fontSize: 12.5, fontWeight: 650, color: CX.emDeep }}>
-          <CheckCircle2 className="h-4 w-4" /> Paris enregistrés dans votre capital
+      {/* Plus d'enregistrement dans un « capital » : les paris qu'on veut suivre
+          se jouent au Défi du mois, en points, ticket par ticket (bouton de chaque
+          ticket). Le plan, lui, reste en euros : c'est l'estimation de ce que
+          donneraient ces mises jouées pour de vrai chez un opérateur. */}
+      {onJouerDefi && (
+        <div style={{ marginTop: 12, display: "flex", alignItems: "flex-start", gap: 8, borderRadius: 12, border: `1px solid ${CX.goldBd}`, background: CX.goldBg, padding: "10px 12px", fontSize: 11.5, lineHeight: 1.45, color: CX.goldDeep }}>
+          <Medal className="h-4 w-4 flex-shrink-0" style={{ marginTop: 1 }} aria-hidden="true" />
+          <span>Jouez ces tickets au <b>Défi du mois</b> avec vos points : bouton « Jouer ce pari au Défi du mois » sous chaque ticket.</span>
         </div>
-      ) : (
-        <button
-          onClick={handleSave}
-          disabled={saveState === "saving"}
-          style={{ width: "100%", minHeight: 48, marginTop: 12, border: `1px solid ${CX.goldDeep}`, cursor: saveState === "saving" ? "wait" : "pointer", background: CX.goldDeep, color: "#FFFFFF", fontWeight: 700, fontSize: 12.5, padding: "12px 14px", borderRadius: 12, boxShadow: "0 5px 14px -9px rgba(146,64,14,.65)", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 8, opacity: saveState === "saving" ? 0.65 : 1, transition: "background-color .2s, opacity .2s, box-shadow .2s" }}
-        >
-          {saveState === "saving" ? <><Loader2 className="h-4 w-4 animate-spin" /> Enregistrement…</> : "Enregistrer ce plan"}
-        </button>
       )}
       <p style={{ margin: "8px 0 0", textAlign: "center", fontSize: 10, lineHeight: 1.4, color: CX.gray400 }}>
         Calcul final selon les rapports PMU officiels.

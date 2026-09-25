@@ -13,6 +13,7 @@ import { CompteGratuitCta } from "@/components/billing/CompteGratuitCta";
 import {
   DEFI_REGLES_DEFAUT, OriginePari, ResultatPari, StatutPari, formatPts, moisLabel, planLabel,
 } from "@/components/defi/kit";
+import { DefiConcept } from "@/components/defi/DefiConcept";
 import { cn } from "@/lib/utils";
 
 const CARTE = "rounded-2xl bg-white ring-1 ring-inset ring-[#ECE7DC] shadow-[0_1px_2px_rgba(17,24,39,.05),0_12px_28px_-22px_rgba(17,24,39,.45)]";
@@ -217,6 +218,22 @@ export default function DefiPage() {
           </p>
         )}
       </header>
+
+      {/* Le concept, en clair, avant tout le reste */}
+      <section aria-labelledby="defi-concept">
+        <h2 id="defi-concept" className="mb-3 font-display text-[16px] font-bold text-slate-900">Comment ça marche</h2>
+        <DefiConcept
+          capital={regles.capital_mensuel}
+          pointsMin={regles.points_min}
+          pointsMax={regles.points_max}
+          prix={regles.recompenses[0]}
+          className="lg:grid-cols-2"
+        />
+        <p className="mt-3 text-[12px] leading-relaxed text-slate-600">
+          Exemple : 50 points sur un cheval gagnant rapporté 4,20 € au PMU ⇒ 50 × 4,20 = <b className="text-slate-800">210 points</b> reviennent dans votre solde, soit +160 points.
+          Il faut {regles.min_paris_classement} paris dans le mois pour entrer au classement.
+        </p>
+      </section>
 
       {/* Ma carte */}
       {user ? (

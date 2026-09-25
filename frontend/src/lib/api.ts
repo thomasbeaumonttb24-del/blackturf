@@ -157,16 +157,6 @@ export const pronosticEmailApi = {
     api.post<{ ok: boolean; message: string }>(`/courses/${courseId}/envoyer-pronostic`, { email, source }),
 };
 
-export const bankrollApi = {
-  entries: (params?: Record<string, unknown>) => api.get("/bankroll/entries", { params }),
-  create: (data: Record<string, unknown>) => api.post("/bankroll/entries", data),
-  update: (id: string, data: Record<string, unknown>) =>
-    api.patch(`/bankroll/entries/${id}`, data),
-  delete: (id: string) => api.delete(`/bankroll/entries/${id}`),
-  stats: () => api.get("/bankroll/stats"),
-  export: () => api.get("/bankroll/export", { responseType: "blob" }),
-};
-
 // ─── Défi du mois ──────────────────────────────────────────────────────────
 export type DefiTypePari = "Simple Gagnant" | "Simple Placé" | "Couplé Gagnant" | "Couplé Placé";
 
@@ -214,6 +204,14 @@ export type DefiLigne = DefiStats & {
   moi: boolean;
 };
 
+export type DefiClassement = {
+  mois: string;
+  nb_joueurs: number;
+  nb_classes: number;
+  lignes: DefiLigne[];
+  ma_ligne: DefiLigne | null;
+};
+
 export type DefiMoi = DefiStats & {
   mois: string;
   nom: string;
@@ -237,8 +235,8 @@ export type DefiPalmares = { mois: string; rang: number; nom: string; solde: num
 
 export const defiApi = {
   regles: () => api.get<DefiRegles>("/defi/regles"),
-  classement: (mois?: string) =>
-    api.get<{ mois: string; nb_joueurs: number; lignes: DefiLigne[] }>("/defi/classement", { params: { mois } }),
+  classement: (mois?: string, top?: number) =>
+    api.get<DefiClassement>("/defi/classement", { params: { mois, top } }),
   moi: (mois?: string) => api.get<DefiMoi>("/defi/moi", { params: { mois } }),
   course: (courseId: string) => api.get<DefiCourse>(`/defi/course/${courseId}`),
   palmares: () => api.get<DefiPalmares>("/defi/palmares"),
@@ -273,7 +271,6 @@ export const statsApi = {
   mlStatus: () => api.get("/stats/ml-status"),
   dashboardSummary: () => api.get("/stats/dashboard-summary"),
   roiByDiscipline: () => api.get("/stats/roi-by-discipline"),
-  perfPersonnelle: () => api.get("/stats/perf-personnelle"),
   trackRecord: () => api.get("/stats/track-record"),
   profils: () => api.get("/stats/profils"),
   // Réservé à l'admin : le 401 renvoyé à un visiteur est ATTENDU, l'appelant
@@ -382,8 +379,6 @@ export const adminApi = {
     api.get(`/users/${id}`, { baseURL: `${API_URL}/admin/api` }),
   updateUser: (id: string, data: Record<string, unknown>) =>
     api.patch(`/users/${id}`, data, { baseURL: `${API_URL}/admin/api` }),
-  adjustBankroll: (id: string, montant: number, note?: string) =>
-    api.post(`/users/${id}/bankroll-adjust`, { montant, note }, { baseURL: `${API_URL}/admin/api` }),
   // Suppression définitive : le compte et ce qui n'appartient qu'à lui. L'API
   // refuse le compte de l'admin lui-même, un autre admin, et tout abonnement
   // encore vivant côté Stripe.

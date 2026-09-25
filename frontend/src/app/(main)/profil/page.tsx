@@ -18,7 +18,6 @@ import { planLabel, formatDate, cn } from "@/lib/utils";
 const profileSchema = z.object({
   prenom: z.string().min(1, "Requis"),
   nom: z.string().optional(),
-  bankroll_initiale: z.number().min(0).optional(),
   profil_risque: z.enum(["conservateur", "equilibre", "agressif"]),
 });
 type ProfileForm = z.infer<typeof profileSchema>;
@@ -28,7 +27,7 @@ const PLAN_FEATURES: Record<string, { label: string; included: boolean }[]> = {
   free: [
     { label: "Programme complet", included: true },
     { label: "Paris de valeur (3/jour)", included: true },
-    { label: "Suivi de capital", included: true },
+    { label: "Défi du mois (concours en points)", included: true },
     { label: "Paris de valeur illimités", included: false },
     { label: "Analyse IA détaillée", included: false },
     { label: "Assistant IA", included: false },
@@ -37,7 +36,7 @@ const PLAN_FEATURES: Record<string, { label: string; included: boolean }[]> = {
   decouverte: [
     { label: "Programme complet", included: true },
     { label: "Paris de valeur (3/jour)", included: true },
-    { label: "Suivi de capital", included: true },
+    { label: "Défi du mois (concours en points)", included: true },
     { label: "Paris de valeur illimités", included: false },
     { label: "Analyse IA détaillée", included: false },
     { label: "Assistant IA", included: false },
@@ -46,7 +45,7 @@ const PLAN_FEATURES: Record<string, { label: string; included: boolean }[]> = {
   standard: [
     { label: "Programme complet", included: true },
     { label: "Paris de valeur illimités", included: true },
-    { label: "Suivi de capital", included: true },
+    { label: "Défi du mois (concours en points)", included: true },
     { label: "Analyse IA détaillée", included: true },
     { label: "Notifications", included: true },
     { label: "Assistant IA", included: false },
@@ -55,7 +54,7 @@ const PLAN_FEATURES: Record<string, { label: string; included: boolean }[]> = {
   starter: [
     { label: "Programme complet", included: true },
     { label: "Paris de valeur illimités", included: true },
-    { label: "Suivi de capital", included: true },
+    { label: "Défi du mois (concours en points)", included: true },
     { label: "Analyse IA détaillée", included: true },
     { label: "Notifications", included: true },
     { label: "Assistant IA", included: false },
@@ -64,7 +63,7 @@ const PLAN_FEATURES: Record<string, { label: string; included: boolean }[]> = {
   pro: [
     { label: "Programme complet", included: true },
     { label: "Paris de valeur illimités", included: true },
-    { label: "Suivi de capital avancé", included: true },
+    { label: "Défi du mois (concours en points)", included: true },
     { label: "Analyse IA détaillée", included: true },
     { label: "Assistant IA", included: true },
     { label: "Notifications", included: true },
@@ -73,7 +72,7 @@ const PLAN_FEATURES: Record<string, { label: string; included: boolean }[]> = {
   expert: [
     { label: "Programme complet", included: true },
     { label: "Paris de valeur illimités", included: true },
-    { label: "Suivi de capital avancé", included: true },
+    { label: "Défi du mois (concours en points)", included: true },
     { label: "Analyse IA détaillée", included: true },
     { label: "Assistant IA", included: true },
     { label: "Notifications", included: true },
@@ -146,7 +145,7 @@ export default function ProfilPage() {
   const { register, handleSubmit, watch, setValue, reset, formState: { errors } } = useForm<ProfileForm>({
     resolver: zodResolver(profileSchema),
     defaultValues: {
-      prenom: "", nom: "", bankroll_initiale: undefined, profil_risque: "equilibre",
+      prenom: "", nom: "", profil_risque: "equilibre",
     },
   });
 
@@ -157,7 +156,6 @@ export default function ProfilPage() {
       reset({
         prenom: user.prenom || "",
         nom: user.nom || "",
-        bankroll_initiale: user.bankroll_initiale ?? undefined,
         profil_risque: (user.profil_risque as "conservateur" | "equilibre" | "agressif") || "equilibre",
       });
     }
@@ -349,17 +347,6 @@ export default function ProfilPage() {
 
                 <Field label="E-mail">
                   <input value={user.email} disabled className={inputCls} />
-                </Field>
-
-                <Field label="Capital initial (€)">
-                  <input
-                    {...register("bankroll_initiale", { valueAsNumber: true })}
-                    type="number"
-                    min="0"
-                    step="1"
-                    className={inputCls}
-                    placeholder="500"
-                  />
                 </Field>
 
                 {/* Risk profile */}

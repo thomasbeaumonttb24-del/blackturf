@@ -7,7 +7,7 @@ import { RUBRIQUES as R } from "@/lib/navigation";
 /**
  * `rel="nofollow"` sur les liens vers des espaces privés.
  *
- * `/bankroll` et `/assistant` sont interdits d'exploration par robots.txt, mais étaient
+ * `/assistant` est interdit d'exploration par robots.txt, mais étaient
  * liés depuis le pied de page de CHAQUE page du site. Un lien massivement répété vers une
  * adresse qu'un robot n'a pas le droit de charger produit exactement le cas que Search
  * Console signale comme « indexée malgré le blocage par robots.txt » : Google connaît
@@ -28,7 +28,6 @@ const COLUMNS: Array<{
       R.performances,
       R.defi,
       R.methode,
-      { ...R.suiviCapital, prive: true },
       { ...R.assistant, prive: true },
     ],
   },

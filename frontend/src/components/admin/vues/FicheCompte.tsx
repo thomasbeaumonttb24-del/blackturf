@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * Fiche d'un compte — portefeuille, abonnements, historique des paris.
+ * Fiche d'un compte — Défi du mois, abonnements, historique des paris du défi.
  *
  * Sur téléphone, l'ancienne version ouvrait une carte flottante centrée dans
  * un fond noirci : sur 390 px, ça donnait une fenêtre de 374 px collée aux
@@ -18,18 +18,29 @@ import useSWR from "swr";
 import { Loader2, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { adminApi } from "@/lib/api";
-import { cn, formatDateTime, formatEuro } from "@/lib/utils";
+import { cn, formatDateTime } from "@/lib/utils";
 import {
   Carte, CartesOuTableau, Champ, DefilementX, GrilleTuiles, TD, TH, Tuile, Vide,
-  eur, num, pct, signedEur, signedPct, tone,
+  num, signedPct, tone,
 } from "../ui";
 import { PROFIL_NET_LABELS, type UserDetail } from "../types";
 
 function badgeResultat(r: string | null) {
   if (r === "gagne") return <Badge variant="success" className="text-[11px]">Gagné</Badge>;
   if (r === "perd") return <Badge variant="secondary" className="text-[11px] text-destructive">Perdu</Badge>;
-  if (r === "annule") return <Badge variant="secondary" className="text-[11px]">Annulé</Badge>;
+  if (r === "rembourse") return <Badge variant="secondary" className="text-[11px]">Remboursé</Badge>;
   return <Badge variant="warning" className="text-[11px]">En attente</Badge>;
+}
+
+/** Points du Défi du mois : « 1 155 pts », « +84 pts ». */
+function pts(v: number | null | undefined, signe = false): string {
+  if (v == null) return "—";
+  const n = Math.round(v * 10) / 10;
+  return `${signe && n > 0 ? "+" : ""}${n.toLocaleString("fr-FR")} pts`;
+}
+
+function netPari(b: UserDetail["bets"][number]): number | null {
+  return b.statut === "en_attente" ? null : (b.points_retour ?? 0) - b.points;
 }
 
 function badgePlan(plan: string) {
@@ -135,36 +146,30 @@ export default function FicheCompte({ userId, onClose }: { userId: string; onClo
                 </dl>
               </section>
 
-              {/* Portefeuille */}
+              {/* Défi du mois en cours */}
               <section>
-                <h3 className="mb-2 text-[13px] font-semibold">Portefeuille</h3>
+                <h3 className="mb-2 text-[13px] font-semibold">Défi du mois ({data.defi.mois})</h3>
                 <GrilleTuiles colonnes={4}>
                   <Tuile
-                    label="Solde actuel"
-                    valeur={formatEuro(data.portefeuille.solde_actuel)}
-                    sub={`capital ${formatEuro(data.portefeuille.capital_initial)}`}
+                    label="Solde"
+                    valeur={pts(data.defi.solde)}
+                    sub={data.defi.rang != null ? `${data.defi.rang}e du classement` : "non classé"}
                   />
                   <Tuile
-                    label="Gain net"
-                    valeur={signedEur(data.portefeuille.gain_net, 2)}
-                    ton={data.portefeuille.gain_net >= 0 ? "ok" : "alerte"}
-                    sub={`misé ${formatEuro(data.portefeuille.mise_totale)}`}
+                    label="Points nets"
+                    valeur={pts(data.defi.points_nets, true)}
+                    ton={data.defi.points_nets >= 0 ? "ok" : "alerte"}
+                    sub={`rendement ${signedPct(data.defi.roi, 1)}`}
                   />
                   <Tuile
-                    label="ROI"
-                    valeur={signedPct(data.portefeuille.roi, 1)}
-                    ton={data.portefeuille.roi == null ? "neutre" : data.portefeuille.roi >= 0 ? "ok" : "alerte"}
-                    sub={`${data.portefeuille.nb_predictions_used} suivis IA`}
+                    label="Plan / perso"
+                    valeur={`${data.defi.plan.nb_paris} / ${data.defi.perso.nb_paris}`}
+                    sub={`${pts(data.defi.plan.points_nets, true)} · ${pts(data.defi.perso.points_nets, true)}`}
                   />
                   <Tuile
                     label="Bilan paris"
-                    valeur={`${data.portefeuille.nb_gagnes}/${data.portefeuille.nb_regles}`}
-                    sub={
-                      <>
-                        {data.portefeuille.win_rate == null ? "—" : `${pct(data.portefeuille.win_rate)} de réussite`}
-                        {data.portefeuille.nb_attente > 0 && ` · ${data.portefeuille.nb_attente} en attente`}
-                      </>
-                    }
+                    valeur={`${data.defi.nb_gagnes}/${data.defi.nb_paris}`}
+                    sub={data.defi.nb_en_attente > 0 ? `${data.defi.nb_en_attente} en attente` : "tous réglés"}
                   />
                 </GrilleTuiles>
               </section>
@@ -177,7 +182,7 @@ export default function FicheCompte({ userId, onClose }: { userId: string; onClo
                       <div key={t.type_pari} className="rounded-xl border border-border px-3 py-2 text-xs">
                         <span className="font-semibold capitalize">{t.type_pari}</span>
                         <span className="text-muted-foreground"> · {t.nb_gagnes}/{t.nb} · </span>
-                        <span className={cn("tabular-nums font-semibold", tone(t.net))}>{signedEur(t.net, 2)}</span>
+                        <span className={cn("tabular-nums font-semibold", tone(t.net))}>{pts(t.net, true)}</span>
                         {t.roi != null && <span className="text-muted-foreground"> ({signedPct(t.roi, 0)})</span>}
                       </div>
                     ))}
@@ -209,27 +214,27 @@ export default function FicheCompte({ userId, onClose }: { userId: string; onClo
 
               <section>
                 <h3 className="mb-2 text-[13px] font-semibold">
-                  Historique des paris <span className="font-normal text-muted-foreground">({num(data.nb_bets)})</span>
+                  Paris du défi, tous les mois <span className="font-normal text-muted-foreground">({num(data.nb_bets)})</span>
                 </h3>
                 {data.bets.length === 0 ? (
-                  <Vide>Aucun pari enregistré.</Vide>
+                  <Vide>Aucun pari au défi.</Vide>
                 ) : (
                   <CartesOuTableau
                     cartes={
                       <div className="max-h-[24rem] space-y-2 overflow-y-auto">
                         {data.bets.map((b) => (
-                          <Carte key={b.entry_id}>
+                          <Carte key={b.pari_id}>
                             <div className="flex items-start justify-between gap-2">
-                              <span className="text-[13px] font-medium capitalize">
+                              <span className="text-[13px] font-medium">
                                 {b.type_pari}
-                                {b.suivi_reco_ia && (
-                                  <span className="ml-1.5 rounded bg-brand-gold/15 px-1 py-0.5 text-[10px] font-bold text-brand-gold-dark">IA</span>
+                                {b.origine === "plan" && (
+                                  <span className="ml-1.5 rounded bg-brand-gold/15 px-1 py-0.5 text-[10px] font-bold text-brand-gold-dark">PLAN</span>
                                 )}
                               </span>
-                              {badgeResultat(b.resultat)}
+                              {badgeResultat(b.statut)}
                             </div>
-                            <p className="mt-1 truncate text-xs text-muted-foreground" title={b.chevaux || ""}>
-                              {b.chevaux || "—"}
+                            <p className="mt-1 truncate text-xs text-muted-foreground">
+                              {b.chevaux.map((n) => `n°${n}`).join(" + ")}
                             </p>
                             <div className="mt-2 space-y-1 border-t border-border/60 pt-2">
                               <Champ label="Course">
@@ -237,11 +242,11 @@ export default function FicheCompte({ userId, onClose }: { userId: string; onClo
                                 {b.hippodrome ? ` · ${b.hippodrome}` : ""}
                               </Champ>
                               <Champ label="Mise">
-                                {formatEuro(b.mise)}{b.cote ? ` @ ${b.cote.toFixed(2)}` : ""}
+                                {pts(b.points)}{b.rapport ? ` × ${b.rapport.toFixed(2)}` : ""}
                               </Champ>
                               <Champ label="Résultat">
-                                <span className={cn("font-semibold", tone(b.gain_perte))}>
-                                  {b.gain_perte == null ? "—" : signedEur(b.gain_perte, 2)}
+                                <span className={cn("font-semibold", tone(netPari(b)))}>
+                                  {pts(netPari(b), true)}
                                 </span>
                               </Champ>
                             </div>
@@ -259,34 +264,34 @@ export default function FicheCompte({ userId, onClose }: { userId: string; onClo
                                 <th className={TH}>Course</th>
                                 <th className={TH}>Type</th>
                                 <th className={TH}>Chevaux</th>
-                                <th className={cn(TH, "text-right")}>Mise</th>
-                                <th className={cn(TH, "text-right")}>Cote</th>
+                                <th className={cn(TH, "text-right")}>Points</th>
+                                <th className={cn(TH, "text-right")}>Rapport</th>
                                 <th className={cn(TH, "text-center")}>Résultat</th>
-                                <th className={cn(TH, "text-right")}>Gain / perte</th>
+                                <th className={cn(TH, "text-right")}>Points nets</th>
                               </tr>
                             </thead>
                             <tbody>
                               {data.bets.map((b) => (
-                                <tr key={b.entry_id} className="border-t border-border/50 hover:bg-muted/25">
-                                  <td className={cn(TD, "whitespace-nowrap text-muted-foreground")}>{formatDateTime(b.date)}</td>
+                                <tr key={b.pari_id} className="border-t border-border/50 hover:bg-muted/25">
+                                  <td className={cn(TD, "whitespace-nowrap text-muted-foreground")}>{formatDateTime(b.engage_at)}</td>
                                   <td className={cn(TD, "whitespace-nowrap")}>
                                     {b.course_code && <span className="font-mono font-semibold">{b.course_code}</span>}
                                     {b.hippodrome && <span className="text-muted-foreground"> {b.hippodrome}</span>}
                                   </td>
-                                  <td className={cn(TD, "whitespace-nowrap capitalize")}>
+                                  <td className={cn(TD, "whitespace-nowrap")}>
                                     {b.type_pari}
-                                    {b.suivi_reco_ia && (
-                                      <span className="ml-1 text-[10px] font-bold text-brand-gold-dark" title="Suivi de la reco IA">IA</span>
+                                    {b.origine === "plan" && (
+                                      <span className="ml-1 text-[10px] font-bold text-brand-gold-dark" title="Pari repris du plan de mise consulté">PLAN</span>
                                     )}
                                   </td>
-                                  <td className={cn(TD, "max-w-[140px] truncate")} title={b.chevaux || ""}>{b.chevaux || "—"}</td>
-                                  <td className={cn(TD, "text-right tabular-nums")}>{formatEuro(b.mise)}</td>
+                                  <td className={cn(TD, "whitespace-nowrap")}>{b.chevaux.map((n) => `n°${n}`).join(" + ")}</td>
+                                  <td className={cn(TD, "text-right tabular-nums")}>{pts(b.points)}</td>
                                   <td className={cn(TD, "text-right tabular-nums text-muted-foreground")}>
-                                    {b.cote ? b.cote.toFixed(2) : "—"}
+                                    {b.rapport ? b.rapport.toFixed(2) : "—"}
                                   </td>
-                                  <td className={cn(TD, "text-center")}>{badgeResultat(b.resultat)}</td>
-                                  <td className={cn(TD, "text-right font-semibold tabular-nums", tone(b.gain_perte))}>
-                                    {b.gain_perte == null ? "—" : signedEur(b.gain_perte, 2)}
+                                  <td className={cn(TD, "text-center")}>{badgeResultat(b.statut)}</td>
+                                  <td className={cn(TD, "text-right font-semibold tabular-nums", tone(netPari(b)))}>
+                                    {pts(netPari(b), true)}
                                   </td>
                                 </tr>
                               ))}
@@ -299,9 +304,6 @@ export default function FicheCompte({ userId, onClose }: { userId: string; onClo
                 )}
               </section>
 
-              <p className="text-xs text-muted-foreground">
-                Capital initial déclaré : {eur(data.portefeuille.capital_initial)}.
-              </p>
             </div>
           )}
         </div>
