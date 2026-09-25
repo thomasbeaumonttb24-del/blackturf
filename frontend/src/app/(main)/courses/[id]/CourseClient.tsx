@@ -966,8 +966,8 @@ function ResultatsSection({ resultats, partants }: {
                       {pos}
                     </span>
                   </td>
-                  <td className="px-2 py-2 tabular-nums"><CasaqueNumero numero={c.numero} /></td>
-                  <td className="px-2 py-2">{c.nom}</td>
+                  <td className="w-px whitespace-nowrap px-2 py-2 tabular-nums"><CasaqueNumero numero={c.numero} /></td>
+                  <td className="min-w-0 break-words px-2 py-2 leading-snug">{c.nom}</td>
                   {hasTemps && (
                     <td className="px-2 py-2 text-right font-mono tabular-nums text-muted-foreground hidden sm:table-cell">
                       {fmtEcart({ position: pos, temps: c.temps })}
@@ -992,10 +992,10 @@ function ResultatsSection({ resultats, partants }: {
                       DSQ
                     </span>
                   </td>
-                  <td className="px-2 py-2 tabular-nums"><CasaqueNumero numero={c.numero} /></td>
-                  <td className="px-2 py-2">
+                  <td className="w-px whitespace-nowrap px-2 py-2 tabular-nums"><CasaqueNumero numero={c.numero} /></td>
+                  <td className="break-words px-2 py-2 leading-snug">
                     <span className="line-through decoration-rose-400/60">{c.nom}</span>
-                    <span className="ml-2 align-middle text-[11px] font-medium text-rose-700">{fmtIncident(c.incident)}</span>
+                    <span className="block text-[11px] font-medium text-rose-700 sm:ml-2 sm:inline sm:align-middle">{fmtIncident(c.incident)}</span>
                   </td>
                   {hasTemps && <td className="px-2 py-2 hidden sm:table-cell" />}
                   <td className="px-2 py-2 text-right font-mono tabular-nums">
