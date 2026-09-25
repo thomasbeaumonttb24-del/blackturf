@@ -15,8 +15,10 @@ import { toast } from "sonner";
 import { CreditCard, Gauge, Hourglass, Loader2, RefreshCw, Users, Wallet } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { adminApi } from "@/lib/api";
-import { EnTetePage, GrilleKpi, Kpi, depuis, eur, num } from "@/components/admin/ui";
-import { useAbonnements, useDashboard } from "@/components/admin/data";
+import { EnTetePage, GrilleKpi, Kpi, MiniRepartition, depuis, eur, num } from "@/components/admin/ui";
+import { useAbonnements, useDashboard, useRevenus } from "@/components/admin/data";
+import { Fraicheur, useRecuLe } from "@/components/admin/graphes";
+import RevenusApercu from "@/components/admin/vues/RevenusApercu";
 import BandeauAlertes from "@/components/admin/vues/BandeauAlertes";
 import EnDirect from "@/components/admin/vues/EnDirect";
 import RentabiliteProfils from "@/components/admin/vues/RentabiliteProfils";
@@ -24,6 +26,8 @@ import RentabiliteProfils from "@/components/admin/vues/RentabiliteProfils";
 export default function PilotagePage() {
   const { data: dashboard } = useDashboard();
   const { data: abos } = useAbonnements();
+  const { data: revenus } = useRevenus(6);
+  const recu = useRecuLe(abos);
   const [retraining, setRetraining] = useState(false);
   const r = abos?.repartition;
 
@@ -48,43 +52,78 @@ export default function PilotagePage() {
           ? `Modèle v${dashboard.modele.version} · entraîné ${depuis(dashboard.modele.trained_at)}`
           : undefined}
         actions={
-          <Button variant="brand" onClick={lancerRetrain} disabled={retraining} className="min-h-[2.75rem]">
+          <>
+          <Fraicheur depuis={recu} cadence={30_000} />
+          <Button onClick={lancerRetrain} disabled={retraining} className="h-9 rounded-lg bg-[#1b2230] px-3.5 text-[13px] font-medium text-white hover:bg-[#2c3547]">
             {retraining ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
             Ré-entraîner
           </Button>
+          </>
         }
       />
 
       <GrilleKpi>
         <Kpi
-          label="Revenu mensuel"
-          valeur={abos ? eur(abos.resume.mrr) : "—"}
-          sub={abos ? `${eur(abos.resume.arr)} par an` : undefined}
+          label="Encaissé ce mois"
+          nombre={revenus ? revenus.totaux.mois_courant_cents / 100 : null}
+          format={(v) => eur(v)}
+          sub={abos ? `Récurrent ${eur(abos.resume.mrr)}/mois · ${eur(abos.resume.arr)}/an` : undefined}
           icone={<Wallet className="h-4 w-4" />}
-          accent="or"
+          accent="bleu"
+          tendance={revenus?.totaux.variation_pct}
+          tendanceLabel="vs mois préc."
+          serie={revenus?.mois.map((m) => m.encaisse_cents / 100)}
+          href="/admin/revenus"
         />
         <Kpi
           label="Payants"
-          valeur={num(r?.payants)}
-          sub={r ? `Standard ${r.par_formule.standard.payants} · Expert ${r.par_formule.expert.payants}` : undefined}
+          nombre={r?.payants ?? null}
+          format={(v) => num(Math.round(v))}
+          sub={r ? (
+            <MiniRepartition parts={[
+              { label: "Standard", n: r.par_formule.standard.payants, couleur: "#6f8bab" },
+              { label: "Expert", n: r.par_formule.expert.payants, couleur: "#a8741a" },
+            ]} />
+          ) : undefined}
           icone={<CreditCard className="h-4 w-4" />}
           accent="ok"
         />
         <Kpi
           label="En essai"
-          valeur={num(r?.essais)}
-          sub={abos
-            ? abos.resume.fin_essai_sous_3j > 0
-              ? `${abos.resume.fin_essai_sous_3j} finissent sous 3 j`
-              : "aucun ne finit sous 3 j"
-            : undefined}
+          nombre={r?.essais ?? null}
+          format={(v) => num(Math.round(v))}
+          sub={abos ? (
+            <>
+              <MiniRepartition parts={[
+                { label: "Avec carte", n: abos.resume.en_essai_avec_carte, couleur: "#27456b" },
+                { label: "Sans carte", n: abos.resume.en_essai_sans_carte, couleur: "#c9d5e3" },
+              ]} />
+              <div className="mt-1.5">
+                {abos.resume.fin_essai_sous_3j > 0
+                  ? `${abos.resume.fin_essai_sous_3j} finissent sous 3 jours`
+                  : "Aucun ne finit sous 3 jours"}
+              </div>
+            </>
+          ) : undefined}
           icone={<Hourglass className="h-4 w-4" />}
           accent="bleu"
         />
         <Kpi
           label="Comptes"
-          valeur={num(r?.comptes)}
-          sub={dashboard ? `+${dashboard.users.nouveaux_7j} cette semaine` : undefined}
+          nombre={r?.comptes ?? null}
+          format={(v) => num(Math.round(v))}
+          accent="violet"
+          sub={r ? (
+            <>
+              <MiniRepartition parts={[
+                { label: "Payants", n: r.payants, couleur: "#0f7b5a" },
+                { label: "Essais", n: r.essais, couleur: "#27456b" },
+                { label: "Offerts", n: r.offerts, couleur: "#6b5b95" },
+                { label: "Gratuits", n: r.gratuits, couleur: "#d5d9de" },
+              ]} />
+              {dashboard && <div className="mt-1.5">+{dashboard.users.nouveaux_7j} inscrits cette semaine</div>}
+            </>
+          ) : undefined}
           icone={<Users className="h-4 w-4" />}
         />
       </GrilleKpi>
@@ -97,6 +136,8 @@ export default function PilotagePage() {
           <BandeauAlertes />
         </div>
       </div>
+
+      <RevenusApercu />
 
       <RentabiliteProfils />
     </div>

@@ -205,6 +205,65 @@ export interface AbonnementsData {
   mouvements: MouvementAbo[];
 }
 
+export interface PaiementRecu {
+  date: string;
+  email: string | null;
+  plan: Formule;
+  montant_cents: number;
+  /** Premier encaissement de l'abonnement, ou échéance suivante. */
+  nature: "nouveau" | "renouvellement";
+  motif: string | null;
+}
+
+export interface MoisRevenu {
+  mois: string; // AAAA-MM, fuseau Europe/Paris
+  encaisse_cents: number;
+  nb_paiements: number;
+  nouveaux_cents: number;
+  renouvellements_cents: number;
+  par_formule: Record<Formule, number>;
+  echecs_cents: number;
+  nb_echecs: number;
+  nb_clients: number;
+  panier_moyen_cents: number | null;
+  cumul_cents: number;
+  paiements: PaiementRecu[];
+}
+
+export type NatureEcheance = "renouvellement" | "premier_prelevement" | "fin_acces" | "impaye";
+
+export interface Echeance {
+  user_id: string;
+  email: string;
+  plan: Formule;
+  periodicite: string;
+  statut: string;
+  nature: NatureEcheance;
+  date: string | null;
+  jours_restants: number | null;
+  montant_cents: number;
+  stripe_subscription_id: string | null;
+}
+
+export interface RevenusData {
+  fuseau: string;
+  mois: MoisRevenu[];
+  totaux: {
+    periode_cents: number;
+    mois_courant_cents: number;
+    mois_precedent_cents: number | null;
+    variation_pct: number | null;
+    reste_a_encaisser_mois_cents: number;
+    atterrissage_mois_cents: number;
+    moyenne_mensuelle_cents: number;
+    nb_paiements: number;
+    echecs_cents: number;
+  };
+  prevision: Array<{ mois: string; prevu_cents: number }>;
+  echeancier: Echeance[];
+  computed_at: string;
+}
+
 export interface CompteLigne {
   user_id: string;
   email: string;

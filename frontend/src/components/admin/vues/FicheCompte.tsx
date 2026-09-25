@@ -55,6 +55,8 @@ export default function FicheCompte({ userId, onClose }: { userId: string; onClo
   const { data, isLoading } = useSWR<UserDetail>(
     ["/admin-user-detail", userId],
     () => adminApi.userDetail(userId).then((r) => r.data),
+    // Fiche ouverte = paris et abonnement suivis en direct, comme le reste de la console.
+    { refreshInterval: 30_000, revalidateOnFocus: true, keepPreviousData: true },
   );
 
   // Échap ferme, et le défilement de la page de fond est gelé : sans ça, le

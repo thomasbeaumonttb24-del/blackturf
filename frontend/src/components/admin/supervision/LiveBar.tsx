@@ -45,7 +45,7 @@ function Cellule({
   valueClass?: string;
 }) {
   return (
-    <div className="min-w-0 rounded-xl border border-border bg-card p-3">
+    <div className="min-w-0 bt-verre rounded-xl p-3">
       <div className="flex items-center gap-1.5">
         <span className="shrink-0 text-muted-foreground/60">{icon}</span>
         <span className="text-[11px] font-semibold uppercase leading-tight tracking-[0.06em] text-muted-foreground">
@@ -90,7 +90,7 @@ export default function LiveBar({
   return (
     <section
       aria-label="Activité en direct"
-      className="overflow-hidden rounded-2xl border border-border bg-card shadow-sm"
+      className="overflow-hidden bt-verre rounded-2xl"
     >
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-border/60 bg-muted/30 px-4 py-2">
         <span className="relative flex h-2 w-2 shrink-0">

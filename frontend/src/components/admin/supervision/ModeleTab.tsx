@@ -119,7 +119,7 @@ function VerdictMarcheBanniere({ v }: { v?: VerdictMarche | null }) {
       </div>
 
       <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <div className="rounded-xl border border-border bg-card p-3">
+        <div className="bt-verre rounded-xl p-3">
           <div className="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
             Écart
           </div>
@@ -136,7 +136,7 @@ function VerdictMarcheBanniere({ v }: { v?: VerdictMarche | null }) {
                   : "la cote seule classerait mieux"}
           </div>
         </div>
-        <div className="rounded-xl border border-border bg-card p-3">
+        <div className="bt-verre rounded-xl p-3">
           <div className="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
             Classement modèle
           </div>
@@ -145,7 +145,7 @@ function VerdictMarcheBanniere({ v }: { v?: VerdictMarche | null }) {
           </div>
           <div className="mt-0.5 text-[11px] text-muted-foreground">AUC intra-course</div>
         </div>
-        <div className="rounded-xl border border-border bg-card p-3">
+        <div className="bt-verre rounded-xl p-3">
           <div className="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
             Classement cote
           </div>
@@ -154,7 +154,7 @@ function VerdictMarcheBanniere({ v }: { v?: VerdictMarche | null }) {
           </div>
           <div className="mt-0.5 text-[11px] text-muted-foreground">même échantillon</div>
         </div>
-        <div className="rounded-xl border border-border bg-card p-3">
+        <div className="bt-verre rounded-xl p-3">
           <div className="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
             Porte sur
           </div>
@@ -190,7 +190,7 @@ function Ecart({
   const mesure = valeur != null;
   const bon = mesure && (sensPositif ? valeur > 0 : valeur < 0);
   return (
-    <div className="rounded-xl border border-border bg-card p-3" title={aide}>
+    <div className="bt-verre rounded-xl p-3" title={aide}>
       <div className="text-[11px] font-semibold uppercase leading-tight tracking-[0.06em] text-muted-foreground">
         {label}
       </div>
@@ -245,7 +245,7 @@ function AvantageServiBanniere({ a }: { a?: AvantageMarche | null }) {
     );
   }
   return (
-    <section className="rounded-2xl border border-border bg-card p-4 sm:p-5">
+    <section className="bt-verre rounded-2xl p-4 sm:p-5">
       <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
         <div className="min-w-0">
           <h3 className="flex items-center gap-1.5 text-sm font-semibold">

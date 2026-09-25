@@ -18,7 +18,7 @@ import { adminApi, statsApi } from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
 import type {
   AbonnementsData, CompteLigne, DashboardData, EnLigneData, ModelVersion,
-  PalmaresNet, ScraperStatus, SystemError,
+  PalmaresNet, RevenusData, ScraperStatus, SystemError,
 } from "./types";
 import { MOUVEMENTS_ECHEC, scraperSain } from "./types";
 
@@ -76,6 +76,17 @@ export function useAbonnements() {
   return useSWR<AbonnementsData>(
     estAdmin ? "/admin-abonnements" : null,
     () => adminApi.abonnements().then((r) => r.data),
+    { refreshInterval: CADENCE.normal, revalidateOnFocus: true, keepPreviousData: true },
+  );
+}
+
+/** Encaissements réels mois par mois + échéancier. Rafraîchi comme les
+ *  abonnements : un paiement Stripe arrive par webhook à toute heure. */
+export function useRevenus(mois = 12) {
+  const { estAdmin } = useEstAdmin();
+  return useSWR<RevenusData>(
+    estAdmin ? ["/admin-revenus", mois] : null,
+    () => adminApi.revenus(mois).then((r) => r.data),
     { refreshInterval: CADENCE.normal, revalidateOnFocus: true, keepPreviousData: true },
   );
 }

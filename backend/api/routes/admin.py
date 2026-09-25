@@ -1647,6 +1647,247 @@ async def abonnements(
 
 
 # ─────────────────────────────────────────────
+# Revenus — l'argent RÉELLEMENT encaissé, mois par mois, et ce qui arrive
+# ─────────────────────────────────────────────
+# Demande de l'exploitant (2026-09-25) : le MRR dit ce que les abonnements
+# DEVRAIENT rapporter ; il ne dit pas ce qui est entré en caisse ce mois-ci, ni
+# quand tombe le prochain prélèvement de chaque abonné.
+#
+# Source unique : `subscription_events` de type `paiement_recu`, écrit à CHAQUE
+# `invoice.payment_succeeded` avec `amount_paid` (cf. `stripe_routes`). C'est
+# de l'argent constaté, pas une estimation. Les factures à 0 € (ouverture d'un
+# essai) n'y sont jamais écrites.
+#
+# L'échéancier, lui, est une PRÉVISION : il se lit sur `subscriptions.periode_fin`
+# (ou `essai_fin` pour un essai avec carte) et il est étiqueté comme tel.
+FUSEAU_REVENUS = "Europe/Paris"
+
+
+def _mois_de(d: datetime, tz) -> str:
+    if d.tzinfo is None:
+        d = d.replace(tzinfo=timezone.utc)
+    return d.astimezone(tz).strftime("%Y-%m")
+
+
+def _ajoute_mois(d: datetime, n: int) -> datetime:
+    """Même jour n mois plus tard, borné à la fin du mois (31 janv. → 28 févr.)."""
+    import calendar
+    m = d.month - 1 + n
+    annee, mois = d.year + m // 12, m % 12 + 1
+    jour = min(d.day, calendar.monthrange(annee, mois)[1])
+    return d.replace(year=annee, month=mois, day=jour)
+
+
+async def _montants_connus(db: AsyncSession) -> dict[str, int]:
+    """Dernier montant connu par abonnement Stripe (le prix RÉEL du price)."""
+    montants: dict[str, int] = {}
+    for sid, montant in (await db.execute(
+        select(SubscriptionEvent.stripe_subscription_id,
+               func.max(SubscriptionEvent.montant_cents))
+        .where(SubscriptionEvent.montant_cents.isnot(None))
+        .group_by(SubscriptionEvent.stripe_subscription_id)
+    )).all():
+        if sid:
+            montants[sid] = montant
+    return montants
+
+
+@router.get("/revenus")
+async def revenus(
+    mois: int = Query(12, ge=1, le=36),
+    mois_prevision: int = Query(3, ge=1, le=12),
+    db: AsyncSession = Depends(get_db),
+    _=Depends(require_admin),
+):
+    """Encaissements réels par mois (détail paiement par paiement) + échéancier
+    des prochains prélèvements de chaque abonné."""
+    from zoneinfo import ZoneInfo
+
+    tz = ZoneInfo(FUSEAU_REVENUS)
+    now = datetime.now(timezone.utc)
+    local = now.astimezone(tz)
+    debut_mois_courant = local.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    debut_fenetre = _ajoute_mois(debut_mois_courant, -(mois - 1))
+    cles_mois = [_ajoute_mois(debut_fenetre, i).strftime("%Y-%m") for i in range(mois)]
+
+    def _formule(plan: Optional[str]) -> str:
+        return {"starter": "standard", "pro": "expert"}.get(plan or "", plan or "standard")
+
+    buckets = {
+        k: {
+            "mois": k, "encaisse_cents": 0, "nb_paiements": 0,
+            "nouveaux_cents": 0, "renouvellements_cents": 0,
+            "par_formule": {"standard": 0, "expert": 0},
+            "echecs_cents": 0, "nb_echecs": 0,
+            "clients": set(), "paiements": [],
+        }
+        for k in cles_mois
+    }
+
+    evenements = (await db.execute(
+        select(SubscriptionEvent)
+        .where(and_(
+            SubscriptionEvent.type.in_(("paiement_recu", "paiement_echoue")),
+            SubscriptionEvent.created_at >= debut_fenetre.astimezone(timezone.utc),
+        ))
+        .order_by(desc(SubscriptionEvent.created_at))
+    )).scalars().all()
+
+    # Un compte qui a déjà payé avant la fenêtre n'est pas « nouveau » en janvier.
+    deja_payeurs_avant = {
+        sid for (sid,) in (await db.execute(
+            select(SubscriptionEvent.stripe_subscription_id).where(and_(
+                SubscriptionEvent.type == "paiement_recu",
+                SubscriptionEvent.created_at < debut_fenetre.astimezone(timezone.utc),
+            )).distinct()
+        )).all() if sid
+    }
+
+    # Parcours chronologique pour savoir quel paiement est le PREMIER d'un abonnement.
+    vus: set[str] = set(deja_payeurs_avant)
+    for ev in sorted(evenements, key=lambda e: e.created_at):
+        cle = _mois_de(ev.created_at, tz)
+        b = buckets.get(cle)
+        if b is None:
+            continue
+        montant = int(ev.montant_cents or 0)
+        if ev.type == "paiement_echoue":
+            b["nb_echecs"] += 1
+            b["echecs_cents"] += montant
+            continue
+        detail = ev.detail if isinstance(ev.detail, dict) else {}
+        motif = detail.get("motif")
+        sid = ev.stripe_subscription_id
+        premier = (
+            motif == "subscription_create"
+            or bool(detail.get("premier_paiement_apres_essai"))
+            or (sid is not None and sid not in vus)
+        )
+        if sid:
+            vus.add(sid)
+        f = _formule(ev.plan)
+        b["encaisse_cents"] += montant
+        b["nb_paiements"] += 1
+        b["par_formule"][f if f in b["par_formule"] else "standard"] += montant
+        b["nouveaux_cents" if premier else "renouvellements_cents"] += montant
+        if ev.email:
+            b["clients"].add(ev.email)
+        b["paiements"].append({
+            "date": ev.created_at,
+            "email": ev.email,
+            "plan": f,
+            "montant_cents": montant,
+            "nature": "nouveau" if premier else "renouvellement",
+            "motif": motif,
+        })
+
+    serie = []
+    cumul = 0
+    for k in cles_mois:
+        b = buckets[k]
+        cumul += b["encaisse_cents"]
+        b["paiements"].sort(key=lambda p: p["date"], reverse=True)
+        serie.append({
+            **{kk: vv for kk, vv in b.items() if kk != "clients"},
+            "nb_clients": len(b["clients"]),
+            "panier_moyen_cents": round(b["encaisse_cents"] / b["nb_paiements"]) if b["nb_paiements"] else None,
+            "cumul_cents": cumul,
+        })
+
+    # ── Échéancier : prochain prélèvement de chaque abonnement vivant ──
+    montants = await _montants_connus(db)
+    # La prévision couvre des MOIS ENTIERS : le mois en cours puis `mois_prevision`
+    # mois pleins. Une borne en jours (90 j) coupait le dernier mois en deux et le
+    # graphique montrait une chute qui n'était qu'un artefact de fenêtre.
+    horizon = _ajoute_mois(debut_mois_courant, mois_prevision + 1).astimezone(timezone.utc)
+    lignes = (await db.execute(
+        select(Subscription, User)
+        .join(User, User.user_id == Subscription.user_id)
+        .where(Subscription.statut.in_(("active", "trialing", "cancel_at_period_end", "past_due")))
+    )).all()
+
+    echeances = []
+    prevu_par_mois: dict[str, int] = {}
+    for sub, user in lignes:
+        montant = montants.get(sub.stripe_subscription_id) or PRIX_MENSUEL_CENTS.get(sub.plan, 0)
+        essai_fin = sub.essai_fin
+        if essai_fin is not None and essai_fin.tzinfo is None:
+            essai_fin = essai_fin.replace(tzinfo=timezone.utc)
+        periode_fin = sub.periode_fin
+        if periode_fin is not None and periode_fin.tzinfo is None:
+            periode_fin = periode_fin.replace(tzinfo=timezone.utc)
+
+        en_essai = essai_fin is not None and essai_fin > now
+        prochaine = essai_fin if en_essai else periode_fin
+        if sub.statut == "cancel_at_period_end":
+            nature = "fin_acces"
+        elif sub.statut == "past_due":
+            nature = "impaye"
+        elif en_essai:
+            nature = "premier_prelevement"
+        else:
+            nature = "renouvellement"
+        echeances.append({
+            "user_id": user.user_id,
+            "email": user.email,
+            "plan": _formule(sub.plan),
+            "periodicite": sub.periodicite,
+            "statut": sub.statut,
+            "nature": nature,
+            "date": prochaine,
+            "jours_restants": round((prochaine - now).total_seconds() / 86400, 1) if prochaine else None,
+            "montant_cents": 0 if nature in ("fin_acces", "impaye") else montant,
+            "stripe_subscription_id": sub.stripe_subscription_id,
+        })
+
+        # Projection : seules les échéances qui DÉBITERONT comptent.
+        if nature in ("fin_acces", "impaye") or prochaine is None:
+            continue
+        pas = 12 if sub.periodicite == "annual" else 1
+        d, i = prochaine, 0
+        while d < horizon and i < 40:
+            if d >= now:
+                cle = _mois_de(d, tz)
+                prevu_par_mois[cle] = prevu_par_mois.get(cle, 0) + montant
+            i += 1
+            d = _ajoute_mois(prochaine, pas * i)
+
+    echeances.sort(key=lambda e: (e["date"] is None, e["date"] or now))
+    mois_courant = cles_mois[-1]
+    courant = serie[-1]
+    precedent = serie[-2] if len(serie) > 1 else None
+    prevision = [
+        {"mois": k, "prevu_cents": v}
+        for k, v in sorted(prevu_par_mois.items())
+    ]
+    reste_mois = prevu_par_mois.get(mois_courant, 0)
+    total = sum(s["encaisse_cents"] for s in serie)
+
+    return {
+        "fuseau": FUSEAU_REVENUS,
+        "mois": serie,
+        "totaux": {
+            "periode_cents": total,
+            "mois_courant_cents": courant["encaisse_cents"],
+            "mois_precedent_cents": precedent["encaisse_cents"] if precedent else None,
+            "variation_pct": (
+                round((courant["encaisse_cents"] - precedent["encaisse_cents"])
+                      / precedent["encaisse_cents"] * 100, 1)
+                if precedent and precedent["encaisse_cents"] else None
+            ),
+            "reste_a_encaisser_mois_cents": reste_mois,
+            "atterrissage_mois_cents": courant["encaisse_cents"] + reste_mois,
+            "moyenne_mensuelle_cents": round(total / len(serie)) if serie else 0,
+            "nb_paiements": sum(s["nb_paiements"] for s in serie),
+            "echecs_cents": sum(s["echecs_cents"] for s in serie),
+        },
+        "prevision": prevision,
+        "echeancier": echeances,
+        "computed_at": now.isoformat(),
+    }
+
+
+# ─────────────────────────────────────────────
 # Suivi des essais : qui résilie, qui ne paie pas, qui abandonne
 # ─────────────────────────────────────────────
 # Demande de l'exploitant (2026-09-16) : les compteurs sur 30 jours ne disaient

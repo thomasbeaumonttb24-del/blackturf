@@ -7,6 +7,16 @@ on:
       - "**.md"
       - ".github/workflows/ci.yml"
 
+# Un seul déploiement à la fois sur le VPS. Le 2026-09-25, deux fusions à six
+# minutes d'écart (PR #16 et #17) ont lancé deux `docker compose up` en parallèle :
+# le nettoyage des conteneurs renommés de l'un a supprimé ceux que l'autre
+# recréait, les deux ont échoué avant le redémarrage et le site est resté en 502.
+# Les runs suivants attendent leur tour ; aucun n'est annulé en cours de route
+# (un `compose up` interrompu laisse justement ces conteneurs orphelins).
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
 env:
   REGISTRY: ghcr.io
   IMAGE_API: ghcr.io/${{ github.repository_owner }}/blackturf-api
