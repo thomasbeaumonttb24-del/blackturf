@@ -16,7 +16,6 @@ import { coursesApi, predictionsApi, api } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { CheckoutButton } from "@/components/billing/CheckoutButton";
-import { CompteGratuitCta } from "@/components/billing/CompteGratuitCta";
 import { useAuth } from "@/hooks/useAuth";
 import { useCotesLive } from "@/hooks/useWebSocket";
 import {
@@ -27,7 +26,8 @@ import {
 import { PronosticEmailPopup } from "@/components/courses/PronosticEmailPopup";
 import { CX, PROFILS_MISE, PlanMiseDisplay, type MisePlan } from "@/components/courses/plan-mise";
 import { Anneau, PartantsSection } from "@/components/courses/partants";
-import { BandeauOnglet, CARTE_CLS, CARTE_STYLE, IconeTuile, LienOnglet, Pastille, PastilleDirect, SuiteOnglets, difficulteCourse } from "@/components/courses/course-ui";
+import { AnalyseVerrouillee, StatsApercu } from "@/components/courses/apercu-abonne";
+import { BandeauOnglet, CARTE_CLS, CARTE_STYLE, IconeTuile, LienOnglet, Pastille, PastilleDirect, Squelette, SuiteOnglets, VoileAbonne, difficulteCourse } from "@/components/courses/course-ui";
 import {
   ClassementAlgo, ClassementApercu, ClassementVerrouille, formatCoteFr, type ClassementSignal,
 } from "@/components/courses/classement";
@@ -602,15 +602,58 @@ function MiseCalculatorWidget({
   // CTA connexion plutôt qu'un message "Passer Standard" trompeur pour un visiteur
   // qui n'a même pas encore de compte gratuit.
   if (!userPlan) {
+    const suite = encodeURIComponent(`/courses/${courseId}`);
     return (
-      <div style={{ padding: "18px 18px 20px" }}>
-        <CompteGratuitCta
-          icone={Calculator}
-          titre="Votre plan de mise sur cette course"
-          texte="Entrez votre budget : BlackTurf répartit vos mises sur les paris les plus justes de la course. Un plan par jour est offert avec le compte gratuit."
-          suite={`/courses/${courseId}`}
-        />
-      </div>
+      // Même calculateur que l'abonné, sous un voile : le visiteur voit ce qu'il
+      // va remplir (profil, budget) et la forme du plan rendu — jamais un pari.
+      <VoileAbonne
+        icone={Calculator}
+        titre="Votre plan de mise sur cette course"
+        texte="Entrez votre budget : BlackTurf répartit vos mises sur les paris les plus justes de la course. Un plan par jour est offert avec le compte gratuit."
+        action={
+          <>
+            <Link
+              href={`/inscription?suite=${suite}`}
+              className="inline-flex min-h-10 items-center gap-1.5 rounded-xl bg-gradient-to-b from-amber-400 to-amber-500 px-5 text-[13px] font-bold text-stone-900 ring-1 ring-inset ring-amber-600/30 shadow-[inset_0_1px_0_rgba(255,255,255,.5),0_10px_22px_-12px_rgba(146,64,14,.8)] transition-transform hover:-translate-y-0.5"
+            >
+              Créer mon compte gratuit
+            </Link>
+            <Link href={`/login?redirect=${suite}`} className="text-[12.5px] font-medium text-stone-600 underline underline-offset-2 hover:text-stone-900">
+              J&apos;ai déjà un compte
+            </Link>
+          </>
+        }
+        decor={
+          <div className="space-y-4 p-1 pb-3">
+            <div className="grid grid-cols-3 gap-2">
+              {PROFILS_MISE.map((p, i) => (
+                <div key={p.key} className={cn("flex min-h-[76px] flex-col items-center justify-center gap-1.5 rounded-2xl text-center ring-1", i === 1 ? "bg-white ring-amber-300" : "bg-[#F7F4EC] ring-[#E7E1D3]")}>
+                  <span className="h-6 w-6 rounded-lg bg-amber-50 ring-1 ring-amber-200" />
+                  <span className="text-[12.5px] font-bold text-stone-700">{p.label}</span>
+                  <span className="text-[10.5px] text-stone-500">{p.bande}</span>
+                </div>
+              ))}
+            </div>
+            <div className="flex min-h-[62px] items-center gap-3 rounded-2xl bg-white px-4 ring-1 ring-[#E7E1D3]">
+              <span className="text-[22px] font-bold text-amber-800">€</span>
+              <span className="text-[26px] font-bold text-stone-300">20</span>
+              <span className="ml-auto h-10 w-40 rounded-xl bg-gradient-to-b from-amber-400 to-amber-500" />
+            </div>
+            <div className="grid gap-2.5 sm:grid-cols-3">
+              {["Sécurité", "Rendement", "Coup"].map((n) => (
+                <div key={n} className="rounded-2xl bg-white p-3 ring-1 ring-[#ECE7DC]">
+                  <p className="m-0 text-[11px] font-bold uppercase tracking-wide text-stone-500">{n}</p>
+                  <div className="mt-2 flex items-center gap-1.5">
+                    {[0, 1, 2].map((k) => <span key={k} className="h-[22px] w-[28px] rounded-md bg-slate-700/80" />)}
+                  </div>
+                  <Squelette className="mt-2.5" largeur="80%" />
+                  <Squelette className="mt-1.5" largeur="55%" />
+                </div>
+              ))}
+            </div>
+          </div>
+        }
+      />
     );
   }
 
@@ -1930,12 +1973,48 @@ function MarcheCotes({ courseId, partants, statut, connecte, authLoading }: { co
   if (!connecte) {
     if (authLoading) return null;
     return (
-      <CompteGratuitCta
-        icone={TrendingUp}
-        titre="Marché des cotes en direct"
-        texte="Suivez l'évolution de la cote de chaque partant, rafraîchie toutes les 5 secondes jusqu'au départ : qui est joué, qui décroche. Réservé aux comptes BlackTurf — la création est gratuite."
-        suite={`/courses/${courseId}`}
-      />
+      <div className={cn(CARTE_CLS, "p-4 sm:p-5")}>
+        <div className="mb-3 flex items-center gap-2">
+          <IconeTuile icone={TrendingUp} />
+          <h3 style={{ margin: 0, fontFamily: CX.sg, fontSize: 15, fontWeight: 700, color: CX.ink2 }}>Marché des cotes</h3>
+          <PastilleDirect />
+        </div>
+        {/* Le décor reprend les cartes du marché (une par cheval, courbe de cote) en
+            formes neutres : aucune cote n'y est dessinée. */}
+        <VoileAbonne
+          icone={TrendingUp}
+          titre="L'évolution de la cote de chaque partant"
+          texte="Rafraîchie toutes les 5 secondes jusqu'au départ : qui est joué, qui décroche. Réservé aux comptes BlackTurf — la création est gratuite."
+          action={
+            <>
+              <Link
+                href={`/inscription?suite=${encodeURIComponent(`/courses/${courseId}`)}`}
+                className="inline-flex min-h-10 items-center rounded-xl bg-gradient-to-b from-amber-400 to-amber-500 px-5 text-[13px] font-bold text-stone-900 ring-1 ring-inset ring-amber-600/30 shadow-[inset_0_1px_0_rgba(255,255,255,.5),0_10px_22px_-12px_rgba(146,64,14,.8)] transition-transform hover:-translate-y-0.5"
+              >
+                Créer mon compte gratuit
+              </Link>
+              <Link href={`/login?redirect=${encodeURIComponent(`/courses/${courseId}`)}`} className="text-[12.5px] font-medium text-stone-600 underline underline-offset-2 hover:text-stone-900">
+                J&apos;ai déjà un compte
+              </Link>
+            </>
+          }
+          decor={
+            <div className="grid grid-cols-2 gap-2.5 py-1 sm:grid-cols-4">
+              {partants.slice(0, 8).map((p, i) => (
+                <div key={p.numero} className="rounded-2xl bg-white p-3 ring-1 ring-[#ECE7DC]">
+                  <div className="flex items-center gap-2">
+                    <span className="inline-flex h-[22px] min-w-[28px] items-center justify-center rounded-md bg-slate-800 text-[11px] font-extrabold text-white">{p.numero}</span>
+                    <Squelette largeur="60%" />
+                  </div>
+                  <svg viewBox="0 0 100 30" className="mt-2 h-8 w-full" aria-hidden="true">
+                    <path d={i % 2 ? "M0 8 C25 10 45 18 60 20 S85 26 100 27" : "M0 24 C20 22 40 12 60 14 S85 6 100 5"} fill="none" stroke={i % 2 ? "#E11D48" : "#10B981"} strokeWidth="2" strokeLinecap="round" opacity=".6" />
+                  </svg>
+                </div>
+              ))}
+            </div>
+          }
+        />
+      </div>
     );
   }
 
@@ -2358,16 +2437,48 @@ export default function CoursePage({
   // l'aperçu public). La moyenne des trois premiers qu'on faisait ici donnait 80
   // là où le programme affichait 84 pour la même course. Le repli sur le score
   // du rang 1 ne sert que le temps d'un déploiement front/back décalé.
+  const abonne = Boolean(user && !["free", "decouverte"].includes(user.plan));
+
+  // Course courue : l'aperçu public nomme TOUT le classement figé avant le
+  // départ. On le met alors dans la forme des prédictions abonné, pour que le
+  // visiteur voie exactement les mêmes cartes, la même table et le même bilan
+  // qu'un abonné — plus rien n'y est jouable. Avant la course, rien de tel :
+  // l'aperçu ne nomme que la queue du classement.
+  const predsPubliques: Prediction[] | null =
+    !predictions?.length && apercu?.revele
+      ? apercu.classement
+          .filter((l) => l.numero != null)
+          .map((l) => ({
+            prediction_id: `apercu-${l.numero}`,
+            participation_id: course.partants.find((p) => p.numero === l.numero)?.participation_id ?? `apercu-${l.numero}`,
+            numero: l.numero!,
+            nom_cheval: l.nom ?? "",
+            proba_top1: l.proba_top1 ?? 0,
+            proba_top3: l.proba_top3 ?? 0,
+            proba_top1_low: null,
+            proba_top1_high: null,
+            rang_predit: l.rang,
+            confidence_score: null,
+            cote_pmu: l.cote ?? null,
+            cote_juste: l.cote_juste ?? null,
+            value_bet: null,
+          }))
+      : null;
+  /** Prédictions affichées : celles de l'abonné, sinon le classement public révélé. */
+  const predsVue = predictions?.length ? predictions : predsPubliques;
+
   const confGlobal: number | null =
     predMeta.confiance
     ?? predictions?.find((p) => p.rang_predit === 1)?.confidence_score
+    // Même chiffre, servi publiquement par l'aperçu (visiteur et plan gratuit).
+    ?? apercu?.confiance
     ?? null;
 
   // Paris de valeur = ceux servis par /predictions, c'est-à-dire la table du cycle
   // (les mêmes que /value-bets). La carte montre le MEILLEUR par espérance, quel
   // que soit son niveau : avant, un ★★ était tu (« aucune valeur franche ») alors
   // qu'il figurait sur la page dédiée. Le bandeau, lui, reste réservé aux ★★★+.
-  const vbPreds = (predictions ?? []).filter((p) => p.value_bet);
+  const vbPreds = (predsVue ?? []).filter((p) => p.value_bet);
   const topVB = vbPreds.length
     ? vbPreds.reduce((a, b) => (b.value_bet!.ev_max > a.value_bet!.ev_max ? b : a))
     : undefined;
@@ -2625,19 +2736,24 @@ export default function CoursePage({
                 </Pastille>
               ) : undefined}
             />
-            {(!predictions || predictions.length === 0) && (
+            {!predsVue?.length && !apercu?.disponible && (
               <ApercuAnalyseCard
                 apercu={apercu}
                 statut={course.statut}
                 partants={course.partants}
                 nbPartants={course.nb_partants}
                 connecte={Boolean(user)}
-                abonne={Boolean(user && !["free", "decouverte"].includes(user.plan))}
+                abonne={abonne}
               />
             )}
+            {/* Non-abonné, course à venir : les quatre cartes de l'abonné, le nom
+                des chevaux en moins. */}
+            {!predsVue?.length && apercu?.disponible && !apercu.revele && (
+              <StatsApercu apercu={apercu} nbPartants={course.nb_partants} connecte={Boolean(user)} />
+            )}
         {/* ── 4 STAT CARDS ── */}
-        {predictions && predictions.length > 0 && (() => {
-          const fav = predictions.find((p) => p.rang_predit === 1) ?? predictions[0];
+        {predsVue && predsVue.length > 0 && (() => {
+          const fav = predsVue.find((p) => p.rang_predit === 1) ?? predsVue[0];
           const favCote = liveCoteMap[fav.numero] ?? fav.cote_pmu;
           return (
             <div className="grid grid-cols-2 gap-2.5 sm:gap-3 lg:grid-cols-4">
@@ -2679,6 +2795,11 @@ export default function CoursePage({
                     ) : null}
                     <span className="mt-2 block text-[11.5px] font-semibold text-emerald-800">Voir sa fiche ›</span>
                   </>
+                ) : predsPubliques && apercu && apercu.nb_value_bets > 0 ? (
+                  <p className="m-0 mt-2 text-[12px] leading-snug text-stone-500">
+                    <b className="font-bold text-emerald-700">{apercu.nb_value_bets}</b> détecté{apercu.nb_value_bets > 1 ? "s" : ""} avant le départ
+                    {apercu.ev_max_pct != null ? <>, jusqu&apos;à <b className="font-bold text-emerald-700">+{apercu.ev_max_pct} %</b> d&apos;espérance</> : null}.
+                  </p>
                 ) : (
                   <p className="m-0 mt-2 text-[12px] leading-snug text-stone-500">Aucun pari de valeur détecté sur cette course.</p>
                 )}
@@ -2731,28 +2852,56 @@ export default function CoursePage({
           {/* Visiteur anonyme : c'est le plus gros du trafic (référencement).
               Lui cacher la table, c'est lui demander de payer pour un produit
               qu'il n'a jamais vu — il reçoit donc le même aperçu. */}
-          {!user && apercu?.disponible && (
-            <ClassementApercu apercu={apercu} onLegende={() => setShowGlossaire(true)} />
-          )}
-
-          {user && (["free", "decouverte"].includes(user.plan) ? (
-            // Découverte / Free : au lieu d'un cadenas muet, la table réelle avec
-            // ses vraies colonnes — probabilités visibles, identités masquées,
-            // bas de classement offert. Il faut voir ce qu'on achète.
-            apercu?.disponible ? (
-              <ClassementApercu apercu={apercu} onLegende={() => setShowGlossaire(true)} />
-            ) : (
-              <ClassementVerrouille
-                titre="Le classement de l'algorithme"
-                texte="Probabilité de victoire et de place pour chaque partant, cote juste, signaux retenus contre le cheval comme en sa faveur. Inclus dès la formule Standard."
-                action={
-                  <Button variant="brand" size="sm" asChild>
-                    <Link href="/tarifs">Passer Standard — 12€/mois</Link>
-                  </Button>
+          {!abonne && (predsPubliques?.length ? (
+            // Course courue : la table abonné, telle quelle.
+            <ClassementAlgo
+              predictions={predsPubliques}
+              signauxParNumero={(() => {
+                const map: Record<number, ClassementSignal[]> = {};
+                for (const l of apercu?.classement ?? []) {
+                  if (l.numero != null && l.signaux?.length) {
+                    map[l.numero] = l.signaux.map((sg) => ({ ...sg, score: 0 }));
+                  }
                 }
-              />
-            )
-          ) : loadingPred ? (
+                return map;
+              })()}
+              positionsReelles={(() => {
+                const map: Record<number, number> = {};
+                for (const c of resultats?.classement ?? []) {
+                  if (c.position != null) map[c.numero] = c.position;
+                }
+                return map;
+              })()}
+              nonPartants={new Set(course.partants.filter((p) => p.non_partant).map((p) => p.numero))}
+              onLegende={() => setShowGlossaire(true)}
+            />
+          ) : apercu?.disponible ? (
+            // Course à venir : la même table, les noms du haut du classement en moins.
+            <ClassementApercu
+              apercu={apercu}
+              connecte={Boolean(user)}
+              marche={(() => {
+                const cotes = course.partants
+                  .filter((p) => !p.non_partant)
+                  .map((p) => ({ numero: p.numero, cote: liveCoteMap[p.numero] ?? p.cote_pmu }))
+                  .filter((x): x is { numero: number; cote: number } => x.cote != null && x.cote > 1);
+                return cotes.length ? cotes.reduce((a, b) => (b.cote < a.cote ? b : a)) : null;
+              })()}
+              onLegende={() => setShowGlossaire(true)}
+            />
+          ) : user ? (
+            <ClassementVerrouille
+              titre="Le classement de l'algorithme"
+              texte="Probabilité de victoire et de place pour chaque partant, cote juste, signaux retenus contre le cheval comme en sa faveur. Inclus dès la formule Standard."
+              action={
+                <Button variant="brand" size="sm" asChild>
+                  <Link href="/tarifs">Passer Standard — 12€/mois</Link>
+                </Button>
+              }
+            />
+          ) : null)}
+
+          {abonne && (loadingPred ? (
             <div className="flex justify-center rounded-2xl border border-stone-200 bg-white py-10">
               <Loader2 className="h-5 w-5 animate-spin text-stone-600" />
             </div>
@@ -2825,6 +2974,8 @@ export default function CoursePage({
               et un bouton d'abonnement serait au mieux du bruit. */}
           {(!predictions || predictions.length === 0) && (
             <>
+              {/* La carte « Analyse BlackTurf » de l'abonné, contenu réservé. */}
+              {apercu?.disponible && !apercu.revele && <AnalyseVerrouillee connecte={Boolean(user)} />}
               {/* Ce que l'abonnement ouvre : un inventaire de capacités réelles,
                   à la place des trois pavés de prose qui le décrivaient. Réservé
                   aux courses ANALYSÉES : ailleurs, il n'y a rien à ouvrir. */}
@@ -3258,7 +3409,9 @@ export default function CoursePage({
           <>
           <PartantsSection
             partants={course.partants}
-            predictions={predictions}
+            predictions={predsVue}
+            apercu={!abonne && !predsVue?.length && apercu?.disponible ? apercu : null}
+            connecte={Boolean(user)}
             liveCoteMap={liveCoteMap}
             confGlobal={confGlobal}
             chevalOuvert={chevalCible}
@@ -3355,8 +3508,8 @@ export default function CoursePage({
                 {resultats && (
                   <ResultatsSection resultats={resultats} partants={course.partants} />
                 )}
-                {resultats && predictions && predictions.length > 0 && (
-                  <PronosticVerdictSection predictions={predictions} classement={resultats.classement} />
+                {resultats && predsVue && predsVue.length > 0 && (
+                  <PronosticVerdictSection predictions={predsVue} classement={resultats.classement} />
                 )}
                 {/* Le teaser « favori de l'IA » (funnel Free, 16/08) a été retiré le
                     20/08 : le bilan du plan ci-dessous, désormais visible par tous,

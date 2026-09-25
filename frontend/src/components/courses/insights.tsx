@@ -1,5 +1,5 @@
 "use client";
-import { CARTE_CLS, IconeTuile, SG } from "@/components/courses/course-ui";
+import { BoutonAbonnement, CARTE_CLS, IconeTuile, PastilleReserve, SG, VoileAbonne } from "@/components/courses/course-ui";
 import { CasaqueNumero, IdentiteCheval } from "@/components/courses/identite-cheval";
 
 /**
@@ -709,11 +709,24 @@ export function EnjeuxParChevalCard({ courseId, courseTerminee, poolTotalEur }: 
 
   if (erreur === 401 || erreur === 403) {
     return (
-      <Card title="L'argent, cheval par cheval" icon={Coins}>
-        <p className="flex items-start gap-2 text-xs leading-5 text-muted-foreground">
-          <Lock className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-700" aria-hidden="true" />
-          L&apos;argent réellement misé sur chaque cheval, et les afflux en direct.
-        </p>
+      <Card title="L'argent, cheval par cheval" icon={Coins} aside={<PastilleReserve libelle="Standard" />}>
+        {/* Décor : barres neutres, aucune somme — le montant réel reste réservé. */}
+        <VoileAbonne
+          icone={Coins}
+          titre="L'argent réellement misé sur chaque cheval"
+          texte="La masse jouée cheval par cheval et les afflux en direct jusqu'au départ : qui les parieurs soutiennent vraiment."
+          action={<BoutonAbonnement connecte={erreur === 403} />}
+          decor={
+            <div className="space-y-2.5 py-2">
+              {[82, 64, 51, 38, 27, 18].map((w, i) => (
+                <div key={w} className="flex items-center gap-3">
+                  <span className="h-[22px] w-[28px] shrink-0 rounded-md bg-slate-700/80" />
+                  <span className="h-3 rounded-full bg-gradient-to-r from-amber-300 to-amber-500" style={{ width: `${w}%`, opacity: 1 - i * 0.1 }} />
+                </div>
+              ))}
+            </div>
+          }
+        />
       </Card>
     );
   }
@@ -1331,42 +1344,70 @@ export function CtaAbonnementBand({ connecte, revele }: { connecte: boolean; rev
     ? connecte ? "Voir les courses à venir" : "Essayer 7 jours gratuitement"
     : connecte ? "Débloquer le pronostic — 12 €/mois" : "Voir le pronostic — essai 7 jours gratuit";
 
+  // Ce que débloque l'abonnement, en quatre mots — les mêmes onglets que la page.
+  const inclus = revele
+    ? ["Classement complet avant le départ", "Signaux pour et contre", "Plan de mise sur votre budget", "Alertes de valeur"]
+    : ["Les noms du podium", "Cote juste et chance de chaque cheval", "L'analyse rédigée", "Votre plan de mise"];
+
   return (
-    <section className="overflow-hidden rounded-2xl border border-amber-200 bg-gradient-to-br from-amber-50 via-white to-white p-5 sm:p-6">
-      <h2 className="font-display text-[17px] font-bold leading-snug text-slate-900 sm:text-[19px]">
-        La cote dit qui les parieurs préfèrent.
-        <span className="block text-amber-800">Elle ne dit pas qui a le plus de chances.</span>
-      </h2>
-      <p className="mt-2 max-w-xl text-[13px] leading-6 text-stone-600">
-        {revele
-          ? "Sur les courses à venir, le classement complet, les signaux et le plan de mise sont ouverts aux abonnés — avant le départ, pas après."
-          : "L'abonnement ouvre les noms du classement, les signaux de chaque cheval et le plan de mise ajusté à votre budget."}
-      </p>
-      <div className="mt-4 flex flex-wrap items-center gap-3">
-        <a
-          href={href}
-          className="inline-flex min-h-11 items-center gap-2 rounded-xl bg-amber-500 px-5 text-[13.5px] font-semibold text-brand-dark shadow-[0_10px_24px_-14px_rgba(146,64,14,.85)] transition-colors hover:bg-amber-600"
-        >
-          {libelle}
-          <ArrowRight className="h-4 w-4" aria-hidden="true" />
-        </a>
-        <a href="/tarifs" className="text-[12.5px] font-medium text-stone-600 underline underline-offset-2 hover:text-amber-800">
-          Comparer les formules
-        </a>
+    <section className="relative overflow-hidden rounded-[22px] bg-gradient-to-br from-[#1C1917] via-[#231F1B] to-[#2B2419] p-5 text-white ring-1 ring-amber-500/20 shadow-[0_24px_48px_-28px_rgba(28,25,23,.9)] sm:p-7">
+      {/* Halo doré : relief, sans image */}
+      <span aria-hidden="true" className="pointer-events-none absolute -right-24 -top-24 h-72 w-72 rounded-full bg-amber-500/20 blur-3xl" />
+      <span aria-hidden="true" className="pointer-events-none absolute -bottom-28 left-10 h-56 w-56 rounded-full bg-amber-300/10 blur-3xl" />
+      <div className="relative grid gap-6 lg:grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)] lg:items-center">
+        <div>
+          <p className="m-0 inline-flex items-center gap-1.5 rounded-full bg-amber-400/15 px-2.5 py-1 text-[10.5px] font-bold uppercase tracking-[.12em] text-amber-300 ring-1 ring-inset ring-amber-400/30">
+            <Sparkles className="h-3 w-3" aria-hidden="true" /> BlackTurf Standard
+          </p>
+          <h2 className="mt-3 font-display text-[19px] font-bold leading-snug text-white sm:text-[22px]">
+            La cote dit qui les parieurs préfèrent.
+            <span className="block text-amber-300">Elle ne dit pas qui a le plus de chances.</span>
+          </h2>
+          <p className="mt-2 max-w-xl text-[13px] leading-6 text-stone-300">
+            {revele
+              ? "Sur les courses à venir, le classement complet, les signaux et le plan de mise sont ouverts aux abonnés — avant le départ, pas après."
+              : "L'abonnement ouvre les noms du classement, les signaux de chaque cheval et le plan de mise ajusté à votre budget."}
+          </p>
+          <div className="mt-5 flex flex-wrap items-center gap-3">
+            <a
+              href={href}
+              className="inline-flex min-h-11 items-center gap-2 rounded-xl bg-gradient-to-b from-amber-300 to-amber-500 px-5 text-[13.5px] font-bold text-stone-900 shadow-[inset_0_1px_0_rgba(255,255,255,.55),0_12px_26px_-12px_rgba(245,158,11,.9)] transition-[transform,filter] hover:-translate-y-0.5 hover:brightness-105"
+            >
+              {libelle}
+              <ArrowRight className="h-4 w-4" aria-hidden="true" />
+            </a>
+            <a href="/tarifs" className="text-[12.5px] font-medium text-stone-300 underline underline-offset-2 hover:text-amber-300">
+              Comparer les formules
+            </a>
+          </div>
+          {/* La carte est exigée par Stripe (payment_method_collection="always") :
+              écrire « sans CB » ici contredirait le tunnel et la page /tarifs. */}
+          <p className="mt-3 text-[11.5px] text-stone-400">
+            Sans engagement · carte requise, aucun prélèvement avant la fin de l&apos;essai
+          </p>
+        </div>
+
+        <div className="rounded-2xl bg-white/[.04] p-4 ring-1 ring-inset ring-white/10 backdrop-blur-sm">
+          <ul className="m-0 space-y-2.5 p-0">
+            {inclus.map((t) => (
+              <li key={t} className="flex items-center gap-2.5 text-[13px] text-stone-100">
+                <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-400/15 text-emerald-300 ring-1 ring-inset ring-emerald-400/30">
+                  <Check className="h-3 w-3" aria-hidden="true" />
+                </span>
+                {t}
+              </li>
+            ))}
+          </ul>
+          {precision != null && (
+            <p className="m-0 mt-4 flex flex-wrap items-baseline gap-x-2 border-t border-white/10 pt-3 text-[12px] text-stone-300">
+              <span className="font-display text-[22px] font-bold leading-none tabular-nums text-amber-300">
+                {Math.round(precision * 100)} %
+              </span>
+              <span>des gagnants dans le top 3 du modèle, sur l&apos;historique vérifié</span>
+            </p>
+          )}
+        </div>
       </div>
-      {precision != null && (
-        <p className="mt-4 flex flex-wrap items-baseline gap-x-2 text-[12.5px] text-stone-600">
-          <span className="font-display text-[20px] font-bold leading-none tabular-nums text-slate-900">
-            {Math.round(precision * 100)} %
-          </span>
-          <span>des gagnants sont dans le top 3 du modèle, sur l&apos;historique vérifié</span>
-        </p>
-      )}
-      {/* La carte est exigée par Stripe (payment_method_collection="always") :
-          écrire « sans CB » ici contredirait le tunnel et la page /tarifs. */}
-      <p className="mt-3 text-[11.5px] text-stone-600">
-        Sans engagement · carte requise, aucun prélèvement avant la fin de l&apos;essai
-      </p>
     </section>
   );
 }
