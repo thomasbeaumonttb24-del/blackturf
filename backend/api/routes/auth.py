@@ -13,6 +13,7 @@ from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 from pydantic import BaseModel, EmailStr, Field, field_validator
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import func, select
 import httpx
@@ -125,6 +126,9 @@ class RegisterRequest(BaseModel):
     # Politique mot de passe : 10-128 chars (bcrypt tronque >72 octets → cap),
     # pas uniquement lettres ni uniquement chiffres (anti mots de passe triviaux).
     password: str = Field(min_length=10, max_length=128)
+    # Nom public (classement du Défi du mois, Communauté). Obligatoire : c'est
+    # lui qui s'affiche partout à la place du prénom ou de l'e-mail.
+    pseudo: str = Field(min_length=1, max_length=40)
     nom: Optional[str] = None
     prenom: Optional[str] = None
 
@@ -181,7 +185,9 @@ class UserMeResponse(BaseModel):
     profil_risque: str
     email_verified: bool
     is_admin: bool = False
-    bankroll_initiale: Optional[float]
+    # None = compte créé avant le pseudo obligatoire (ou via Google) : le front
+    # le demande avant tout le reste.
+    pseudo: Optional[str] = None
     created_at: datetime
     # Essai ouvert mais bloqué faute de carte enregistrée. Sans ce signal, le
     # compte se retrouve en `free` sans la moindre explication — l'utilisateur
@@ -376,6 +382,7 @@ async def register(body: RegisterRequest,
     """
     from services.adresse_email import AdresseRefusee, controler
     from services.email_verification import email_confirme
+    from services.pseudo import PseudoRefuse, normaliser, verifier_disponible
 
     try:
         email = await controler(body.email)
@@ -387,6 +394,12 @@ async def register(body: RegisterRequest,
         select(User).where(func.lower(User.email) == email)
     )).scalar_one_or_none()
 
+    try:
+        pseudo = normaliser(body.pseudo)
+        await verifier_disponible(db, pseudo, existant.user_id if existant else None)
+    except PseudoRefuse as e:
+        raise HTTPException(status_code=e.code, detail=str(e))
+
     if existant is not None:
         # Un compte jamais confirmé ne prouve RIEN : celui qui l'a ouvert n'a
         # pas montré qu'il relevait cette boîte. Le laisser réserver l'adresse
@@ -397,7 +410,12 @@ async def register(body: RegisterRequest,
         existant.hashed_password = _hash(body.password)
         existant.nom = body.nom or existant.nom
         existant.prenom = body.prenom or existant.prenom
-        await db.commit()
+        existant.pseudo = pseudo
+        try:
+            await db.commit()
+        except IntegrityError:
+            await db.rollback()
+            raise HTTPException(status_code=409, detail="Ce pseudo est déjà pris.")
         await _envoyer_lien_verification(existant)
         log.info("auth.register.reprise_non_confirme", user_id=existant.user_id)
         return _reponse_verification(email)
@@ -408,10 +426,16 @@ async def register(body: RegisterRequest,
         hashed_password=_hash(body.password),
         nom=body.nom,
         prenom=body.prenom,
+        pseudo=pseudo,
         plan="free",
     )
     db.add(user)
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError:
+        # Deux inscriptions simultanées sur le même pseudo : l'index unique tranche.
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="Ce pseudo est déjà pris.")
     await db.refresh(user)
     log.info("auth.register", user_id=user.user_id, email=user.email)
 
@@ -656,7 +680,7 @@ async def me(user: User = Depends(get_current_user), db: AsyncSession = Depends(
         profil_risque=user.profil_risque,
         email_verified=user.email_verified,
         is_admin=bool(user.is_admin),
-        bankroll_initiale=user.bankroll_initiale,
+        pseudo=user.pseudo,
         created_at=user.created_at,
         essai_bloque_sans_carte=bloque is not None,
         essai_fin=bloque.essai_fin if bloque else None,
@@ -672,32 +696,39 @@ async def update_me(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    # Validation par champ : sans elle, profil_risque/bankroll_initiale étaient posés
-    # bruts (ex. "abc", négatif, profil inconnu) → calculs de plan de mise corrompus.
+    # Validation par champ : sans elle, profil_risque était posé brut (ex. "abc",
+    # profil inconnu) → calculs de plan de mise corrompus.
+    from services.pseudo import PseudoRefuse, normaliser, verifier_disponible
     VALID_PROFILS = {"conservateur", "equilibre", "agressif"}
     updates: dict = {}
     for k, v in body.items():
-        if k not in {"nom", "prenom", "profil_risque", "bankroll_initiale"}:
+        if k not in {"nom", "prenom", "profil_risque", "pseudo"}:
             continue
         if k == "profil_risque":
             if v not in VALID_PROFILS:
                 raise HTTPException(status_code=422, detail="profil_risque invalide")
             updates[k] = v
-        elif k == "bankroll_initiale":
+        elif k == "pseudo":
             try:
-                fv = float(v)
-            except (TypeError, ValueError):
-                raise HTTPException(status_code=422, detail="bankroll_initiale invalide")
-            if not (0 < fv <= 1_000_000):
-                raise HTTPException(status_code=422, detail="bankroll_initiale hors plage")
-            updates[k] = round(fv, 2)
+                p = normaliser(v, admin=bool(user.is_admin))
+                await verifier_disponible(db, p, user.user_id)
+            except PseudoRefuse as e:
+                raise HTTPException(status_code=e.code, detail=str(e))
+            updates[k] = p
         else:  # nom / prenom
             if v is None:
                 continue
             updates[k] = str(v).strip()[:100]
     for k, v in updates.items():
         setattr(user, k, v)
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="Ce pseudo est déjà pris.")
+    if "pseudo" in updates:
+        from services.defi import invalider_classement
+        invalider_classement()
     return {"ok": True}
 
 

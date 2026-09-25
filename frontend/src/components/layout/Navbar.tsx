@@ -234,12 +234,14 @@ export function Navbar() {
                       : "text-gray-600 hover:bg-[#f5f6f2] hover:text-[#17231f]"
                   )}
                 >
-                  {Icon && <Icon className="hidden xl:block h-3.5 w-3.5" />}
+                  {Icon && <Icon className="hidden 2xl:block h-3.5 w-3.5" />}
                   {/* Entre 1 024 et 1 280 px, les noms complets se chevauchaient : la
                       forme courte (celle de la barre du bas sur téléphone) prend le
                       relais, le nom complet revient dès qu'il y a la place. */}
-                  <span className="xl:hidden">{link.court}</span>
-                  <span className="hidden xl:inline">{link.label}</span>
+                  {/* Avec l'entrée « Défi du mois » (7 liens), les noms complets ne
+                      tiennent qu'à partir de 1 536 px : en dessous, forme courte. */}
+                  <span className="2xl:hidden">{link.court}</span>
+                  <span className="hidden 2xl:inline">{link.label}</span>
                 </Link>
               );
             })}

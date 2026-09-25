@@ -37,9 +37,8 @@ LONGUEUR_MAX = 500
 INTERVALLE_MIN_S = 2
 PLANS_ABONNES = ("starter", "standard", "expert")
 
-PSEUDO_RE = re.compile(r"^[A-Za-z0-9À-ÖØ-öø-ÿ_.-]{3,20}$")
-# Sous-chaînes qui feraient passer un membre pour l'équipe du site.
-MOTS_RESERVES = ("admin", "blackturf", "modera", "modéra", "modo", "support", "staff")
+# Règles du pseudo (format, mots réservés, unicité) : services/pseudo.py, communes
+# à l'inscription, au profil et au salon.
 
 
 # ─────────────────────────────────────────────
@@ -194,23 +193,12 @@ async def choisir_pseudo(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    pseudo = body.pseudo.strip()
-    if not PSEUDO_RE.match(pseudo):
-        raise HTTPException(
-            status_code=422,
-            detail="Pseudo : 3 à 20 caractères — lettres, chiffres, point, tiret ou soulignement.",
-        )
-    if not user.is_admin and any(m in pseudo.lower() for m in MOTS_RESERVES):
-        raise HTTPException(status_code=422, detail="Ce pseudo est réservé à l'équipe du site.")
-
-    pris = await db.scalar(
-        select(User.user_id).where(
-            func.lower(User.pseudo) == pseudo.lower(),
-            User.user_id != user.user_id,
-        )
-    )
-    if pris:
-        raise HTTPException(status_code=409, detail="Ce pseudo est déjà pris.")
+    from services.pseudo import PseudoRefuse, normaliser, verifier_disponible
+    try:
+        pseudo = normaliser(body.pseudo, admin=bool(user.is_admin))
+        await verifier_disponible(db, pseudo, user.user_id)
+    except PseudoRefuse as e:
+        raise HTTPException(status_code=e.code, detail=str(e))
 
     user.pseudo = pseudo
     try:

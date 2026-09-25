@@ -13,7 +13,7 @@ MDP = "MotDePasse123"
 
 async def _inscrire(client: AsyncClient, email: str = "cookie@blackturf.fr"):
     return await client.post("/api/v1/auth/register", json={
-        "email": email, "password": MDP, "nom": "T", "prenom": "U",
+        "email": email, "password": MDP, "pseudo": "Joueur4", "nom": "T", "prenom": "U",
     })
 
 

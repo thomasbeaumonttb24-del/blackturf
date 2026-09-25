@@ -16,8 +16,13 @@ async def test_chat_exige_un_compte(client):
     assert (await client.post(f"{BASE}/messages", json={"contenu": "yo"})).status_code == 401
 
 
-async def test_compte_gratuit_ecrit_apres_avoir_choisi_un_pseudo(client, inscrire):
+async def test_compte_gratuit_ecrit_apres_avoir_choisi_un_pseudo(client, inscrire, db):
+    # Compte d'avant le pseudo obligatoire (ou ouvert via Google) : il n'en a pas.
+    from sqlalchemy import update
+    from db.models import User
     h = await inscrire(email="gratuit@blackturf.fr")
+    await db.execute(update(User).where(User.email == "gratuit@blackturf.fr").values(pseudo=None))
+    await db.commit()
 
     moi = (await client.get(f"{BASE}/moi", headers=h)).json()
     assert moi["pseudo"] is None and moi["banni"] is False

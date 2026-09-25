@@ -1,5 +1,6 @@
 "use client";
 
+import { champPseudo } from "@/lib/pseudo";
 import { useState, useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -18,6 +19,7 @@ import { planLabel, formatDate, cn } from "@/lib/utils";
 const profileSchema = z.object({
   prenom: z.string().min(1, "Requis"),
   nom: z.string().optional(),
+  pseudo: champPseudo,
   profil_risque: z.enum(["conservateur", "equilibre", "agressif"]),
 });
 type ProfileForm = z.infer<typeof profileSchema>;
@@ -145,7 +147,7 @@ export default function ProfilPage() {
   const { register, handleSubmit, watch, setValue, reset, formState: { errors } } = useForm<ProfileForm>({
     resolver: zodResolver(profileSchema),
     defaultValues: {
-      prenom: "", nom: "", profil_risque: "equilibre",
+      prenom: "", nom: "", pseudo: "", profil_risque: "equilibre",
     },
   });
 
@@ -156,6 +158,7 @@ export default function ProfilPage() {
       reset({
         prenom: user.prenom || "",
         nom: user.nom || "",
+        pseudo: user.pseudo || "",
         profil_risque: (user.profil_risque as "conservateur" | "equilibre" | "agressif") || "equilibre",
       });
     }
@@ -179,8 +182,9 @@ export default function ProfilPage() {
       await authApi.updateMe(data);
       await refreshUser();
       toast.success("Profil mis à jour");
-    } catch {
-      toast.error("Erreur lors de la sauvegarde");
+    } catch (e: unknown) {
+      const d = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;
+      toast.error(typeof d === "string" ? d : "Erreur lors de la sauvegarde");
     } finally {
       setSavingProfile(false);
     }
@@ -344,6 +348,10 @@ export default function ProfilPage() {
                     <input {...register("nom")} className={inputCls} placeholder="Dupont" />
                   </Field>
                 </div>
+
+                <Field label="Pseudo" error={errors.pseudo?.message}>
+                  <input {...register("pseudo")} className={inputCls} maxLength={20} autoComplete="nickname" placeholder="Turfiste75" />
+                </Field>
 
                 <Field label="E-mail">
                   <input value={user.email} disabled className={inputCls} />

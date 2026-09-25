@@ -43,6 +43,10 @@ MIN_PARIS_CLASSEMENT = 10
 # Au-delà, on n'est plus dans le pronostic mais dans l'arrosage de la course.
 MAX_PARIS_PAR_COURSE = 3
 VERROU_AVANT_DEPART = timedelta(minutes=2)
+# Un pari gagnant dont le PMU n'a toujours pas publié le rapport 72 h après la
+# course est remboursé : sans cela il resterait « en attente » à vie et bloquerait
+# la remise des récompenses du mois (qui exige zéro pari en attente).
+DELAI_RAPPORT_MAX = timedelta(hours=72)
 
 # Rang → (plan offert, durée). Remis par l'admin après vérification du compte.
 RECOMPENSES: dict[int, tuple[str, int]] = {
@@ -161,6 +165,8 @@ async def engager_pari(session, user: User, course_id: str, type_pari: str,
                        now: Optional[datetime] = None) -> DefiPari:
     now = now or datetime.now(timezone.utc)
 
+    if not user.pseudo:
+        raise DefiErreur("Choisissez un pseudo pour apparaître au classement avant de jouer.")
     if type_pari not in TYPES_DEFI:
         raise DefiErreur("Type de pari non proposé dans le défi.")
     nb_attendu, drapeau = TYPES_DEFI[type_pari]
@@ -270,6 +276,11 @@ async def regler_course(session, course_id: str) -> int:
             p.statut, p.rapport, p.points_retour = "perd", None, 0.0
         p.regle_at = now
         n += 1
+    if _utc(course.date_heure) + DELAI_RAPPORT_MAX < now:
+        for p in paris:
+            if p.statut == "en_attente":
+                p.statut, p.rapport, p.points_retour, p.regle_at = "rembourse", 1.0, float(p.points), now
+                n += 1
     if n:
         await session.commit()
         invalider_classement()

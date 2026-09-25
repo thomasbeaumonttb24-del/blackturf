@@ -4,6 +4,7 @@ SQLite en mémoire pour isolation, pas de dépendance externe.
 Lifespan patché pour éviter connexions PostgreSQL/Redis en CI.
 """
 import os
+import re
 import pytest
 import pytest_asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -191,6 +192,8 @@ async def inscrire(client, confirmer_adresse):
     """
     async def _inscrire(email: str = "test@blackturf.fr",
                         password: str = "TestPassword123!", **champs) -> dict[str, str]:
+        # Pseudo obligatoire à l'inscription : déduit de l'adresse s'il n'est pas donné.
+        champs.setdefault("pseudo", (re.sub(r"[^A-Za-z0-9_.-]", "", email.split("@")[0]) or "joueur")[:20].ljust(3, "0"))
         resp = await client.post("/api/v1/auth/register",
                                  json={"email": email, "password": password, **champs})
         assert resp.status_code == 200, f"register failed: {resp.text}"

@@ -96,7 +96,7 @@ export type InscriptionEnAttente = {
 
 export const authApi = {
   // L'inscription n'ouvre plus de session : elle envoie un lien de confirmation.
-  register: (data: { email: string; password: string; nom?: string; prenom?: string }) =>
+  register: (data: { email: string; password: string; pseudo: string; nom?: string; prenom?: string }) =>
     api.post<InscriptionEnAttente>("/auth/register", data),
   // Renvoi du lien SANS session : celui dont le lien a expiré ne peut plus se
   // connecter, donc plus rien demander depuis son profil.
@@ -224,6 +224,8 @@ export type DefiMoi = DefiStats & {
 };
 
 export type DefiCourse = {
+  /** Mois du défi auquel la course appartient (calendrier de Paris). */
+  mois: string;
   ouvert: boolean;
   limite: string;
   solde: number | null;

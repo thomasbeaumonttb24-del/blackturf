@@ -13,6 +13,7 @@ import { Loader2, Check, MailCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/useAuth";
 import { champMotDePasse, MOT_DE_PASSE_AIDE, messageErreurApi } from "@/lib/motdepasse";
+import { champPseudo, PSEUDO_AIDE } from "@/lib/pseudo";
 import { authApi } from "@/lib/api";
 import { cheminInterne, memoriserIntention, planEssai } from "@/lib/intentionEssai";
 import { AVANTAGES_COMPTE_GRATUIT } from "@/components/billing/CompteGratuitCta";
@@ -20,6 +21,7 @@ import { AVANTAGES_COMPTE_GRATUIT } from "@/components/billing/CompteGratuitCta"
 const schema = z.object({
   prenom: z.string().min(1, "Prénom requis"),
   nom: z.string().optional(),
+  pseudo: champPseudo,
   email: z.string().email("E-mail invalide"),
   password: champMotDePasse,
 });
@@ -153,6 +155,26 @@ function InscriptionContent() {
                     className="w-full rounded-lg border border-input bg-background px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-ring"
                   />
                 </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium mb-1.5" htmlFor="pseudo">Pseudo</label>
+                <input
+                  id="pseudo"
+                  {...register("pseudo")}
+                  type="text"
+                  placeholder="Turfiste75"
+                  maxLength={20}
+                  autoComplete="nickname"
+                  className="w-full rounded-lg border border-input bg-background px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-ring"
+                />
+                {errors.pseudo ? (
+                  <p className="text-xs text-destructive mt-1">{errors.pseudo.message}</p>
+                ) : (
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Votre nom public au classement du Défi du mois et dans la Communauté. {PSEUDO_AIDE}
+                  </p>
+                )}
               </div>
 
               <div>

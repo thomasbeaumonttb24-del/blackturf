@@ -25,6 +25,7 @@ def _cache_classement_vide():
 
 
 async def _user(db, email="joueur@blackturf.fr", **champs) -> User:
+    champs.setdefault("pseudo", email.split("@")[0][:20])
     u = User(user_id=str(uuid.uuid4()), email=email, email_verified=True,
              plan=champs.pop("plan", "free"), **champs)
     db.add(u)
@@ -114,6 +115,13 @@ async def test_paris_invalides_refuses(db, type_pari, chevaux, points, message):
         await defi.engager_pari(db, u, "C1", type_pari, chevaux, points)
 
 
+async def test_pseudo_obligatoire_pour_jouer(db):
+    u = await _user(db, pseudo=None)
+    await _course(db)
+    with pytest.raises(defi.DefiErreur, match="pseudo"):
+        await defi.engager_pari(db, u, "C1", "Simple Gagnant", [3], 10)
+
+
 async def test_depot_ferme_avant_le_depart(db):
     u = await _user(db)
     await _course(db, depart=MAINTENANT + timedelta(minutes=1))
@@ -188,6 +196,18 @@ async def test_rapport_pas_encore_publie_reste_en_attente(db):
     await defi.regler_course(db, "C1")
     await db.refresh(p)
     assert p.statut == "en_attente"
+
+
+async def test_rapport_jamais_publie_rembourse_apres_72h(db):
+    u = await _user(db)
+    c = await _course(db)
+    p = await defi.engager_pari(db, u, "C1", "Simple Placé", [3], 20)
+    await _arrivee(db, c, rapports={}, detail={})
+    c.date_heure = MAINTENANT - timedelta(hours=73)
+    await db.commit()
+    await defi.regler_course(db, "C1")
+    await db.refresh(p)
+    assert (p.statut, p.points_retour) == ("rembourse", 20.0)
 
 
 async def test_non_partant_apres_depot_rembourse(db):

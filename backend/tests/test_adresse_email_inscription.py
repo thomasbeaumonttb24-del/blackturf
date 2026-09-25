@@ -155,7 +155,7 @@ async def test_un_verdict_incertain_n_est_pas_mis_en_cache(dns, monkeypatch):
 # ── Bout en bout sur l'inscription ───────────────────────────────────────────
 async def test_l_inscription_refuse_une_adresse_jetable(client: AsyncClient, db: AsyncSession):
     resp = await client.post("/api/v1/auth/register", json={
-        "email": "testturf@yopmail.com", "password": "MotDePasse123",
+        "email": "testturf@yopmail.com", "password": "MotDePasse123", "pseudo": "Joueur6",
     })
 
     assert resp.status_code == 422
@@ -166,7 +166,7 @@ async def test_l_inscription_refuse_une_adresse_jetable(client: AsyncClient, db:
 
 async def test_l_inscription_refuse_une_faute_de_frappe(client: AsyncClient):
     resp = await client.post("/api/v1/auth/register", json={
-        "email": "jean@gmial.com", "password": "MotDePasse123",
+        "email": "jean@gmial.com", "password": "MotDePasse123", "pseudo": "Joueur7",
     })
     assert resp.status_code == 422
     assert "gmail.com" in resp.json()["detail"]
@@ -176,7 +176,7 @@ async def test_l_inscription_enregistre_l_adresse_normalisee(
     client: AsyncClient, db: AsyncSession
 ):
     resp = await client.post("/api/v1/auth/register", json={
-        "email": "  Jean.Dupont@BlackTurf.FR ", "password": "MotDePasse123",
+        "email": "  Jean.Dupont@BlackTurf.FR ", "password": "MotDePasse123", "pseudo": "Joueur8",
     })
 
     assert resp.status_code == 200
@@ -188,7 +188,7 @@ async def test_la_connexion_ignore_la_casse(client: AsyncClient, confirmer_adres
     """Une majuscule à la saisie renvoyait « identifiants incorrects » sur un
     compte pourtant existant."""
     await client.post("/api/v1/auth/register", json={
-        "email": "casse@blackturf.fr", "password": "MotDePasse123",
+        "email": "casse@blackturf.fr", "password": "MotDePasse123", "pseudo": "Joueur9",
     })
     await confirmer_adresse("casse@blackturf.fr")
 
@@ -204,11 +204,11 @@ async def test_une_inscription_jamais_confirmee_ne_reserve_pas_l_adresse(
     """Sans cela, il suffisait de saisir l'adresse d'un tiers pour l'empêcher à vie
     de s'inscrire — celui qui l'a saisie n'a jamais montré qu'il relevait la boîte."""
     await client.post("/api/v1/auth/register", json={
-        "email": "squatte@blackturf.fr", "password": "MotDePasse123",
+        "email": "squatte@blackturf.fr", "password": "MotDePasse123", "pseudo": "Joueur10",
     })
 
     resp = await client.post("/api/v1/auth/register", json={
-        "email": "squatte@blackturf.fr", "password": "AutreMotDePasse456", "prenom": "Vrai",
+        "email": "squatte@blackturf.fr", "password": "AutreMotDePasse456", "pseudo": "Joueur11", "prenom": "Vrai",
     })
     assert resp.status_code == 200
 
@@ -227,12 +227,12 @@ async def test_un_compte_confirme_reste_intouchable(
     """La reprise ne vaut QUE pour une inscription en attente : réécrire le mot de
     passe d'un compte confirmé serait un vol de compte à la demande."""
     await client.post("/api/v1/auth/register", json={
-        "email": "confirme@blackturf.fr", "password": "MotDePasse123",
+        "email": "confirme@blackturf.fr", "password": "MotDePasse123", "pseudo": "Joueur12",
     })
     await confirmer_adresse("confirme@blackturf.fr")
 
     resp = await client.post("/api/v1/auth/register", json={
-        "email": "confirme@blackturf.fr", "password": "MotDePasseIntrus999",
+        "email": "confirme@blackturf.fr", "password": "MotDePasseIntrus999", "pseudo": "Joueur13",
     })
     assert resp.status_code == 400
 

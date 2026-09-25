@@ -56,20 +56,20 @@ def _longueur_minimale_api() -> int:
 def test_api_refuse_sous_le_minimum(mauvais: str):
     """Le cas exact rencontré par le visiteur du 02/09 : 8 et 9 caractères."""
     with pytest.raises(ValidationError):
-        RegisterRequest(email="a@b.fr", password=mauvais)
+        RegisterRequest(email="a@b.fr", pseudo="Joueur", password=mauvais)
 
 
 @pytest.mark.parametrize("trivial", ["Motdepasse", "1234567890"])
 def test_api_refuse_lettres_seules_et_chiffres_seuls(trivial: str):
     """Assez long, mais uniquement des lettres ou uniquement des chiffres."""
     with pytest.raises(ValidationError):
-        RegisterRequest(email="a@b.fr", password=trivial)
+        RegisterRequest(email="a@b.fr", pseudo="Joueur", password=trivial)
 
 
 def test_api_accepte_un_mot_de_passe_conforme():
     """Témoin négatif : sans lui, un schéma cassé rendrait les tests ci-dessus
     verts pour la mauvaise raison (tout serait refusé)."""
-    assert RegisterRequest(email="a@b.fr", password="MotDePasse2026").password
+    assert RegisterRequest(email="a@b.fr", pseudo="Joueur", password="MotDePasse2026").password
 
 
 def test_le_frontend_annonce_la_meme_longueur_que_l_api():

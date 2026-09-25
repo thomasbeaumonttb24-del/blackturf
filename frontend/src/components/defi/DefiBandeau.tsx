@@ -15,11 +15,12 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import useSWR from "swr";
-import { Medal, X } from "lucide-react";
+import { X } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { peutDemarrerEssai } from "@/lib/auth";
 import { defiApi } from "@/lib/api";
-import { formatPts, planLabel } from "@/components/defi/kit";
+import { DEFI_FOND, DefiEmbleme, formatPts, planLabel, formatNombre } from "@/components/defi/kit";
+import { cn } from "@/lib/utils";
 
 const PAGES_SANS_BANDEAU = ["/defi", "/tarifs", "/abonnement"];
 // Mêmes clé et durée que EssaiGratuitBanner : on sait ainsi s'il est affiché.
@@ -65,19 +66,19 @@ export function DefiBandeau() {
   const leader = top?.lignes[0];
 
   return (
-    <div className="border-b border-amber-200 bg-gradient-to-r from-amber-50 via-white to-amber-50">
-      <div className="mx-auto flex max-w-5xl items-center gap-3 px-4 py-2 text-[13px] text-slate-800">
-        <Medal className="h-4 w-4 shrink-0 text-amber-700" aria-hidden />
-        <p className="min-w-0 flex-1 leading-snug">
-          <span className="font-semibold">Défi du mois</span>
-          <span className="hidden sm:inline"> : {regles.capital_mensuel.toLocaleString("fr-FR")} points offerts pour parier sur les courses,</span>
-          {" "}le 1er gagne {prix.jours} j {planLabel(prix.plan)}.
-          {leader && <span className="text-slate-600"> En tête : <b className="text-slate-800">{leader.nom}</b> · {formatPts(leader.solde)}</span>}
+    <div className={cn(DEFI_FOND, "border-b border-amber-900/10")}>
+      <div className="mx-auto flex max-w-5xl items-center gap-3 px-4 py-2 text-[13px]">
+        <DefiEmbleme taille={28} />
+        <p className="min-w-0 flex-1 leading-snug text-slate-700">
+          <span className="font-bold text-slate-900">Défi du mois</span>
+          <span className="hidden sm:inline"> · {formatNombre(regles.capital_mensuel, 2)} points offerts pour parier sur les courses</span>
+          {" "}· le 1<sup>er</sup> gagne <span className="font-semibold text-amber-800">{prix.jours} j {planLabel(prix.plan)}</span>
+          {leader && <span className="hidden md:inline"> · en tête : <b className="text-slate-900">{leader.nom}</b> ({formatPts(leader.solde)})</span>}
         </p>
-        <Link href="/defi" className="shrink-0 rounded-lg bg-amber-800 px-3 py-1.5 text-[12px] font-bold text-white">
+        <Link href="/defi" className="shrink-0 rounded-lg bg-gradient-to-b from-amber-500 to-amber-700 px-3 py-1.5 text-[12px] font-bold text-white shadow-[inset_0_1px_0_rgba(255,255,255,.35)]">
           {user ? "Jouer" : "Participer"}
         </Link>
-        <button onClick={fermer} className="shrink-0 text-slate-500 hover:text-slate-800" aria-label="Masquer le bandeau du défi pour ce mois">
+        <button onClick={fermer} className="shrink-0 text-slate-400 hover:text-slate-800" aria-label="Masquer le bandeau du défi pour ce mois">
           <X className="h-4 w-4" />
         </button>
       </div>

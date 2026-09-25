@@ -178,6 +178,7 @@ async def get_course(
         )).scalars().all())
         solde = await defi.solde(db, user.user_id, defi.mois_de(course.date_heure))
     return {
+        "mois": defi.mois_de(course.date_heure),
         "ouvert": defi.depot_ouvert(course),
         "limite": defi.limite_depot(course),
         "solde": solde,

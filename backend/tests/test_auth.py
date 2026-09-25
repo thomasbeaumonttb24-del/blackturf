@@ -14,7 +14,7 @@ async def test_register_cree_le_compte_sans_ouvrir_de_session(client: AsyncClien
     """
     resp = await client.post("/api/v1/auth/register", json={
         "email": "new@blackturf.fr",
-        "password": "TestPass12!",
+        "password": "TestPass12!", "pseudo": "Joueur1",
     })
     assert resp.status_code == 200
     data = resp.json()
@@ -26,7 +26,7 @@ async def test_register_cree_le_compte_sans_ouvrir_de_session(client: AsyncClien
 async def test_register_duplicate_email(client: AsyncClient, auth_headers):
     resp = await client.post("/api/v1/auth/register", json={
         "email": "test@blackturf.fr",
-        "password": "TestPass12!",
+        "password": "TestPass12!", "pseudo": "Joueur2",
     })
     assert resp.status_code == 400
 
@@ -120,7 +120,7 @@ async def test_resend_verification_marche_sans_session(client: AsyncClient):
     """Celui dont le lien a expiré ne peut plus se connecter : le renvoi doit donc
     être atteignable depuis l'écran de connexion, sans jeton."""
     await client.post("/api/v1/auth/register", json={
-        "email": "lien-expire@blackturf.fr", "password": "TestPass12!",
+        "email": "lien-expire@blackturf.fr", "password": "TestPass12!", "pseudo": "Joueur3",
     })
     resp = await client.post("/api/v1/auth/resend-verification",
                              json={"email": "lien-expire@blackturf.fr"})
@@ -161,8 +161,40 @@ async def test_profil_risque_defaut_equilibre(client: AsyncClient, inscrire):
     assert me.json()["profil_risque"] in ("equilibre", None, "")  # Default
 
 
-async def test_update_me_bankroll(client: AsyncClient, auth_headers):
-    resp = await client.patch("/api/v1/auth/me", json={"bankroll_initiale": 500.0}, headers=auth_headers)
+async def test_register_exige_un_pseudo(client: AsyncClient):
+    resp = await client.post("/api/v1/auth/register", json={
+        "email": "sanspseudo@blackturf.fr", "password": "TestPass12!",
+    })
+    assert resp.status_code == 422
+
+
+async def test_register_refuse_un_pseudo_deja_pris(client: AsyncClient, inscrire):
+    await inscrire(email="premier@blackturf.fr", pseudo="LaCravache")
+    resp = await client.post("/api/v1/auth/register", json={
+        "email": "second@blackturf.fr", "password": "TestPass12!", "pseudo": "lacravache",
+    })
+    assert resp.status_code == 409
+    assert "pris" in resp.json()["detail"]
+
+
+async def test_register_refuse_un_pseudo_reserve_ou_mal_forme(client: AsyncClient):
+    for pseudo in ("AdminTurf", "a", "avec espace"):
+        resp = await client.post("/api/v1/auth/register", json={
+            "email": "reserve@blackturf.fr", "password": "TestPass12!", "pseudo": pseudo,
+        })
+        assert resp.status_code == 422, pseudo
+
+
+async def test_me_expose_le_pseudo_et_permet_de_le_changer(client: AsyncClient, inscrire):
+    headers = await inscrire(email="change@blackturf.fr", pseudo="Avant")
+    assert (await client.get("/api/v1/auth/me", headers=headers)).json()["pseudo"] == "Avant"
+    resp = await client.patch("/api/v1/auth/me", json={"pseudo": "Apres"}, headers=headers)
     assert resp.status_code == 200
-    me = await client.get("/api/v1/auth/me", headers=auth_headers)
-    assert me.json()["bankroll_initiale"] == 500.0
+    assert (await client.get("/api/v1/auth/me", headers=headers)).json()["pseudo"] == "Apres"
+
+
+async def test_changer_pour_un_pseudo_pris_est_refuse(client: AsyncClient, inscrire):
+    await inscrire(email="a1@blackturf.fr", pseudo="Pegase")
+    headers = await inscrire(email="a2@blackturf.fr", pseudo="Autre")
+    resp = await client.patch("/api/v1/auth/me", json={"pseudo": "PEGASE"}, headers=headers)
+    assert resp.status_code == 409

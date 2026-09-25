@@ -82,7 +82,7 @@ async def test_le_filtre_sql_ecarte_les_adresses_non_confirmees(db: AsyncSession
 # ── Bout en bout sur l'API ───────────────────────────────────────────────────
 async def _inscrire(client: AsyncClient, email: str) -> None:
     resp = await client.post("/api/v1/auth/register", json={
-        "email": email, "password": "MotDePasse123",
+        "email": email, "password": "MotDePasse123", "pseudo": "Joueur5",
     })
     assert resp.status_code == 200, resp.text
 

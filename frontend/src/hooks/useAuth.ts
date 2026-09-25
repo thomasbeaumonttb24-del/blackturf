@@ -22,7 +22,7 @@ interface AuthContextValue {
    * PAS : tant que l'adresse n'est pas confirmée, il n'y a pas de session à
    * ouvrir — c'est ce qui retire tout intérêt à une adresse inventée.
    */
-  register: (data: { email: string; password: string; nom?: string; prenom?: string }) => Promise<InscriptionEnAttente>;
+  register: (data: { email: string; password: string; pseudo: string; nom?: string; prenom?: string }) => Promise<InscriptionEnAttente>;
   logout: () => void;
   refreshUser: () => Promise<void>;
 }
@@ -120,7 +120,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const register = useCallback(
-    async (data: { email: string; password: string; nom?: string; prenom?: string }) => {
+    async (data: { email: string; password: string; pseudo: string; nom?: string; prenom?: string }) => {
       const res = await authApi.register(data);
       return res.data;
     },

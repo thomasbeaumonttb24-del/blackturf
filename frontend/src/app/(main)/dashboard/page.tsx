@@ -23,7 +23,7 @@ import { Reveal, Tilt, useReveal } from "@/components/track-record/effets";
 import { Anneau, Compteur, Etoiles, Plan3D, SectionTitre, nf } from "@/components/espace/kit";
 import { useRequireAuth } from "@/hooks/useAuth";
 import { defiApi, predictionsApi, coursesApi, statsApi, type DefiMoi } from "@/lib/api";
-import { ResultatPari, formatPts, moisLabel } from "@/components/defi/kit";
+import { BOUTON_OR, CompteRebours, DEFI_CARTE, DefiEntete, ResultatPari, formatPts, moisLabel } from "@/components/defi/kit";
 import { DefiClassementLive } from "@/components/defi/DefiClassementLive";
 import { RUBRIQUES } from "@/lib/navigation";
 import { cn, planLabel } from "@/lib/utils";
@@ -437,44 +437,42 @@ function CarteProfil({ p, i }: { p: PariProfil; i: number }) {
 function PanneauDefi({ defi }: { defi?: DefiMoi }) {
   const derniers = (defi?.paris ?? []).slice(0, 4);
   return (
-    <div className="esp-panneau h-full rounded-3xl p-5 sm:p-8">
-      <div className="flex flex-wrap items-start justify-between gap-5">
-        <div>
-          <span className="flex items-center gap-2 text-[11px] font-medium uppercase tracking-[0.2em] text-stone-500">
-            <span className="h-px w-5 bg-amber-600/70" aria-hidden="true" /> {RUBRIQUES.defi.label}
-            {defi && <span className="normal-case tracking-normal text-stone-400">· {moisLabel(defi.mois)}</span>}
-          </span>
-          <div className="mt-3 font-display text-4xl font-medium tracking-tight text-stone-900 sm:text-5xl">
+    <div className={cn(DEFI_CARTE, "h-full")}>
+      <DefiEntete
+        surtitre={defi ? `Défi du mois · ${moisLabel(defi.mois)}` : "Défi du mois"}
+        titre="Ma saison"
+        sousTitre={!defi ? undefined : defi.rang != null
+          ? <><b className="text-amber-800">{defi.rang}{defi.rang === 1 ? "er" : "e"}</b> sur {defi.nb_classes} joueurs classés</>
+          : defi.nb_paris === 0 ? "Vos points du mois vous attendent : engagez votre premier pari."
+          : `Encore ${Math.max(0, 10 - defi.nb_paris)} paris pour entrer au classement.`}
+        droite={defi && <CompteRebours mois={defi.mois} />}
+      >
+        <div className="mt-4 flex flex-wrap items-end justify-between gap-3">
+          <div className="font-display text-4xl font-bold tracking-tight text-slate-900 sm:text-5xl">
             <Compteur valeur={defi?.solde ?? null} suffixe={" pts"} />
           </div>
-          <p className="mt-2 text-sm text-stone-500">
-            {!defi ? "\u00a0" : defi.rang != null
-              ? <><span className="font-semibold text-amber-800">{defi.rang}{defi.rang === 1 ? "er" : "e"}</span> sur {defi.nb_classes} joueurs classés</>
-              : defi.nb_paris === 0 ? "Vos points du mois vous attendent : engagez votre premier pari."
-              : `Encore ${Math.max(0, 10 - defi.nb_paris)} paris pour entrer au classement.`}
-          </p>
+          <Link href={RUBRIQUES.coursesDuJour.href}
+            className={cn(BOUTON_OR, "press h-11 text-sm")}>
+            <Medal className="h-4 w-4" aria-hidden="true" /> Parier mes points
+          </Link>
         </div>
-        <Link href={RUBRIQUES.coursesDuJour.href}
-          className="press inline-flex h-11 items-center gap-2 rounded-xl bg-amber-800 px-4 text-sm font-semibold text-white">
-          <Medal className="h-4 w-4" aria-hidden="true" /> Parier mes points
-        </Link>
-      </div>
+      </DefiEntete>
 
-      {defi && defi.nb_paris > 0 && (
-        <div className="mt-6 grid grid-cols-2 gap-3">
-          {([["Plan de mise", defi.plan], ["Mes choix perso", defi.perso]] as const).map(([l, st]) => (
-            <div key={l} className="rounded-2xl bg-stone-50 p-4 ring-1 ring-stone-100">
-              <div className="text-[11px] font-medium uppercase tracking-[0.14em] text-stone-500">{l}</div>
-              <div className={cn("mt-1 font-display text-xl font-medium tabular-nums", st.points_nets >= 0 ? "text-emerald-700" : "text-rose-700")}>
-                {formatPts(st.points_nets, true)}
+      <div className="p-5 sm:p-6">
+        {defi && defi.nb_paris > 0 && (
+          <div className="mb-5 grid grid-cols-2 gap-3">
+            {([["Plan de mise", defi.plan], ["Mes choix perso", defi.perso]] as const).map(([l, st]) => (
+              <div key={l} className="rounded-2xl bg-stone-50 p-4 ring-1 ring-stone-100">
+                <div className="text-[11px] font-medium uppercase tracking-[0.14em] text-stone-500">{l}</div>
+                <div className={cn("mt-1 font-display text-xl font-bold tabular-nums", st.points_nets >= 0 ? "text-emerald-700" : "text-rose-700")}>
+                  {formatPts(st.points_nets, true)}
+                </div>
+                <div className="text-xs text-stone-500">{st.nb_paris} pari{st.nb_paris > 1 ? "s" : ""}</div>
               </div>
-              <div className="text-xs text-stone-500">{st.nb_paris} pari{st.nb_paris > 1 ? "s" : ""}</div>
-            </div>
-          ))}
-        </div>
-      )}
+            ))}
+          </div>
+        )}
 
-      <div className="mt-6 border-t border-stone-100 pt-5">
         <div className="text-[11px] font-medium uppercase tracking-[0.14em] text-stone-500">Derniers paris</div>
         {derniers.length === 0 ? (
           <p className="mt-2 text-sm text-stone-500">

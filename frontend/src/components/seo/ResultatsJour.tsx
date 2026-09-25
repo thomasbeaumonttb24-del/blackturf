@@ -1,4 +1,5 @@
 import { CasaqueNumero } from "@/components/courses/identite-cheval";
+import { DefiClassementLive } from "@/components/defi/DefiClassementLive";
 import Link from "next/link";
 import {
   fetchProgramme,
@@ -231,6 +232,15 @@ export async function ResultatsJour({ jour }: { jour: string }) {
         ) : null}
 
         <BilanAlgoJour verdicts={verdictsListe} nbCoursesJour={avecArrivee.length} />
+
+        {/* Défi du mois : chaque arrivée publiée ici vient de régler les paris des
+            joueurs, c'est là que le classement bouge. Seulement sur le jour en cours :
+            le classement est celui du mois courant, pas celui d'une date d'archive. */}
+        {estAujourdhui && (
+          <div className="mb-10">
+            <DefiClassementLive top={5} titre="Défi du mois : le classement après ces arrivées" />
+          </div>
+        )}
 
         <Section title={`Toutes les arrivées du ${jourLong(jour)}`}>
           {avecArrivee.length ? (

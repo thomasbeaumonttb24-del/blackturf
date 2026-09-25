@@ -9,7 +9,8 @@ export interface AuthUser {
   created_at: string;
   profil_risque: string;
   email_verified: boolean;
-  bankroll_initiale: number | null;
+  /** Nom public (classement du défi, Communauté). null = à choisir. */
+  pseudo: string | null;
   is_admin?: boolean;
   // Essai ouvert mais bloqué faute de carte enregistrée : le compte reste en
   // `free` tant que le moyen de paiement n'est pas là. Sans ce signal, la perte
