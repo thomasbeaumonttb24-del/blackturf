@@ -323,15 +323,24 @@ def champs_maj_course(course: CourseScrape, date_heure: Optional[datetime],
         "categorie_particularite": _t(course.categorie_particularite, 30),
         "montant_offert_1er": course.montant_offert_1er,
         "nombre_declares_partants": course.nombre_declares_partants,
-        # Re-scrape live → met à jour les paris offerts + flags jackpot (un champ
-        # réduit après scratchings peut faire passer un couplé en couplé ordre).
-        "est_quinte": course.est_quinte,
-        "est_quarte": course.est_quarte,
-        "est_tierce": course.est_tierce,
-        "est_2sur4": course.est_2sur4,
-        "paris_disponibles": course.paris_disponibles,
         "updated_at": datetime.now(timezone.utc),
     }
+    # Re-scrape live → met à jour les paris offerts + flags jackpot (un champ
+    # réduit après scratchings peut faire passer un couplé en couplé ordre).
+    #
+    # MAIS seulement si le payload liste réellement des paris. Un `paris` absent ou
+    # vide (course clôturée, payload partiel, hoquet PMU) produisait des drapeaux
+    # tous à False qui écrasaient la désignation déjà en base : le support du
+    # Quinté+ perdait `est_quinte` en cours de journée et /quinte-du-jour annonçait
+    # « pas encore publié » alors que la course était connue depuis la veille.
+    if course.paris_disponibles:
+        champs.update({
+            "est_quinte": course.est_quinte,
+            "est_quarte": course.est_quarte,
+            "est_tierce": course.est_tierce,
+            "est_2sur4": course.est_2sur4,
+            "paris_disponibles": course.paris_disponibles,
+        })
     # Annulation en cours de journée (cas le plus fréquent : le PMU annule une
     # réunion entière après la publication du programme). Écriture CONDITIONNELLE :
     # on ne remet jamais un statut existant à 'a_venir' — un re-scrape ne doit pas
