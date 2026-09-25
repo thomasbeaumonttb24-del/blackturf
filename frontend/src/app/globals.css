@@ -819,3 +819,33 @@
 /* Colonnes en relief « Face au hasard » : montée à l'entrée dans l'écran. */
 .colonne3d { transition: height 1.6s cubic-bezier(0.16,1,0.3,1); }
 @media (prefers-reduced-motion: reduce) { .colonne3d { transition: none !important; } }
+
+/* ════════ MON ESPACE (/dashboard) — relief sobre ════════
+   Le relief passe par les plans `.scene3d` de l'accueil (inclinaison légère qui
+   suit le pointeur) et par des ombres étagées ; ici, seulement le tracé de la
+   courbe et l'entrée des lignes. Tout se coupe avec « réduire les animations ». */
+
+/* Ombre étagée d'un panneau posé sur la page (contact + portée longue). */
+.esp-panneau {
+  background: #fff;
+  box-shadow:
+    0 1px 0 rgba(255,255,255,.9) inset,
+    0 0 0 1px rgba(28,25,23,.06),
+    0 1px 2px rgba(28,25,23,.04),
+    0 12px 24px -16px rgba(28,25,23,.18),
+    0 40px 80px -48px rgba(28,25,23,.30);
+}
+
+/* Courbe du capital : le tracé se dessine, l'aire apparaît ensuite. */
+@keyframes espTrace { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
+.esp-trace { stroke-dasharray: 1; stroke-dashoffset: 0; animation: espTrace 1.6s cubic-bezier(0.16,1,0.3,1) .2s backwards; }
+@keyframes espAire { from { opacity: 0; } to { opacity: 1; } }
+.esp-aire { animation: espAire 1s ease .9s backwards; }
+
+/* Entrée des lignes d'une liste, en léger décalé. */
+@keyframes espLigne { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+.esp-ligne { animation: espLigne .6s cubic-bezier(0.16,1,0.3,1) backwards; }
+
+@media (prefers-reduced-motion: reduce) {
+  .esp-trace, .esp-aire, .esp-ligne { animation: none !important; }
+}

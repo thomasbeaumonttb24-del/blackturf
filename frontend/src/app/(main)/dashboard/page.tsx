@@ -1,482 +1,769 @@
 "use client";
-import { IdentiteCheval } from "@/components/courses/identite-cheval";
 
-import { useState } from "react";
+/**
+ * Mon espace — tableau de bord de l'abonné.
+ *
+ * Registre sobre, celui de « Comment ça marche » sur l'accueil : fond ivoire,
+ * panneaux blancs aux ombres étagées, pierre et or employé avec parcimonie. Le
+ * relief passe par des plans légèrement inclinés qui suivent le pointeur
+ * (`Plan3D`, `Tilt`) plutôt que par des effets lumineux.
+ */
+
 import Link from "next/link";
 import useSWR from "swr";
 import {
-  TrendingUp, TrendingDown, Zap, Calendar, Activity, Star,
-  ArrowRight, ChevronRight, AlertTriangle, CheckCircle, Clock,
-  BarChart3, Wallet, Trophy, Cpu,
+  Activity, ArrowRight, ArrowUpRight, BarChart3, Calendar, CheckCircle2, Clock, Cpu, LockKeyhole,
+  Radio, Target, TrendingDown, TrendingUp, Trophy,
 } from "lucide-react";
 import { format } from "date-fns";
 import { fr } from "date-fns/locale";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { CasaqueNumero, IdentiteCheval } from "@/components/courses/identite-cheval";
+import { Reveal, Tilt, useReveal } from "@/components/track-record/effets";
+import { Anneau, Compteur, CourbeCapital, Etoiles, Plan3D, SectionTitre, nf } from "@/components/espace/kit";
 import { useRequireAuth } from "@/hooks/useAuth";
 import { bankrollApi, predictionsApi, coursesApi, statsApi } from "@/lib/api";
+import { RUBRIQUES } from "@/lib/navigation";
+import { cn, planLabel } from "@/lib/utils";
+import { disciplineLabel, heureParis, titleCase } from "@/lib/seo";
 
-// ─── helpers ────────────────────────────────────────────────
-const NIVEAU_LABELS: Record<number, string> = {
-  1: "Intéressant", 2: "Bon", 3: "Fort", 4: "Exceptionnel",
-};
-const NIVEAU_COLORS: Record<number, string> = {
-  1: "text-zinc-600", 2: "text-blue-700", 3: "text-amber-700", 4: "text-emerald-700",
-};
-
-function StarRating({ n }: { n: number }) {
-  return (
-    <span className="flex gap-0.5">
-      {Array.from({ length: 4 }).map((_, i) => (
-        <Star
-          key={i}
-          className={`w-3 h-3 ${i < n ? "fill-amber-500 text-amber-700" : "text-zinc-600"}`}
-        />
-      ))}
-    </span>
-  );
+// ─── Types ──────────────────────────────────────────────────────
+/** Forme réelle de `/programme` (cf. `CourseSummary` côté API) : l'heure vient de
+ *  `date_heure` et l'hippodrome de la COURSE, jamais de la réunion. */
+interface CourseJour {
+  course_id: string;
+  nom?: string | null;
+  numero: number;
+  numero_reunion?: number | null;
+  date_heure: string;
+  hippodrome_nom: string;
+  discipline: string;
+  distance?: number;
+  nb_partants?: number;
+  statut?: string;
+  est_quinte?: boolean;
+  est_quarte?: boolean;
+  est_tierce?: boolean;
+  penetrometre_desc?: string | null;
+  pool_total_eur?: number | null;
 }
 
 interface Reunion {
-  hippodrome_nom?: string;
-  discipline?: string;
-  courses?: Array<{
-    course_id: string;
-    nom?: string;
-    heure?: string;
-    nb_partants?: number;
-    statut?: string;
-  }>;
+  numero?: number;
+  hippodrome?: string;
+  courses?: CourseJour[];
 }
 
-// ─── main component ─────────────────────────────────────────
-export default function DashboardPage() {
-  const { user } = useRequireAuth();
+interface PariDuJour {
+  course_id: string;
+  code: string;
+  hippodrome: string;
+  numero: number;
+  nom_cheval: string;
+  ev?: number;
+  edge_valide?: boolean;
+  niveau: number;
+  raison?: string;
+  proba_top1?: number;
+  proba_top1_low?: number | null;
+  proba_top1_high?: number | null;
+  /** Accord des modèles, 0-100. */
+  confidence?: number;
+  cote_pmu?: number | null;
+  date_heure?: string;
+  discipline?: string;
+}
 
-  const isPaid = user && !["free", "decouverte"].includes(user.plan ?? "free");
+interface PariProfil {
+  profil: string;
+  profil_label: string;
+  course_id: string;
+  code: string;
+  hippodrome: string;
+  type_pari: string;
+  chevaux: Array<{ numero: number; nom: string }>;
+  mise: number;
+  gain_potentiel?: number | null;
+  probabilite: number;
+  ev: number;
+  raisons: string[];
+  date_heure?: string | null;
+  discipline?: string | null;
+}
 
-  // Parallel data fetches
-  const { data: bankrollStats } = useSWR(
-    "bankroll-stats",
-    () => bankrollApi.stats().then((r) => r.data),
-    { refreshInterval: 60_000 }
-  );
-  const { data: summary } = useSWR(
-    "dashboard-summary",
-    () => statsApi.dashboardSummary().then((r) => r.data),
-    { refreshInterval: 120_000 }
-  );
-  const { data: programme } = useSWR(
-    "programme-today",
-    () => coursesApi.programme().then((r) => r.data),
-    { refreshInterval: 180_000 }
-  );
-  const { data: pariDuJour } = useSWR(
-    "pari-du-jour",
-    () => predictionsApi.pariDuJour().then((r) => r.data),
-    { refreshInterval: 120_000 }
-  );
-  const { data: parisProfils } = useSWR(
-    "pari-du-jour-profils",
-    () => predictionsApi.pariDuJourProfils().then((r) => r.data),
-    { refreshInterval: 120_000 }
-  );
+interface ValueBet {
+  nom_cheval: string;
+  numero?: number | null;
+  hippodrome: string;
+  discipline?: string;
+  heure?: string;
+  date_heure?: string | null;
+  code?: string | null;
+  ev: number;
+  niveau: number;
+  cote?: number;
+  course_id: string;
+}
 
-  // flatten today's courses from programme reunions
-  const reunions: Reunion[] = programme?.reunions ?? [];
-  const allCourses = reunions.flatMap((r: Reunion) =>
-    (r.courses ?? []).map((c) => ({ ...c, hippodrome: r.hippodrome_nom, discipline: r.discipline }))
-  );
-  // Prochaines courses : à venir / en cours d'abord, triées par heure.
-  // Si tout est terminé (soirée), on retombe sur les dernières courses.
-  const upcoming = allCourses
-    .filter((c) => c.statut === "a_venir" || c.statut === "en_cours")
-    .sort((a, b) => (a.heure ?? "").localeCompare(b.heure ?? ""));
-  const todayCourses = (upcoming.length > 0 ? upcoming : allCourses.slice(-6)).slice(0, 6);
-  const aDesProchaines = upcoming.length > 0;
+interface Entree {
+  date: string;
+  gain_perte: number | null;
+  resultat: string | null;
+}
 
-  const topVbs = summary?.top_vbs ?? [];
+const euros = (n?: number | null, d = 0) => (n == null ? "—" : `${nf(n, d)}\u00a0€`);
+const pct = (x?: number | null) => (x == null ? "—" : `${Math.round(x * 100)}\u00a0%`);
+const heureDe = (iso?: string | null, repli?: string | null) => (iso ? heureParis(iso) : repli ?? null);
 
-  const roi = bankrollStats?.roi_global ?? 0;
-  const roiPositive = roi >= 0;
+const lienDiscret = "group inline-flex items-center gap-1 text-sm font-medium text-stone-600 transition-colors hover:text-stone-900";
 
+// ─── En-tête ────────────────────────────────────────────────────
+function PariDuJourCarte({ p }: { p: PariDuJour }) {
+  const proba = Math.round((p.proba_top1 ?? 0) * 100);
+  const ev = Math.round((p.ev ?? 0) * 100);
   return (
-    <div className="min-h-screen bg-background">
-      <div className="max-w-7xl mx-auto px-4 py-6 sm:py-8 space-y-6 sm:space-y-8">
-
-        {/* ── Header ─────────────────────────────── */}
-        <div className="flex flex-row items-center justify-between gap-3">
-          <div className="min-w-0">
-            <h1 className="text-xl sm:text-2xl font-bold text-foreground truncate">
-              Bonjour{user?.prenom ? `, ${user.prenom}` : ""} 👋
-            </h1>
-            <p className="text-sm text-muted-foreground mt-0.5">
-              Mon espace · {format(new Date(), "EEEE d MMMM", { locale: fr })}
-            </p>
+    <Link href={`/courses/${p.course_id}`} className="group block" aria-label={`Pari du jour : ${p.nom_cheval}, ${p.code} à ${p.hippodrome}`}>
+      <div className="esp-panneau relative overflow-hidden rounded-[1.4rem]">
+        <div className="h-1 bg-gradient-to-r from-amber-700 via-amber-500 to-amber-300" aria-hidden="true" />
+        <div className="p-5 sm:p-7">
+          <div className="flex items-center justify-between gap-3 text-[11px]">
+            <span className="font-medium uppercase tracking-[0.2em] text-amber-800">Pari du jour</span>
+            <span className="truncate text-stone-500">
+              {[p.code, titleCase(p.hippodrome), p.date_heure && heureParis(p.date_heure)].filter(Boolean).join(" · ")}
+            </span>
           </div>
-          <div className="flex items-center gap-2 shrink-0">
-            <Badge variant={user?.plan === "expert" ? "expert" : "secondary"} className="text-xs px-3 py-1">
-              {(user?.plan ?? "free").toUpperCase()}
-            </Badge>
-            <Button asChild variant="brand" size="sm">
-              <Link href="/programme">
-                <Calendar className="w-4 h-4 mr-2" />
-                Courses du jour
-              </Link>
-            </Button>
-          </div>
-        </div>
 
-        {/* ── Pari du jour ───────────────────────── */}
-        {pariDuJour && (
-          <Link href={`/courses/${pariDuJour.course_id}`} className="block group">
-            <Card className="border-brand-gold/40 bg-gradient-to-r from-amber-500/10 via-amber-500/5 to-transparent hover:border-brand-gold/70 transition-colors">
-              <CardContent className="p-4 sm:p-5">
-                <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4">
-                  <div className="flex items-center gap-2 sm:flex-col sm:items-start sm:gap-0.5 shrink-0">
-                    <span className="text-[11px] font-semibold uppercase tracking-wide text-brand-gold-dark">🎯 Pari du jour</span>
-                    <span className="text-[11px] text-muted-foreground">{pariDuJour.code} · {pariDuJour.hippodrome}</span>
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="font-bold text-foreground"><IdentiteCheval numero={pariDuJour.numero} nom={pariDuJour.nom_cheval} courseId={pariDuJour.course_id} /></span>
-                      <span className="text-xs rounded-full px-2 py-0.5 bg-emerald-500/15 text-emerald-700 font-semibold">
-                        EV +{((pariDuJour.ev ?? 0) * 100).toFixed(0)}%
-                      </span>
-                      {pariDuJour.edge_valide && (
-                        <span
-                          className="text-xs rounded-full px-2 py-0.5 bg-amber-50 text-amber-700 font-semibold ring-1 ring-amber-200"
-                          title="Signaux historiquement gagnants confirmés — edge validé hors-échantillon (taux de gain 3-4× le marché sur le passé). Pas une garantie."
-                        >
-                          ✓ Edge validé
-                        </span>
-                      )}
-                      {"⭐".repeat(Math.max(1, pariDuJour.niveau))}
-                    </div>
-                    <p className="text-xs text-muted-foreground mt-0.5">{pariDuJour.raison}</p>
-                  </div>
-                  <div className="flex items-center gap-4 shrink-0">
-                    <div className="text-right">
-                      <div className="text-lg font-bold tabular-nums">{((pariDuJour.proba_top1 ?? 0) * 100).toFixed(0)}%</div>
-                      <div className="text-[10px] text-muted-foreground">gagnant{pariDuJour.cote_pmu ? ` · cote ${pariDuJour.cote_pmu}` : ""}</div>
-                    </div>
-                    <ChevronRight className="w-5 h-5 text-muted-foreground group-hover:text-brand-gold-dark transition-colors" />
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          </Link>
-        )}
-
-        {/* ── Le pari du jour PAR PROFIL ──────────── */}
-        {parisProfils?.profils?.length > 0 && (
-          <div>
-            <div className="flex items-center gap-2 mb-2 px-0.5">
-              <span className="text-[11px] font-semibold uppercase tracking-wide text-brand-gold-dark">Le pari du jour, par profil</span>
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              {parisProfils.profils.map((p: {
-                profil: string; profil_label: string; course_id: string; code: string; hippodrome: string;
-                type_pari: string; chevaux: Array<{ numero: number; nom: string }>; mise: number;
-                probabilite: number; ev: number; raisons: string[];
-              }) => {
-                const col = p.profil === "conservateur" ? "border-emerald-300 bg-emerald-50/40"
-                  : p.profil === "equilibre" ? "border-blue-300 bg-blue-50/40" : "border-rose-300 bg-rose-50/40";
-                return (
-                  <Link key={p.profil} href={`/courses/${p.course_id}`}
-                    className={`block rounded-xl border p-3 hover:shadow-md transition-shadow ${col}`}>
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-bold uppercase tracking-wide">{p.profil_label}</span>
-                      <span className="text-[10px] text-muted-foreground">{p.code}</span>
-                    </div>
-                    <div className="mt-1.5 text-sm font-semibold">{p.type_pari}</div>
-                    <div className="text-xs text-muted-foreground">{(p.chevaux ?? []).map((c) => `N°${c.numero}`).join(" + ")}</div>
-                    <div className="mt-1.5 flex items-baseline gap-2">
-                      <span className="text-lg font-bold tabular-nums">{Math.round((p.probabilite ?? 0) * 100)}%</span>
-                      <span className="text-[10px] text-muted-foreground">de toucher</span>
-                      {p.ev > 0 && <span className="text-[10px] font-bold text-emerald-700">EV +{Math.round(p.ev * 100)}%</span>}
-                    </div>
-                    {p.raisons?.[0] && <p className="mt-1 text-[10px] text-muted-foreground leading-snug line-clamp-2">{p.raisons[0]}</p>}
-                    <div className="mt-1 text-[10px] text-muted-foreground truncate">{p.hippodrome}</div>
-                  </Link>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
-        {/* ── KPI cards ──────────────────────────── */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-          {/* Bankroll */}
-          <Card className="border-border/60 hover:border-brand-gold/40 transition-colors">
-            <CardContent className="p-4 sm:p-5">
-              <div className="flex items-start justify-between mb-3">
-                <div className="p-2 rounded-lg bg-amber-50">
-                  <Wallet className="w-4 h-4 text-amber-700" />
-                </div>
-                <span className={`text-xs font-medium flex items-center gap-1 ${roiPositive ? "text-emerald-700" : "text-red-700"}`}>
-                  {roiPositive ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
-                  {roi > 0 ? "+" : ""}{roi}%
+          <div className="mt-6 flex items-center gap-5">
+            <Anneau pct={proba} taille={96} epaisseur={5} couleur={["#B45309", "#F59E0B"]} fond="rgba(120,113,108,.14)">
+              <span className="font-display text-2xl font-medium leading-none text-stone-900">{proba}<span className="text-sm text-stone-500"> %</span></span>
+              <span className="mt-1 text-[9px] font-medium uppercase tracking-wider text-stone-500">victoire</span>
+            </Anneau>
+            <div className="min-w-0 flex-1">
+              <div className="text-lg font-semibold text-stone-900">
+                <IdentiteCheval numero={p.numero} nom={p.nom_cheval} courseId={p.course_id} />
+              </div>
+              {p.discipline && <div className="mt-1 text-xs text-stone-500">{disciplineLabel(p.discipline)}</div>}
+              <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-xs">
+                {p.cote_pmu ? (<><dt className="text-stone-500">Cote PMU</dt><dd className="text-right font-semibold tabular-nums text-stone-900">{p.cote_pmu}</dd></>) : null}
+                {p.cote_pmu ? (<><dt className="text-stone-500">Cote juste</dt><dd className="text-right font-semibold tabular-nums text-stone-900">{p.proba_top1 ? nf(1 / p.proba_top1, 1) : "—"}</dd></>) : null}
+                <dt className="text-stone-500">EV</dt>
+                <dd className={cn("text-right font-semibold tabular-nums", ev > 0 ? "text-emerald-700" : "text-stone-900")}>{ev > 0 ? "+" : ""}{ev} %</dd>
+                {p.proba_top1_low != null && p.proba_top1_high != null && (<><dt className="text-stone-500">Fourchette</dt><dd className="text-right tabular-nums text-stone-700">{Math.round(p.proba_top1_low * 100)} – {Math.round(p.proba_top1_high * 100)} %</dd></>)}
+                {p.confidence != null && (<><dt className="text-stone-500">Accord des modèles</dt><dd className="text-right tabular-nums text-stone-700">{p.confidence} %</dd></>)}
+                <dt className="text-stone-500">Niveau</dt>
+                <dd className="text-right"><Niveau n={p.niveau} /></dd>
+              </dl>
+              {p.edge_valide && (
+                <span
+                  className="mt-3 inline-flex items-center gap-1 text-[11px] font-medium text-stone-600"
+                  title="Signaux historiquement gagnants confirmés hors échantillon (taux de gain 3 à 4 fois le marché sur le passé). Pas une garantie."
+                >
+                  <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" aria-hidden="true" /> Signal validé sur l&apos;historique
                 </span>
-              </div>
-              <div className="text-xl sm:text-2xl font-bold text-foreground tabular-nums">
-                {bankrollStats
-                  ? `€${((bankrollStats.bankroll_initiale ?? 0) + (bankrollStats.gains_totaux ?? 0) - (bankrollStats.pertes_totales ?? 0)).toFixed(0)}`
-                  : "—"}
-              </div>
-              <div className="text-xs text-muted-foreground mt-1">Capital total</div>
-            </CardContent>
-          </Card>
-
-          {/* ROI */}
-          <Card className="border-border/60 hover:border-brand-gold/40 transition-colors">
-            <CardContent className="p-4 sm:p-5">
-              <div className="flex items-start justify-between mb-3">
-                <div className="p-2 rounded-lg bg-blue-50">
-                  <BarChart3 className="w-4 h-4 text-blue-700" />
-                </div>
-                <span className="text-xs text-muted-foreground">{bankrollStats?.nb_paris ?? 0} paris</span>
-              </div>
-              <div className={`text-xl sm:text-2xl font-bold tabular-nums ${(bankrollStats?.roi_ia_only ?? 0) >= 0 ? "text-emerald-700" : "text-red-700"}`}>
-                {bankrollStats ? `${bankrollStats.roi_ia_only > 0 ? "+" : ""}${bankrollStats.roi_ia_only}%` : "—"}
-              </div>
-              <div className="text-xs text-muted-foreground mt-1">Rendement algo</div>
-            </CardContent>
-          </Card>
-
-          {/* Value Bets */}
-          <Card className="border-border/60 hover:border-brand-gold/40 transition-colors">
-            <CardContent className="p-4 sm:p-5">
-              <div className="flex items-start justify-between mb-3">
-                <div className="p-2 rounded-lg bg-emerald-50">
-                  <Zap className="w-4 h-4 text-emerald-700" />
-                </div>
-                {(summary?.nb_vbs_premium ?? 0) > 0 && (
-                  <Badge className="bg-amber-50 text-amber-700 border-0 text-xs">
-                    {summary.nb_vbs_premium} ★★★+
-                  </Badge>
-                )}
-              </div>
-              <div className="text-xl sm:text-2xl font-bold text-foreground tabular-nums">
-                {summary?.nb_vbs_actifs ?? "—"}
-              </div>
-              <div className="text-xs text-muted-foreground mt-1">Paris de valeur</div>
-            </CardContent>
-          </Card>
-
-          {/* Courses du jour */}
-          <Card className="border-border/60 hover:border-brand-gold/40 transition-colors">
-            <CardContent className="p-4 sm:p-5">
-              <div className="flex items-start justify-between mb-3">
-                <div className="p-2 rounded-lg bg-purple-50">
-                  <Trophy className="w-4 h-4 text-purple-700" />
-                </div>
-                {(summary?.nb_en_cours ?? 0) > 0 && (
-                  <span className="flex items-center gap-1 text-xs text-emerald-700">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                    En cours
-                  </span>
-                )}
-              </div>
-              <div className="text-xl sm:text-2xl font-bold text-foreground tabular-nums">
-                {summary?.nb_courses_jour ?? "—"}
-              </div>
-              <div className="text-xs text-muted-foreground mt-1">Courses aujourd&apos;hui</div>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* ── Main grid ──────────────────────────── */}
-        <div className="grid grid-cols-1 lg:grid-cols-5 gap-4 sm:gap-6">
-
-          {/* Left col (3/5) */}
-          <div className="lg:col-span-3 space-y-4 sm:space-y-6">
-
-            {/* Top Value Bets */}
-            <Card className="border-border/60">
-              <CardHeader className="pb-3">
-                <div className="flex items-center justify-between">
-                  <CardTitle className="text-base flex items-center gap-2">
-                    <Zap className="w-4 h-4 text-amber-700" />
-                    Meilleurs paris de valeur
-                  </CardTitle>
-                  <Button asChild variant="ghost" size="sm" className="text-xs text-muted-foreground hover:text-foreground shrink-0">
-                    <Link href="/value-bets">
-                      Voir tous <ArrowRight className="w-3 h-3 ml-1" />
-                    </Link>
-                  </Button>
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                {!isPaid ? (
-                  <div className="rounded-lg border border-dashed border-border/60 p-6 text-center">
-                    <Star className="w-8 h-8 text-amber-700 mx-auto mb-2" />
-                    <p className="text-sm font-medium text-foreground mb-1">Fonctionnalité Premium</p>
-                    <p className="text-xs text-muted-foreground mb-3">
-                      Accédez aux paris de valeur en temps réel à partir de Standard.
-                    </p>
-                    <Button asChild variant="brand" size="sm">
-                      <Link href="/tarifs">Passer Premium</Link>
-                    </Button>
-                  </div>
-                ) : topVbs.length === 0 ? (
-                  <div className="text-center py-6 text-muted-foreground text-sm">
-                    Aucun pari de valeur actif pour le moment
-                  </div>
-                ) : (
-                  topVbs.map((vb: {
-                    nom_cheval: string; numero?: number | null; hippodrome: string; discipline?: string;
-                    heure?: string; ev: number; niveau: number; cote?: number; course_id: string;
-                  }, i: number) => (
-                    <Link
-                      key={i}
-                      href={`/courses/${vb.course_id}`}
-                      className="flex items-center justify-between gap-2 p-3 rounded-lg border border-border/40 hover:border-brand-gold/40 hover:bg-accent/30 transition-all group"
-                    >
-                      <div className="flex items-center gap-3 min-w-0">
-                        <div className="text-lg font-bold text-muted-foreground w-6 text-center shrink-0">
-                          #{i + 1}
-                        </div>
-                        <div className="min-w-0">
-                          <div className="flex items-center gap-2">
-                            {/* Le dossard en gras, le nom en confirmation : même règle que /value-bets. */}
-                            <IdentiteCheval numero={vb.numero} nom={vb.nom_cheval} courseId={vb.course_id} />
-                            <StarRating n={vb.niveau} />
-                          </div>
-                          <div className="flex items-center gap-2 mt-0.5 flex-wrap">
-                            <span className="text-xs text-muted-foreground">{vb.hippodrome}</span>
-                            {vb.heure && (
-                              <span className="text-xs text-muted-foreground flex items-center gap-0.5">
-                                <Clock className="w-3 h-3" />{vb.heure}
-                              </span>
-                            )}
-                            {vb.discipline && (
-                              <Badge variant="outline" className="text-xs px-1.5 py-0 h-4">{vb.discipline}</Badge>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-2 shrink-0">
-                        <div className="text-right">
-                          <div className={`text-sm font-bold tabular-nums ${vb.ev > 0 ? "text-emerald-700" : "text-red-700"}`}>
-                            {vb.ev > 0 ? "+" : ""}{(vb.ev * 100).toFixed(0)}%
-                          </div>
-                          {vb.cote && (
-                            <div className="text-xs text-muted-foreground">Cote {vb.cote}</div>
-                          )}
-                        </div>
-                        <ChevronRight className="w-4 h-4 text-muted-foreground group-hover:text-foreground transition-colors" />
-                      </div>
-                    </Link>
-                  ))
-                )}
-              </CardContent>
-            </Card>
-
-            {/* Programme du jour */}
-            <Card className="border-border/60">
-              <CardHeader className="pb-3">
-                <div className="flex items-center justify-between">
-                  <CardTitle className="text-base flex items-center gap-2">
-                    <Calendar className="w-4 h-4 text-blue-700" />
-                    {aDesProchaines ? "Prochaines courses" : "Courses du jour"}
-                  </CardTitle>
-                  <Button asChild variant="ghost" size="sm" className="text-xs text-muted-foreground hover:text-foreground">
-                    <Link href="/programme">
-                      Programme complet <ArrowRight className="w-3 h-3 ml-1" />
-                    </Link>
-                  </Button>
-                </div>
-              </CardHeader>
-              <CardContent>
-                {todayCourses.length === 0 ? (
-                  <p className="text-sm text-muted-foreground text-center py-4">
-                    Aucune donnée pour le moment
-                  </p>
-                ) : (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    {todayCourses.map((c: {
-                      course_id: string; nom?: string; heure?: string;
-                      nb_partants?: number; statut?: string; est_quinte?: boolean;
-                      hippodrome?: string; discipline?: string;
-                    }) => (
-                      <Link
-                        key={c.course_id}
-                        href={`/courses/${c.course_id}`}
-                        className="flex items-center gap-3 p-3 rounded-lg border border-border/40 hover:border-brand-gold/40 hover:bg-accent/30 transition-all group"
-                      >
-                        {c.heure && (
-                          <span className="flex h-9 w-12 flex-shrink-0 flex-col items-center justify-center rounded-md bg-muted/50 font-mono text-xs font-bold text-amber-700 tabular-nums">
-                            {c.heure}
-                          </span>
-                        )}
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-1.5">
-                            <span className="truncate text-xs font-medium text-foreground">
-                              {c.hippodrome ?? c.nom ?? "—"}
-                            </span>
-                            {c.est_quinte && (
-                              <span className="shrink-0 rounded bg-amber-100 px-1 text-[9px] font-bold text-amber-700">Quinté+</span>
-                            )}
-                          </div>
-                          <div className="mt-0.5 flex items-center gap-1.5">
-                            {c.discipline && (
-                              <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4">{c.discipline}</Badge>
-                            )}
-                            {c.nb_partants && (
-                              <span className="text-[10px] text-muted-foreground">{c.nb_partants} partants</span>
-                            )}
-                          </div>
-                        </div>
-                        {c.statut === "en_cours" ? (
-                          <span className="flex shrink-0 items-center gap-1 text-xs font-medium text-emerald-700">
-                            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />En direct
-                          </span>
-                        ) : c.statut === "termine" ? (
-                          <span className="shrink-0 text-xs text-muted-foreground">Terminée</span>
-                        ) : (
-                          <ArrowRight className="h-4 w-4 shrink-0 text-muted-foreground group-hover:text-brand-gold-dark transition-colors" />
-                        )}
-                      </Link>
-                    ))}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
+              )}
+            </div>
           </div>
 
-          {/* Right col (2/5) */}
-          <div className="lg:col-span-2 space-y-4 sm:space-y-6">
+          {p.raison && <p className="mt-5 line-clamp-2 border-l-2 border-amber-200 pl-3 text-[13px] leading-relaxed text-stone-600">{p.raison}</p>}
 
-            {/* Quick links */}
-            <Card className="border-border/60">
-              <CardHeader className="pb-3">
-                <CardTitle className="text-sm text-muted-foreground font-medium">Accès rapide</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-2">
-                {[
-                  { href: "/bankroll", label: "Suivi du capital", icon: Wallet },
-                  { href: "/strategies", label: "Mes stratégies", icon: BarChart3 },
-                  { href: "/assistant", label: "Assistant IA", icon: Cpu },
-                ].map(({ href, label, icon: Icon }) => (
-                  <Link
-                    key={href}
-                    href={href}
-                    className="flex items-center justify-between p-2.5 rounded-lg hover:bg-accent/40 transition-colors group"
-                  >
-                    <div className="flex items-center gap-2.5 text-sm text-foreground">
-                      <Icon className="w-4 h-4 text-muted-foreground group-hover:text-foreground transition-colors" />
-                      {label}
-                    </div>
-                    <ChevronRight className="w-4 h-4 text-muted-foreground" />
-                  </Link>
-                ))}
-              </CardContent>
-            </Card>
+          <div className="mt-6 flex items-center justify-between border-t border-stone-100 pt-4 text-sm font-medium text-stone-900">
+            Voir l&apos;analyse de la course
+            <ArrowRight className="h-4 w-4 text-stone-400 transition-all group-hover:translate-x-1 group-hover:text-stone-900" aria-hidden="true" />
           </div>
         </div>
       </div>
+    </Link>
+  );
+}
+
+/** Niveau d'un pari de valeur, de 1 à 4 étoiles. */
+function Niveau({ n }: { n: number }) {
+  return <Etoiles n={n} taille="h-3 w-3" />;
+}
+
+/** Sans pari du jour (tôt le matin, jour sans course) : une carte vers le programme. */
+function PariDuJourAttente() {
+  return (
+    <Link href={RUBRIQUES.coursesDuJour.href} className="group block">
+      <div className="esp-panneau rounded-[1.4rem] p-6 sm:p-7">
+        <span className="text-[11px] font-medium uppercase tracking-[0.2em] text-stone-500">Pari du jour</span>
+        <p className="mt-4 font-display text-xl font-medium text-stone-900">Pas encore de sélection.</p>
+        <p className="mt-2 text-sm leading-relaxed text-stone-500">
+          Le pari du jour est publié dès qu&apos;une course présente un écart net entre la chance d&apos;un cheval et sa cote.
+        </p>
+        <span className="mt-5 inline-flex items-center gap-1.5 text-sm font-medium text-stone-900">
+          {RUBRIQUES.coursesDuJour.label} <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" aria-hidden="true" />
+        </span>
+      </div>
+    </Link>
+  );
+}
+
+/** Une colonne du relevé de chiffres clés. */
+function Chiffre({ libelle, children, note }: { libelle: string; children: React.ReactNode; note?: React.ReactNode }) {
+  return (
+    <div className="px-4 py-4 sm:px-6 sm:py-5">
+      <div className="text-[11px] font-medium uppercase tracking-[0.14em] text-stone-500">{libelle}</div>
+      <div className="mt-2 whitespace-nowrap font-display text-2xl font-medium tracking-tight text-stone-900 sm:text-[1.9rem]">{children}</div>
+      <div className="mt-1 min-h-[1rem] text-xs text-stone-500">{note}</div>
     </div>
+  );
+}
+
+// ─── Page ───────────────────────────────────────────────────────
+export default function DashboardPage() {
+  const { user } = useRequireAuth();
+  const plan = user?.plan ?? "free";
+  const isPaid = !!user && !["free", "decouverte"].includes(plan);
+
+  const { data: bankrollStats } = useSWR("bankroll-stats", () => bankrollApi.stats().then((r) => r.data), { refreshInterval: 60_000 });
+  const { data: summary } = useSWR("dashboard-summary", () => statsApi.dashboardSummary().then((r) => r.data), { refreshInterval: 120_000 });
+  const { data: programme } = useSWR("programme-today", () => coursesApi.programme().then((r) => r.data), { refreshInterval: 180_000 });
+  const { data: pariDuJour } = useSWR<PariDuJour | null>("pari-du-jour", () => predictionsApi.pariDuJour().then((r) => r.data), { refreshInterval: 120_000 });
+  const { data: parisProfils } = useSWR<{ profils?: PariProfil[] }>("pari-du-jour-profils", () => predictionsApi.pariDuJourProfils().then((r) => r.data), { refreshInterval: 120_000 });
+  // Même clé et même requête que la page « Suivi du capital » : le cache est partagé.
+  const { data: entrees } = useSWR<Entree[]>("/bankroll/entries", () => bankrollApi.entries().then((r) => r.data));
+
+  // Prochaines courses : à venir / en cours d'abord, triées par heure.
+  // Si tout est terminé (soirée), on retombe sur les dernières courses.
+  const reunions: Reunion[] = programme?.reunions ?? [];
+  const toutes: CourseJour[] = reunions
+    .flatMap((r) => (r.courses ?? []).map((c) => ({ ...c, hippodrome_nom: c.hippodrome_nom || r.hippodrome || "" })))
+    .sort((a, b) => a.date_heure.localeCompare(b.date_heure));
+  const aVenir = toutes.filter((c) => c.statut === "a_venir" || c.statut === "en_cours");
+  const courses = (aVenir.length > 0 ? aVenir : toutes.slice(-6)).slice(0, 6);
+  const aDesProchaines = aVenir.length > 0;
+
+  const topVbs: ValueBet[] = summary?.top_vbs ?? [];
+  const profils = parisProfils?.profils ?? [];
+
+  const capital: number | null = bankrollStats
+    ? (bankrollStats.bankroll_initiale ?? 0) + (bankrollStats.gains_totaux ?? 0) - (bankrollStats.pertes_totales ?? 0)
+    : null;
+  const roi: number = bankrollStats?.roi_global ?? 0;
+  const roiAlgo: number | null = bankrollStats ? bankrollStats.roi_ia_only ?? 0 : null;
+
+  // Courbe : capital après chacun des derniers paris réglés. L'API renvoie les 50
+  // plus récents ; on part du capital actuel et on remonte le temps pour que le
+  // dernier point tombe exactement sur le chiffre affiché.
+  const regles = (entrees ?? [])
+    .filter((e) => e.gain_perte != null && e.resultat && e.resultat !== "en_attente")
+    .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+  let courbe: number[] = [];
+  if (capital != null && regles.length >= 2) {
+    const somme = regles.reduce((s, e) => s + (e.gain_perte ?? 0), 0);
+    let c = capital - somme;
+    courbe = [c, ...regles.map((e) => (c += e.gain_perte ?? 0))];
+  }
+  const variationCourbe = courbe.length ? courbe[courbe.length - 1] - courbe[0] : 0;
+
+  return (
+    <div className="min-h-screen bg-background">
+      {/* ══ En-tête ═════════════════════════════════════════════════ */}
+      <header className="relative isolate overflow-hidden border-b border-stone-200/70 bg-gradient-to-b from-[#FBF8F2] to-background">
+        <div className="pointer-events-none absolute -right-40 -top-40 -z-10 h-[32rem] w-[32rem] rounded-full bg-amber-100/60 blur-3xl" aria-hidden="true" />
+
+        <div className="mx-auto max-w-7xl px-4 pb-10 pt-8 sm:px-6 sm:pb-14 sm:pt-14 lg:px-8">
+          <div className="grid items-center gap-10 lg:grid-cols-[minmax(0,6fr)_minmax(0,5fr)] lg:gap-16">
+            <Reveal>
+              <div className="flex flex-wrap items-center gap-3 text-[11px] font-medium uppercase tracking-[0.2em] text-stone-500">
+                <span className="flex items-center gap-2">
+                  <span className="h-px w-6 bg-amber-600/70" aria-hidden="true" />
+                  {RUBRIQUES.monEspace.label}
+                </span>
+                <span className="rounded-full border border-stone-300 px-2 py-0.5 text-[10px] tracking-[0.14em] text-stone-600">
+                  {planLabel(plan)}
+                </span>
+              </div>
+
+              <h1 className="mt-5 font-display text-[2.2rem] font-medium leading-[1.05] tracking-tight text-stone-900 sm:text-[3.4rem]">
+                Bonjour{user?.prenom ? `, ${user.prenom}` : ""}.
+              </h1>
+              <p className="mt-3 text-base capitalize text-stone-500">
+                {format(new Date(), "EEEE d MMMM yyyy", { locale: fr })}
+              </p>
+
+              {summary && (
+                <p className="mt-6 max-w-lg text-[15px] leading-relaxed text-stone-600">
+                  {summary.nb_courses_jour} course{summary.nb_courses_jour > 1 ? "s" : ""} au programme aujourd&apos;hui
+                  {summary.nb_vbs_actifs ? <>, dont <span className="font-semibold text-stone-900">{summary.nb_vbs_actifs} pari{summary.nb_vbs_actifs > 1 ? "s" : ""} de valeur</span> en cours</> : null}.
+                  {summary.nb_en_cours ? (
+                    <span className="ml-2 inline-flex items-center gap-1.5 whitespace-nowrap text-sm text-emerald-700">
+                      <span className="live-dot h-1.5 w-1.5 rounded-full bg-emerald-500" aria-hidden="true" />
+                      {summary.nb_en_cours} en direct
+                    </span>
+                  ) : null}
+                </p>
+              )}
+
+              <div className="mt-7 flex flex-wrap gap-3">
+                <Button asChild size="lg" className="press h-12 rounded-xl bg-stone-900 px-6 font-medium text-white shadow-[0_12px_24px_-12px_rgba(28,25,23,.6)] hover:bg-stone-800">
+                  <Link href={RUBRIQUES.coursesDuJour.href}>
+                    <Calendar className="mr-2 h-4 w-4" aria-hidden="true" /> {RUBRIQUES.coursesDuJour.label}
+                  </Link>
+                </Button>
+                <Button asChild size="lg" variant="outline" className="press h-12 rounded-xl border-stone-300 bg-white px-6 font-medium text-stone-900 hover:bg-stone-50">
+                  <Link href={RUBRIQUES.quinte.href}>
+                    <Trophy className="mr-2 h-4 w-4 text-amber-700" aria-hidden="true" /> {RUBRIQUES.quinte.label}
+                  </Link>
+                </Button>
+              </div>
+            </Reveal>
+
+            <Reveal delay={120}>
+              <Plan3D className="mx-auto w-full max-w-md lg:max-w-none">
+                {pariDuJour ? <PariDuJourCarte p={pariDuJour} /> : <PariDuJourAttente />}
+              </Plan3D>
+            </Reveal>
+          </div>
+
+          {/* Relevé des chiffres clés : un seul panneau, quatre colonnes. */}
+          <Reveal delay={200}>
+            <div className="esp-panneau mt-12 grid grid-cols-2 overflow-hidden rounded-2xl lg:grid-cols-4 [&>*]:border-stone-100 [&>*:nth-child(odd)]:border-r [&>*:nth-child(-n+2)]:border-b lg:[&>*:nth-child(-n+2)]:border-b-0 lg:[&>*:nth-child(-n+3)]:border-r">
+              <Chiffre
+                libelle="Capital"
+                note={bankrollStats && (
+                  <span className={cn("inline-flex items-center gap-1 font-medium", roi >= 0 ? "text-emerald-700" : "text-rose-700")}>
+                    {roi >= 0 ? <TrendingUp className="h-3 w-3" aria-hidden="true" /> : <TrendingDown className="h-3 w-3" aria-hidden="true" />}
+                    {roi > 0 ? "+" : ""}{nf(roi, 1)} % de rendement
+                  </span>
+                )}
+              >
+                <Compteur valeur={capital} suffixe={" €"} />
+              </Chiffre>
+              <Chiffre libelle="Paris suivis" note={bankrollStats ? `${bankrollStats.nb_paris ?? 0} paris enregistrés` : null}>
+                <Compteur
+                  valeur={roiAlgo} decimales={1} suffixe={" %"} signe
+                  className={roiAlgo == null ? undefined : roiAlgo >= 0 ? "text-emerald-800" : "text-rose-800"}
+                />
+              </Chiffre>
+              <Chiffre libelle={RUBRIQUES.parisDeValeur.label} note={(summary?.nb_vbs_premium ?? 0) > 0 ? `dont ${summary.nb_vbs_premium} de niveau 3 ou plus` : null}>
+                <Compteur valeur={summary?.nb_vbs_actifs} />
+              </Chiffre>
+              <Chiffre libelle="Courses du jour" note={(summary?.nb_en_cours ?? 0) > 0 ? `${summary.nb_en_cours} en cours` : null}>
+                <Compteur valeur={summary?.nb_courses_jour} />
+              </Chiffre>
+            </div>
+          </Reveal>
+        </div>
+      </header>
+
+      <div className="mx-auto max-w-7xl space-y-14 px-4 py-12 sm:space-y-20 sm:px-6 sm:py-16 lg:px-8">
+        {/* ══ Le pari du jour par profil ══════════════════════════════ */}
+        {profils.length > 0 && (
+          <section>
+            <SectionTitre sur="Selon votre profil" titre="Trois façons de jouer aujourd'hui" />
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3 sm:gap-5">
+              {profils.map((p, i) => <CarteProfil key={p.profil} p={p} i={i} />)}
+            </div>
+          </section>
+        )}
+
+        {/* ══ Capital + outils ════════════════════════════════════════ */}
+        <section className="grid grid-cols-1 gap-6 lg:grid-cols-5">
+          <Reveal className="lg:col-span-3">
+            <PanneauCapital capital={capital} courbe={courbe} variation={variationCourbe} stats={bankrollStats} />
+          </Reveal>
+          <Reveal className="lg:col-span-2" delay={120}>
+            <Outils modele={summary} />
+          </Reveal>
+        </section>
+
+        {/* ══ Paris de valeur + prochaines courses ═════════════════════ */}
+        <section className="grid grid-cols-1 gap-10 lg:grid-cols-5 lg:gap-6">
+          <div className="lg:col-span-3">
+            <SectionTitre
+              sur="Sélection du moment"
+              titre="Meilleurs paris de valeur"
+              aside={<Link href={RUBRIQUES.parisDeValeur.href} className={lienDiscret}>Voir tous <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" aria-hidden="true" /></Link>}
+            />
+            <ParisDeValeur vbs={topVbs} isPaid={isPaid} />
+          </div>
+          <div className="lg:col-span-2">
+            <SectionTitre
+              sur="Programme"
+              titre={aDesProchaines ? "Prochaines courses" : "Courses du jour"}
+              aside={<Link href={RUBRIQUES.coursesDuJour.href} className={lienDiscret}>Tout voir <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" aria-hidden="true" /></Link>}
+            />
+            <ProchainesCourses courses={courses} />
+          </div>
+        </section>
+      </div>
+    </div>
+  );
+}
+
+// ─── Cartes par profil ──────────────────────────────────────────
+const PROFIL_TEINTE: Record<string, { filet: string; texte: string; barre: string }> = {
+  conservateur: { filet: "bg-emerald-700", texte: "text-emerald-800", barre: "bg-emerald-700" },
+  equilibre: { filet: "bg-stone-800", texte: "text-stone-800", barre: "bg-stone-800" },
+  agressif: { filet: "bg-amber-700", texte: "text-amber-800", barre: "bg-amber-700" },
+};
+
+function CarteProfil({ p, i }: { p: PariProfil; i: number }) {
+  const t = PROFIL_TEINTE[p.profil] ?? PROFIL_TEINTE.equilibre;
+  const proba = Math.round((p.probabilite ?? 0) * 100);
+  const { ref, hidden } = useReveal<HTMLDivElement>(0.3);
+  return (
+    <Reveal delay={i * 110}>
+      <Link href={`/courses/${p.course_id}`} className="group block h-full">
+        <Tilt max={4} className="h-full rounded-2xl">
+          <div ref={ref} className="esp-panneau relative flex h-full flex-col overflow-hidden rounded-2xl p-5 sm:p-6">
+            <span className={cn("absolute inset-x-0 top-0 h-[3px]", t.filet)} aria-hidden="true" />
+            <div className="flex items-center justify-between gap-2">
+              <span className={cn("text-[11px] font-semibold uppercase tracking-[0.16em]", t.texte)}>{p.profil_label}</span>
+              <span className="truncate text-[11px] text-stone-400">
+                {[p.code, titleCase(p.hippodrome), heureDe(p.date_heure)].filter(Boolean).join(" · ")}
+              </span>
+            </div>
+            <div className="mt-4 font-display text-lg font-medium text-stone-900">{p.type_pari}</div>
+            {p.discipline && <div className="text-[11px] text-stone-500">{disciplineLabel(p.discipline)}</div>}
+            {/* Casaque + dossard + nom de chaque cheval joué. */}
+            <ul className="mt-3 space-y-1.5">
+              {(p.chevaux ?? []).map((c) => (
+                <li key={c.numero} className="flex min-w-0 items-center gap-2 text-sm text-stone-800">
+                  {c.nom
+                    ? <IdentiteCheval numero={c.numero} nom={titleCase(c.nom)} courseId={p.course_id} />
+                    : <CasaqueNumero numero={c.numero} courseId={p.course_id} />}
+                </li>
+              ))}
+            </ul>
+
+            <dl className="mt-4 grid grid-cols-2 gap-3 rounded-xl bg-stone-50 px-3 py-2.5 text-xs ring-1 ring-stone-100">
+              <div>
+                <dt className="text-stone-500">Mise conseillée</dt>
+                <dd className="mt-0.5 font-display text-base font-medium tabular-nums text-stone-900">{euros(p.mise, 2)}</dd>
+              </div>
+              <div className="text-right">
+                <dt className="text-stone-500">Gain possible</dt>
+                <dd className="mt-0.5 font-display text-base font-medium tabular-nums text-stone-900">{euros(p.gain_potentiel, 2)}</dd>
+              </div>
+            </dl>
+
+            <div className="mt-6 flex items-baseline justify-between border-t border-stone-100 pt-4">
+              <span className="text-xs text-stone-500">Chance de toucher</span>
+              <span className="font-display text-2xl font-medium tabular-nums text-stone-900">{proba}<span className="text-sm text-stone-500"> %</span></span>
+            </div>
+            <div className="mt-2 h-1 overflow-hidden rounded-full bg-stone-100">
+              <div className={cn("tr-bar h-full rounded-full", t.barre)} style={{ width: hidden ? "0%" : `${Math.max(2, proba)}%` }} />
+            </div>
+            <div className={cn("mt-2 text-right text-[11px] font-medium", p.ev > 0 ? "text-emerald-700" : "text-stone-500")}>
+              EV {p.ev > 0 ? "+" : ""}{Math.round((p.ev ?? 0) * 100)} %
+            </div>
+            {p.raisons?.[0] && <p className="mt-3 line-clamp-2 text-xs leading-relaxed text-stone-500">{p.raisons[0]}</p>}
+          </div>
+        </Tilt>
+      </Link>
+    </Reveal>
+  );
+}
+
+// ─── Capital ────────────────────────────────────────────────────
+function PanneauCapital({ capital, courbe, variation, stats }: {
+  capital: number | null;
+  courbe: number[];
+  variation: number;
+  stats?: {
+    nb_paris?: number; nb_gagnants?: number; nb_perdants?: number; taux_reussite?: number;
+    bankroll_initiale?: number | null; mise_totale?: number; gains_totaux?: number; pertes_totales?: number;
+  };
+}) {
+  const taux = stats?.taux_reussite ?? 0;
+  return (
+    <div className="esp-panneau h-full rounded-3xl p-5 sm:p-8">
+      <div className="flex flex-wrap items-start justify-between gap-5">
+        <div>
+          <span className="flex items-center gap-2 text-[11px] font-medium uppercase tracking-[0.2em] text-stone-500">
+            <span className="h-px w-5 bg-amber-600/70" aria-hidden="true" /> {RUBRIQUES.suiviCapital.label}
+          </span>
+          <div className="mt-3 font-display text-4xl font-medium tracking-tight text-stone-900 sm:text-5xl">
+            <Compteur valeur={capital} suffixe={" €"} />
+          </div>
+          {courbe.length > 0 && (
+            <div className={cn("mt-2 text-sm", variation >= 0 ? "text-emerald-700" : "text-rose-700")}>
+              <span className="font-semibold tabular-nums">{variation >= 0 ? "+" : ""}{nf(variation, 2)} €</span>
+              <span className="text-stone-500"> sur vos {courbe.length - 1} derniers paris</span>
+            </div>
+          )}
+        </div>
+
+        <Anneau pct={taux} taille={84} epaisseur={4} couleur={["#047857", "#10B981"]} fond="rgba(120,113,108,.14)">
+          <span className="font-display text-lg font-medium leading-none text-stone-900">{nf(taux, 0)} %</span>
+          <span className="mt-0.5 text-[9px] font-medium uppercase tracking-wider text-stone-500">réussite</span>
+        </Anneau>
+      </div>
+
+      <div className="mt-8">
+        {courbe.length > 0 ? (
+          <CourbeCapital points={courbe} hauteur={150} />
+        ) : (
+          <div className="flex h-[150px] flex-col items-center justify-center rounded-2xl border border-dashed border-stone-200 text-center">
+            <p className="text-sm font-medium text-stone-700">Votre courbe apparaîtra ici</p>
+            <p className="mt-1 text-xs text-stone-500">Enregistrez au moins deux paris réglés pour la tracer.</p>
+          </div>
+        )}
+      </div>
+
+      <dl className="mt-6 grid grid-cols-2 gap-x-6 gap-y-3 border-t border-stone-100 pt-5 text-sm sm:grid-cols-4">
+        {[
+          { l: "Capital de départ", v: euros(stats?.bankroll_initiale ?? (stats ? 0 : null)), c: "text-stone-900" },
+          { l: "Total misé", v: euros(stats?.mise_totale, 2), c: "text-stone-900" },
+          { l: "Gains", v: stats ? `+${euros(stats.gains_totaux, 2)}` : "—", c: "text-emerald-700" },
+          { l: "Pertes", v: stats ? `−${euros(stats.pertes_totales, 2)}` : "—", c: "text-rose-700" },
+        ].map((k) => (
+          <div key={k.l}>
+            <dt className="text-[11px] text-stone-500">{k.l}</dt>
+            <dd className={cn("font-display text-base font-medium tabular-nums", k.c)}>{k.v}</dd>
+          </div>
+        ))}
+      </dl>
+
+      <div className="mt-5 flex items-center justify-between gap-4 border-t border-stone-100 pt-5">
+        <dl className="flex gap-6 text-sm sm:gap-8">
+          {[
+            { l: "Paris", v: stats?.nb_paris, c: "text-stone-900" },
+            { l: "Gagnés", v: stats?.nb_gagnants, c: "text-emerald-700" },
+            { l: "Perdus", v: stats?.nb_perdants, c: "text-rose-700" },
+          ].map((k) => (
+            <div key={k.l}>
+              <dt className="text-[11px] text-stone-500">{k.l}</dt>
+              <dd className={cn("font-display text-lg font-medium", k.c)}><Compteur valeur={k.v} /></dd>
+            </div>
+          ))}
+        </dl>
+        <Link href={RUBRIQUES.suiviCapital.href} className={cn(lienDiscret, "shrink-0")}>
+          Détail <ArrowUpRight className="h-4 w-4 transition-transform group-hover:-translate-y-0.5 group-hover:translate-x-0.5" aria-hidden="true" />
+        </Link>
+      </div>
+    </div>
+  );
+}
+
+// ─── Outils ─────────────────────────────────────────────────────
+const OUTILS = [
+  { r: RUBRIQUES.assistant, icone: Cpu },
+  { r: RUBRIQUES.strategies, icone: Target },
+  { r: RUBRIQUES.statistiques, icone: BarChart3 },
+  { r: RUBRIQUES.resultats, icone: Radio },
+];
+
+interface EtatModele {
+  precision_top3?: number | null;
+  model_auc?: number | null;
+  nb_courses_evaluees?: number;
+  drift_severity?: string;
+}
+
+function Outils({ modele }: { modele?: EtatModele }) {
+  const derive = modele?.drift_severity && modele.drift_severity !== "none";
+  return (
+    <div className="esp-panneau h-full rounded-3xl p-5 sm:p-8">
+      <span className="flex items-center gap-2 text-[11px] font-medium uppercase tracking-[0.2em] text-stone-500">
+        <span className="h-px w-5 bg-amber-600/70" aria-hidden="true" /> Accès rapide
+      </span>
+      <h2 className="mt-3 font-display text-xl font-medium tracking-tight text-stone-900 sm:text-[1.65rem]">Vos outils</h2>
+      <ul className="mt-5 divide-y divide-stone-100">
+        {OUTILS.map(({ r, icone: Icone }) => (
+          <li key={r.href}>
+            <Link href={r.href} className="group flex items-center gap-4 py-3.5">
+              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-b from-white to-stone-100 text-stone-700 shadow-[0_1px_0_#fff_inset,0_0_0_1px_rgba(28,25,23,.08),0_6px_12px_-8px_rgba(28,25,23,.35)] transition-transform duration-300 group-hover:-translate-y-0.5">
+                <Icone className="h-[18px] w-[18px]" aria-hidden="true" />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block text-sm font-medium text-stone-900">{r.label}</span>
+                <span className="block truncate text-xs text-stone-500">{r.description}</span>
+              </span>
+              <ArrowRight className="h-4 w-4 shrink-0 text-stone-300 transition-all group-hover:translate-x-0.5 group-hover:text-stone-900" aria-hidden="true" />
+            </Link>
+          </li>
+        ))}
+      </ul>
+
+      {/* État du modèle, tel que publié par /stats/dashboard-summary. Les chiffres
+          absents (modèle non crédible, trop peu de courses) restent des tirets. */}
+      {modele && (
+        <div className="mt-5 rounded-2xl bg-stone-50 p-4 ring-1 ring-stone-100">
+          <div className="flex items-center justify-between gap-2">
+            <span className="inline-flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-[0.16em] text-stone-500">
+              <Activity className="h-3.5 w-3.5" aria-hidden="true" /> Le modèle
+            </span>
+            <span className={cn("inline-flex items-center gap-1.5 text-[11px] font-medium", derive ? "text-amber-700" : "text-emerald-700")}>
+              <span className={cn("h-1.5 w-1.5 rounded-full", derive ? "bg-amber-500" : "bg-emerald-500")} aria-hidden="true" />
+              {derive ? "Recalibrage en cours" : "Stable"}
+            </span>
+          </div>
+          <dl className="mt-3 grid grid-cols-3 gap-2 text-center">
+            <div>
+              <dd className="font-display text-lg font-medium tabular-nums text-stone-900">{pct(modele.precision_top3)}</dd>
+              <dt className="text-[10px] leading-tight text-stone-500">gagnant dans notre top 3</dt>
+            </div>
+            <div>
+              <dd className="font-display text-lg font-medium tabular-nums text-stone-900">{modele.model_auc != null ? nf(modele.model_auc, 2) : "—"}</dd>
+              <dt className="text-[10px] leading-tight text-stone-500">AUC</dt>
+            </div>
+            <div>
+              <dd className="font-display text-lg font-medium tabular-nums text-stone-900">{modele.nb_courses_evaluees != null ? nf(modele.nb_courses_evaluees) : "—"}</dd>
+              <dt className="text-[10px] leading-tight text-stone-500">courses évaluées</dt>
+            </div>
+          </dl>
+          <Link href={RUBRIQUES.performances.href} className={cn(lienDiscret, "mt-3 text-xs")}>
+            {RUBRIQUES.performances.label} <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" aria-hidden="true" />
+          </Link>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Paris de valeur ────────────────────────────────────────────
+function ParisDeValeur({ vbs, isPaid }: { vbs: ValueBet[]; isPaid: boolean }) {
+  const { ref, hidden } = useReveal<HTMLDivElement>(0.25);
+
+  if (!isPaid) {
+    return (
+      <Reveal>
+        <div className="esp-panneau relative overflow-hidden rounded-3xl p-5 sm:p-6">
+          {/* Silhouette floutée de la liste : des barres, aucun cheval ni cote inventés. */}
+          <div className="space-y-4 blur-[3px]" aria-hidden="true">
+            {[78, 64, 52].map((w) => (
+              <div key={w} className="flex items-center gap-4 py-2">
+                <div className="h-6 w-6 rounded bg-stone-100" />
+                <div className="flex-1 space-y-2">
+                  <div className="h-3 rounded bg-stone-200" style={{ width: `${w}%` }} />
+                  <div className="h-2 w-1/3 rounded bg-stone-100" />
+                </div>
+                <div className="h-5 w-12 rounded bg-stone-100" />
+              </div>
+            ))}
+          </div>
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-gradient-to-b from-white/50 via-white/90 to-white px-6 text-center">
+            <LockKeyhole className="h-5 w-5 text-stone-700" aria-hidden="true" />
+            <p className="mt-3 font-display text-base font-medium text-stone-900">Réservé aux abonnés</p>
+            <p className="mt-1 max-w-xs text-xs text-stone-500">Les paris de valeur en temps réel sont inclus dès l&apos;abonnement Standard.</p>
+            <Button asChild size="sm" className="press mt-4 rounded-lg bg-stone-900 font-medium text-white hover:bg-stone-800">
+              <Link href={RUBRIQUES.tarifs.href}>Voir les abonnements</Link>
+            </Button>
+          </div>
+        </div>
+      </Reveal>
+    );
+  }
+
+  if (vbs.length === 0) {
+    return (
+      <Reveal>
+        <div className="rounded-3xl border border-dashed border-stone-200 px-6 py-12 text-center">
+          <p className="text-sm font-medium text-stone-700">Aucun pari de valeur pour le moment</p>
+          <p className="mt-1 text-xs text-stone-500">Une sélection apparaît dès qu&apos;une cote dépasse la chance réelle d&apos;un cheval.</p>
+        </div>
+      </Reveal>
+    );
+  }
+
+  const evMax = Math.max(...vbs.map((v) => v.ev), 0.01);
+
+  return (
+    <div ref={ref} className="esp-panneau divide-y divide-stone-100 overflow-hidden rounded-3xl">
+      {vbs.map((vb, i) => (
+        <Link
+          key={`${vb.course_id}-${i}`}
+          href={`/courses/${vb.course_id}`}
+          className={cn("group flex items-center gap-4 px-4 py-4 transition-colors hover:bg-stone-50/80 sm:px-6", !hidden && "esp-ligne")}
+          style={{ animationDelay: `${i * 90}ms` }}
+        >
+          <span className="w-5 shrink-0 font-display text-lg font-medium tabular-nums text-stone-400">{i + 1}</span>
+          <div className="min-w-0 flex-1">
+            <div className="flex min-w-0 items-center gap-2 text-sm font-medium text-stone-900">
+              <IdentiteCheval numero={vb.numero} nom={vb.nom_cheval} courseId={vb.course_id} />
+            </div>
+            <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-stone-500">
+              {vb.code && <span className="font-medium text-stone-600">{vb.code}</span>}
+              <span className="truncate">{titleCase(vb.hippodrome)}</span>
+              {heureDe(vb.date_heure, vb.heure) && <span className="inline-flex items-center gap-0.5"><Clock className="h-3 w-3" aria-hidden="true" />{heureDe(vb.date_heure, vb.heure)}</span>}
+              {vb.discipline && <span>{disciplineLabel(vb.discipline)}</span>}
+              <Niveau n={vb.niveau} />
+            </div>
+            <div className="mt-2.5 h-[3px] max-w-xs overflow-hidden rounded-full bg-stone-100">
+              <div className="tr-bar h-full rounded-full bg-emerald-600/80" style={{ width: hidden ? "0%" : `${Math.max(6, (vb.ev / evMax) * 100)}%` }} />
+            </div>
+          </div>
+          <div className="shrink-0 text-right">
+            <div className={cn("font-display text-lg font-medium tabular-nums", vb.ev > 0 ? "text-emerald-700" : "text-rose-700")}>
+              {vb.ev > 0 ? "+" : ""}{Math.round(vb.ev * 100)} %
+            </div>
+            <div className="text-[10px] uppercase tracking-wider text-stone-400">EV</div>
+            {vb.cote && <div className="text-[11px] text-stone-500">cote {vb.cote}</div>}
+          </div>
+          <ArrowRight className="hidden h-4 w-4 shrink-0 text-stone-300 transition-all group-hover:translate-x-0.5 group-hover:text-stone-900 sm:block" aria-hidden="true" />
+        </Link>
+      ))}
+    </div>
+  );
+}
+
+// ─── Prochaines courses ─────────────────────────────────────────
+function ProchainesCourses({ courses }: { courses: CourseJour[] }) {
+  const { ref, hidden } = useReveal<HTMLOListElement>(0.2);
+
+  if (courses.length === 0) {
+    return (
+      <div className="rounded-3xl border border-dashed border-stone-200 px-6 py-12 text-center">
+        <p className="text-sm font-medium text-stone-700">Aucune course pour le moment</p>
+      </div>
+    );
+  }
+
+  return (
+    <ol ref={ref} className="esp-panneau divide-y divide-stone-100 overflow-hidden rounded-3xl">
+      {courses.map((c, i) => {
+        const direct = c.statut === "en_cours";
+        const finie = c.statut === "termine";
+        return (
+          <li key={c.course_id} className={cn(!hidden && "esp-ligne")} style={{ animationDelay: `${i * 80}ms` }}>
+            <Link href={`/courses/${c.course_id}`} className="group flex items-center gap-4 px-4 py-3.5 transition-colors hover:bg-stone-50/80 sm:px-5">
+              <span className={cn(
+                "w-12 shrink-0 font-display text-base font-medium tabular-nums",
+                direct ? "text-emerald-700" : finie ? "text-stone-300" : "text-stone-900",
+              )}>
+                {heureParis(c.date_heure)}
+              </span>
+              <span className={cn("h-8 w-px shrink-0", direct ? "bg-emerald-500" : "bg-stone-200")} aria-hidden="true" />
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2">
+                  {c.numero_reunion ? <span className="shrink-0 text-[11px] font-medium text-stone-500">R{c.numero_reunion}C{c.numero}</span> : null}
+                  <span className={cn("truncate text-sm font-medium", finie ? "text-stone-400" : "text-stone-900")}>
+                    {titleCase(c.hippodrome_nom) || titleCase(c.nom) || "—"}
+                  </span>
+                  {(c.est_quinte || c.est_quarte || c.est_tierce) && (
+                    <span className="shrink-0 rounded border border-amber-300 px-1 text-[9px] font-semibold uppercase tracking-wide text-amber-800">
+                      {c.est_quinte ? "Quinté+" : c.est_quarte ? "Quarté+" : "Tiercé"}
+                    </span>
+                  )}
+                </div>
+                {c.nom && <div className="truncate text-[11px] text-stone-600">{titleCase(c.nom)}</div>}
+                <div className="mt-0.5 truncate text-[11px] text-stone-500">
+                  {[
+                    disciplineLabel(c.discipline),
+                    c.distance ? `${nf(c.distance)} m` : null,
+                    c.nb_partants ? `${c.nb_partants} partants` : null,
+                    c.penetrometre_desc ? titleCase(c.penetrometre_desc) : null,
+                    c.pool_total_eur ? `${nf(c.pool_total_eur)} € d'enjeux` : null,
+                  ].filter(Boolean).join(" · ")}
+                </div>
+              </div>
+              {direct ? (
+                <span className="flex shrink-0 items-center gap-1.5 text-[11px] font-medium text-emerald-700">
+                  <span className="live-dot h-1.5 w-1.5 rounded-full bg-emerald-500" aria-hidden="true" /> En direct
+                </span>
+              ) : finie ? (
+                <span className="shrink-0 text-[11px] text-stone-400">Terminée</span>
+              ) : (
+                <ArrowRight className="h-4 w-4 shrink-0 text-stone-300 transition-all group-hover:translate-x-0.5 group-hover:text-stone-900" aria-hidden="true" />
+              )}
+            </Link>
+          </li>
+        );
+      })}
+    </ol>
   );
 }
