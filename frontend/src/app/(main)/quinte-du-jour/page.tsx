@@ -15,6 +15,7 @@ import {
   ogBase,
   twitterBase,
   type SeoCourse,
+  type SeoCourseDetail,
 
   jsonLd,
 } from "@/lib/seo";
@@ -25,18 +26,34 @@ import { PreuvesRecentesCard } from "@/components/courses/insights";
 
 export const revalidate = 300;
 
-/** La course support du Quinté+ du jour (une seule par journée PMU). */
-async function quinteDuJour(jour: string): Promise<SeoCourse | null> {
-  const prog = await fetchProgramme(jour);
-  for (const r of prog?.reunions ?? []) {
-    for (const c of r.courses ?? []) if (c.est_quinte) return c;
+type QuinteDuJour =
+  | { status: "ok"; course: SeoCourse }
+  | { status: "absent" }
+  | { status: "indisponible" };
+
+/** La course support du Quinté+ du jour (une seule par journée PMU).
+ *
+ * « Pas de Quinté+ dans le programme » et « programme illisible » ne sont pas la même
+ * chose : un 429 ou un délai dépassé côté API rendait `null`, et la page annonçait
+ * alors au visiteur que le PMU n'avait « pas encore publié » un Quinté+ connu depuis
+ * la veille — message ensuite figé 5 minutes par l'ISR. Un échec est retenté une fois
+ * hors cache avant d'être signalé comme tel.
+ */
+async function quinteDuJour(jour: string): Promise<QuinteDuJour> {
+  const prog =
+    (await fetchProgramme(jour)) ??
+    (await fetchProgramme(jour, { cache: "no-store" }));
+  if (!prog) return { status: "indisponible" };
+  for (const r of prog.reunions ?? []) {
+    for (const c of r.courses ?? []) if (c.est_quinte) return { status: "ok", course: c };
   }
-  return null;
+  return { status: "absent" };
 }
 
 export async function generateMetadata(): Promise<Metadata> {
   const jour = jourParis();
-  const c = await quinteDuJour(jour);
+  const q = await quinteDuJour(jour);
+  const c = q.status === "ok" ? q.course : null;
 
   // « pronostic IA » est ici la formulation exacte de ce que la page propose, et l'une
   // des requêtes les plus tapées sur ce créneau.
@@ -61,9 +78,12 @@ export async function generateMetadata(): Promise<Metadata> {
 
 export default async function QuinteDuJourPage() {
   const jour = jourParis();
-  const resume = await quinteDuJour(jour);
+  const q = await quinteDuJour(jour);
+  const resume = q.status === "ok" ? q.course : null;
   const detail = resume ? await fetchCourseDetail(resume.course_id) : null;
-  const course = detail?.status === "ok" ? detail.course : null;
+  // Fiche détaillée indisponible (hoquet API) : la course reste connue par le
+  // programme — on l'affiche sans les partants plutôt que de la déclarer absente.
+  const course: SeoCourseDetail | null = detail?.status === "ok" ? detail.course : resume;
   const resultats =
     course?.statut === "termine" ? await fetchResultats(course.course_id) : null;
 
@@ -149,7 +169,9 @@ export default async function QuinteDuJourPage() {
             ? `${codeReunionCourse(course.course_id)} · ${disciplineLabel(course.discipline)} · ${
                 course.distance
               } m · ${course.nb_partants} partants · départ à ${heureParis(course.date_heure)}.`
-            : "Le support du Quinté+ n'est pas encore publié pour aujourd'hui. Le PMU le désigne la veille au soir."
+            : q.status === "indisponible"
+              ? "Le programme du jour est momentanément indisponible. Rechargez la page dans une minute."
+              : "Le support du Quinté+ n'est pas encore publié pour aujourd'hui. Le PMU le désigne la veille au soir."
         }
       />
 
@@ -293,6 +315,17 @@ export default async function QuinteDuJourPage() {
               tout le détail du Quinté+ est sur la fiche de la course.
             </Callout>
           </>
+        ) : q.status === "indisponible" ? (
+          <Section title="Programme momentanément indisponible">
+            <p className="text-sm text-brand-charcoal">
+              Nous n'avons pas pu lire le programme du jour. Rechargez la page dans une minute,
+              ou consultez le{" "}
+              <Link href="/programme" className="font-medium text-brand-gold-dark hover:underline">
+                programme complet du jour
+              </Link>
+              .
+            </p>
+          </Section>
         ) : (
           <Section title="Pas encore de Quinté+ publié">
             <p className="text-sm text-brand-charcoal">

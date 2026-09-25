@@ -96,10 +96,13 @@ export interface SeoProgramme {
   reunions: SeoReunion[];
 }
 
-export async function fetchProgramme(jour?: string): Promise<SeoProgramme | null> {
+export async function fetchProgramme(
+  jour?: string,
+  init: RequestInit = { next: { revalidate: 300 } },
+): Promise<SeoProgramme | null> {
   try {
     const url = `${API}/programme${jour ? `?jour=${encodeURIComponent(jour)}` : ""}`;
-    const res = await fetch(url, { next: { revalidate: 300 } });
+    const res = await fetch(url, init);
     if (!res.ok) return null;
     return (await res.json()) as SeoProgramme;
   } catch {
