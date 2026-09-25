@@ -72,7 +72,7 @@ export default function PilotagePage() {
           accent="bleu"
           tendance={revenus?.totaux.variation_pct}
           tendanceLabel="vs mois préc."
-          serie={revenus?.mois.map((m) => m.encaisse_cents / 100)}
+          serie={revenus?.mois.map((m) => m.ca_cents / 100)}
           href="/admin/revenus"
         />
         <Kpi

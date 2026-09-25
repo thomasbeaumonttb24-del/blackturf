@@ -20,11 +20,11 @@ import {
   Area, AreaChart, CartesianGrid, ComposedChart, Line, ReferenceDot, ReferenceLine,
   ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
-import { CalendarClock, ChevronLeft, ChevronRight, Euro, Landmark, Repeat } from "lucide-react";
+import { AlertTriangle, CalendarClock, CheckCircle2, ChevronLeft, ChevronRight, Euro, FileText, Landmark, Loader2, RefreshCw, Repeat } from "lucide-react";
 import { cn, formatDateTime } from "@/lib/utils";
 import {
-  BadgeFormule, CelluleCompte, DefilementX, EnTetePage, Etat, GrilleKpi, Kpi, Panneau, Puce,
-  Segments, Squelette, TD, TH, Tableau, Vide, eur, num, pct, signedPct, type Colonne,
+  BadgeFormule, CelluleCompte, EnTetePage, Etat, GrilleKpi, Kpi, Panneau, Puce,
+  Segments, Squelette, Tableau, Vide, eur, num, pct, signedPct, type Colonne,
 } from "@/components/admin/ui";
 import { useAbonnements, useRevenus } from "@/components/admin/data";
 import {
@@ -32,6 +32,8 @@ import {
 } from "@/components/admin/graphes";
 import type { Echeance, MoisRevenu, PaiementRecu } from "@/components/admin/types";
 import CompteARebours from "@/components/admin/vues/CompteARebours";
+import ReleveDeclaration from "@/components/admin/vues/ReleveDeclaration";
+import { adminApi } from "@/lib/api";
 
 /* ─────────────────────────────── formats ───────────────────────────────── */
 
@@ -136,7 +138,10 @@ function CourbeRevenus({
                 <Infobulle
                   titre={<span>{nomMois(p.cle, "long")}</span>}
                   lignes={[
-                    { label: "Encaissé", valeur: euros(p.m.encaisse_cents, 2), couleur: PALETTE.ardoise },
+                    { label: "Encaissé (CA)", valeur: euros(p.m.ca_cents, 2), couleur: PALETTE.ardoise },
+                    ...(p.m.rembourse_cents ? [{ label: "Remboursements", valeur: `−${euros(p.m.rembourse_cents, 2)}`, secondaire: true }] : []),
+                    ...(p.m.frais_connus && p.m.nb_paiements > 0 ? [{ label: "Frais Stripe", valeur: `−${euros(p.m.frais_cents, 2)}`, secondaire: true },
+                      { label: "Net perçu", valeur: euros(p.m.net_cents, 2), secondaire: true }] : []),
                     { label: "Nouveaux clients", valeur: euros(p.m.nouveaux_cents, 2), secondaire: true },
                     { label: "Renouvellements", valeur: euros(p.m.renouvellements_cents, 2), secondaire: true },
                     ...(p.prevu != null ? [{ label: "Atterrissage prévu", valeur: eur(p.prevu, 2), couleur: PALETTE.ardoiseMoyen, pointille: true }] : []),
@@ -187,22 +192,28 @@ function CourbeRevenus({
 
 /** Bandeau de lecture sous la courbe : les repères qu'on cherche des yeux. */
 function Reperes({ mois }: { mois: MoisRevenu[] }) {
-  const actifs = mois.filter((m) => m.encaisse_cents > 0);
+  const actifs = mois.filter((m) => m.ca_cents > 0);
   if (actifs.length === 0) return null;
-  const meilleur = actifs.reduce((a, b) => (b.encaisse_cents > a.encaisse_cents ? b : a));
-  const faible = actifs.reduce((a, b) => (b.encaisse_cents < a.encaisse_cents ? b : a));
-  const premier = actifs[0];
-  const dernierComplet = mois.length > 1 ? mois[mois.length - 2] : mois[mois.length - 1];
-  const croissance = variation(dernierComplet.encaisse_cents, premier.encaisse_cents);
+  const meilleur = actifs.reduce((a, b) => (b.ca_cents > a.ca_cents ? b : a));
+  const faible = actifs.reduce((a, b) => (b.ca_cents < a.ca_cents ? b : a));
+  // Progression : du premier au DERNIER mois complet ayant des encaissements.
+  // L'ancienne version comparait au mois précédent même vide, et affichait
+  // « −100 % » quand le seul encaissement tombait dans le mois en cours.
+  const complets = actifs.filter((m) => m.mois !== mois[mois.length - 1]?.mois);
+  const premier = complets[0];
+  const dernier = complets[complets.length - 1];
+  const croissance = premier && dernier && premier !== dernier ? variation(dernier.ca_cents, premier.ca_cents) : null;
   const totalNouveaux = mois.reduce((s, m) => s + m.nouveaux_cents, 0);
   const total = mois.reduce((s, m) => s + m.encaisse_cents, 0);
   const cases = [
-    { l: "Meilleur mois", v: euros(meilleur.encaisse_cents), d: nomMois(meilleur.mois, "long") },
-    { l: "Mois le plus faible", v: euros(faible.encaisse_cents), d: nomMois(faible.mois, "long") },
+    { l: "Meilleur mois", v: euros(meilleur.ca_cents), d: nomMois(meilleur.mois, "long") },
+    { l: "Mois le plus faible", v: euros(faible.ca_cents), d: nomMois(faible.mois, "long") },
     {
       l: "Progression",
       v: croissance == null ? "—" : signedPct(croissance, 0),
-      d: `${nomMois(premier.mois)} → ${nomMois(dernierComplet.mois)}, dernier mois complet`,
+      d: croissance == null
+        ? "au moins deux mois complets encaissés nécessaires"
+        : `${nomMois(premier!.mois)} → ${nomMois(dernier!.mois)} (mois complets)`,
       c: croissance == null ? "" : croissance >= 0 ? "text-emerald-700" : "text-red-700",
     },
     { l: "Part des nouveaux clients", v: total > 0 ? pct((totalNouveaux / total) * 100, 0) : "—", d: `${euros(totalNouveaux)} sur ${euros(total)}` },
@@ -302,7 +313,25 @@ const COLONNES_PAIEMENTS: Colonne<PaiementRecu>[] = [
     titre: "Date",
     rendu: (p) => <span className="whitespace-nowrap text-muted-foreground" title={formatDateTime(p.date)}>{dateCourte(p.date)}</span>,
   },
-  { titre: "Montant", rendu: (p) => <span className="font-semibold text-foreground">{eurosFin(p.montant_cents)}</span>, droite: true },
+  {
+    titre: "Montant",
+    rendu: (p) => (
+      <span className="font-semibold text-foreground">
+        {eurosFin(p.montant_cents)}
+        {p.rembourse_cents > 0 && <span className="ml-1 text-xs font-normal text-red-700">(−{eurosFin(p.rembourse_cents)} remb.)</span>}
+      </span>
+    ),
+    droite: true,
+  },
+  { titre: "Frais", rendu: (p) => <span className="text-muted-foreground">{p.frais_cents == null ? "—" : `−${eurosFin(p.frais_cents)}`}</span>, droite: true },
+  { titre: "Net", rendu: (p) => <span>{p.net_cents == null ? "—" : eurosFin(p.net_cents)}</span>, droite: true },
+  {
+    titre: "Reçu",
+    rendu: (p) => p.recu_url
+      ? <a href={p.recu_url} target="_blank" rel="noopener noreferrer" className="text-xs font-medium text-[#27456b] hover:underline">Reçu Stripe ↗</a>
+      : <span className="text-muted-foreground">—</span>,
+    droite: true,
+  },
 ];
 
 function Ecart({ a, b }: { a: number; b: number | null | undefined }) {
@@ -313,7 +342,7 @@ function Ecart({ a, b }: { a: number; b: number | null | undefined }) {
 
 function DetailMois({ m, precedent }: { m: MoisRevenu; precedent?: MoisRevenu }) {
   const cases = [
-    { label: "Encaissé", v: euros(m.encaisse_cents, 2), a: m.encaisse_cents, b: precedent?.encaisse_cents },
+    { label: "Encaissé (CA)", v: euros(m.ca_cents, 2), a: m.ca_cents, b: precedent?.ca_cents },
     { label: "Nouveaux clients", v: euros(m.nouveaux_cents, 2), a: m.nouveaux_cents, b: precedent?.nouveaux_cents },
     { label: "Renouvellements", v: euros(m.renouvellements_cents, 2), a: m.renouvellements_cents, b: precedent?.renouvellements_cents },
     { label: "Paiements", v: num(m.nb_paiements), a: m.nb_paiements, b: precedent?.nb_paiements },
@@ -386,88 +415,6 @@ function DetailMois({ m, precedent }: { m: MoisRevenu; precedent?: MoisRevenu })
         />
       </div>
     </div>
-  );
-}
-
-/* ─────────────────────────── tableau récapitulatif ─────────────────────── */
-
-function Recapitulatif({ mois, selection, onSelection }: {
-  mois: MoisRevenu[]; selection: string | null; onSelection: (c: string) => void;
-}) {
-  const max = Math.max(1, ...mois.map((m) => m.encaisse_cents));
-  const lignes = [...mois].reverse();
-  const somme = (f: (m: MoisRevenu) => number) => mois.reduce((s, m) => s + f(m), 0);
-  const cellNum = cn(TD, "text-right tabular-nums");
-  return (
-    <DefilementX label="Revenus mois par mois">
-      <table className="w-full min-w-[880px] border-collapse">
-        <thead>
-          <tr className="border-b border-border bg-muted/50">
-            <th className={TH}>Mois</th>
-            <th className={cn(TH, "w-[26%]")}>Encaissé</th>
-            <th className={cn(TH, "text-right")}>Évol.</th>
-            <th className={cn(TH, "text-right")}>Paiements</th>
-            <th className={cn(TH, "text-right")}>Nouveaux</th>
-            <th className={cn(TH, "text-right")}>Renouv.</th>
-            <th className={cn(TH, "text-right")}>Standard</th>
-            <th className={cn(TH, "text-right")}>Expert</th>
-            <th className={cn(TH, "text-right")}>Échecs</th>
-            <th className={cn(TH, "text-right")}>Cumul</th>
-          </tr>
-        </thead>
-        <tbody>
-          {lignes.map((m, i) => {
-            const prec = lignes[i + 1];
-            const actif = m.mois === selection;
-            return (
-              <tr
-                key={m.mois}
-                onClick={() => onSelection(m.mois)}
-                aria-selected={actif}
-                className={cn("cursor-pointer border-b border-border/70", actif && "bg-[#faf6ec]")}
-              >
-                <td className={cn(TD, "whitespace-nowrap font-medium", actif && "shadow-[inset_3px_0_0_0_#a8741a]")}>
-                  {nomMois(m.mois, "long")}
-                  {i === 0 && <span className="ml-2 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium normal-case text-muted-foreground">en cours</span>}
-                </td>
-                <td className={TD}>
-                  <div className="flex items-center gap-3">
-                    <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
-                      <div className="h-full rounded-full bg-[#27456b]" style={{ width: `${(m.encaisse_cents / max) * 100}%` }} />
-                    </div>
-                    <span className="w-20 text-right font-semibold tabular-nums">{euros(m.encaisse_cents)}</span>
-                  </div>
-                </td>
-                <td className={cellNum}><Ecart a={m.encaisse_cents} b={prec?.encaisse_cents} /></td>
-                <td className={cellNum}>{num(m.nb_paiements)}</td>
-                <td className={cellNum}>{euros(m.nouveaux_cents)}</td>
-                <td className={cellNum}>{euros(m.renouvellements_cents)}</td>
-                <td className={cellNum}>{euros(m.par_formule.standard)}</td>
-                <td className={cellNum}>{euros(m.par_formule.expert)}</td>
-                <td className={cn(cellNum, m.nb_echecs ? "text-red-700" : "text-muted-foreground")}>
-                  {m.nb_echecs ? `${m.nb_echecs} · ${euros(m.echecs_cents)}` : "—"}
-                </td>
-                <td className={cn(cellNum, "text-muted-foreground")}>{euros(m.cumul_cents)}</td>
-              </tr>
-            );
-          })}
-        </tbody>
-        <tfoot>
-          <tr className="border-t-2 border-border bg-muted/40 font-semibold">
-            <td className={TD}>Total</td>
-            <td className={cn(TD, "text-right tabular-nums")}>{euros(somme((m) => m.encaisse_cents))}</td>
-            <td className={TD} />
-            <td className={cellNum}>{num(somme((m) => m.nb_paiements))}</td>
-            <td className={cellNum}>{euros(somme((m) => m.nouveaux_cents))}</td>
-            <td className={cellNum}>{euros(somme((m) => m.renouvellements_cents))}</td>
-            <td className={cellNum}>{euros(somme((m) => m.par_formule.standard))}</td>
-            <td className={cellNum}>{euros(somme((m) => m.par_formule.expert))}</td>
-            <td className={cellNum}>{num(somme((m) => m.nb_echecs))}</td>
-            <td className={TD} />
-          </tr>
-        </tfoot>
-      </table>
-    </DefilementX>
   );
 }
 
@@ -621,10 +568,65 @@ function Echeancier({ echeances }: { echeances: Echeance[] }) {
 
 /* ───────────────────────────────── page ────────────────────────────────── */
 
+/** D'où viennent les chiffres, et ce que le rapprochement a trouvé. */
+function BandeauSource({ data }: { data: import("@/components/admin/types").RevenusData }) {
+  const [ouvert, setOuvert] = useState(false);
+  const manquants = data.rapprochement.absents_du_journal;
+  if (data.source.type !== "stripe") {
+    return (
+      <div className="flex items-start gap-2.5 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-[13px] text-amber-900">
+        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+        <div>
+          <b className="font-semibold">Chiffres provisoires.</b> {data.source.erreur ?? "Stripe indisponible."}{" "}
+          Le journal interne peut omettre des paiements : ne vous en servez pas pour une déclaration.
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className="rounded-lg border border-border bg-white px-4 py-3 text-[13px] shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+        <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-700" />
+        <span>
+          <b className="font-semibold">Source : votre compte Stripe.</b>{" "}
+          <span className="text-muted-foreground">
+            Débits réussis, remboursements, frais et virements lus directement par l&apos;API
+            {data.source.lu_le ? ` · lu à ${new Date(data.source.lu_le).toLocaleTimeString("fr-FR", { timeZone: "Europe/Paris" })}` : ""}.
+          </span>
+        </span>
+        {manquants.length > 0 && (
+          <button type="button" onClick={() => setOuvert((v) => !v)} className="ml-auto text-xs font-medium text-[#27456b] hover:underline">
+            {manquants.length} paiement{manquants.length > 1 ? "s" : ""} absent{manquants.length > 1 ? "s" : ""} du journal interne — {ouvert ? "masquer" : "voir"}
+          </button>
+        )}
+      </div>
+      {ouvert && manquants.length > 0 && (
+        <div className="mt-3 border-t border-border pt-3 text-xs text-muted-foreground">
+          <p className="mb-2">
+            Ces paiements ont bien été encaissés chez Stripe et sont <b className="text-foreground">comptés dans tous les chiffres de cette page</b>.
+            Le journal interne du site ne les avait pas enregistrés (anciens webhooks) : cet écart est désormais corrigé pour les prochains paiements.
+          </p>
+          <ul className="space-y-1">
+            {manquants.map((e) => (
+              <li key={e.charge_id ?? `${e.date}${e.email}`} className="flex justify-between gap-4 tabular-nums">
+                <span>{new Date(e.date).toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" })} · {e.email ?? "client inconnu"}</span>
+                <b className="text-foreground">{euros(e.montant_cents, 2)}</b>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function RevenusPage() {
   const [fenetre, setFenetre] = useState<"6" | "12" | "24">("12");
   const [vue, setVue] = useState<Vue>("mensuel");
-  const { data } = useRevenus(Number(fenetre));
+  const { data, mutate } = useRevenus(Number(fenetre));
+  // Le relevé de déclaration a besoin d'années civiles complètes : 24 mois.
+  const { data: data24, mutate: mutate24 } = useRevenus(24);
+  const [relecture, setRelecture] = useState(false);
   const { data: abos } = useAbonnements();
   const recu = useRecuLe(data);
   const [choix, setChoix] = useState<string | null>(null);
@@ -635,7 +637,8 @@ export default function RevenusPage() {
     const passes: Point[] = data.mois.map((m, i) => ({
       cle: m.mois,
       label: nomMois(m.mois),
-      encaisse: m.encaisse_cents / 100,
+      // Chiffre d'affaires encaissé : débits réussis moins remboursements.
+      encaisse: m.ca_cents / 100,
       // Le prévu part du mois en cours (son atterrissage) pour prolonger la courbe.
       prevu: m.mois === courant ? data.totaux.atterrissage_mois_cents / 100 : null,
       cumul: m.cumul_cents / 100,
@@ -658,12 +661,24 @@ export default function RevenusPage() {
   const idx = data?.mois.findIndex((m) => m.mois === selection) ?? -1;
   const moisChoisi = idx >= 0 ? data?.mois[idx] : undefined;
   const t = data?.totaux;
-  const serie = data?.mois.map((m) => m.encaisse_cents / 100);
+  const serie = data?.mois.map((m) => m.ca_cents / 100);
   const progression = t && t.atterrissage_mois_cents > 0 ? (t.mois_courant_cents / t.atterrissage_mois_cents) * 100 : null;
 
   const choisir = (cle: string) => {
+    // Un mois du relevé peut sortir de la fenêtre affichée : on l'élargit.
+    if (data && !data.mois.some((m) => m.mois === cle)) setFenetre("24");
     setChoix(cle);
     document.getElementById("detail-mois")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+
+  const relireStripe = async () => {
+    setRelecture(true);
+    try {
+      await adminApi.revenus(Number(fenetre), true);
+      await Promise.all([mutate(), mutate24()]);
+    } finally {
+      setRelecture(false);
+    }
   };
 
   return (
@@ -671,10 +686,17 @@ export default function RevenusPage() {
       <EnTetePage
         titre="Revenus"
         icone={<Euro className="h-4 w-4" />}
-        desc="Encaissements Stripe réels (factures payées), mois par mois, et échéancier des prochains prélèvements."
+        desc="Encaissements lus directement dans votre compte Stripe, mois par mois, et échéancier des prochains prélèvements."
         actions={
           <>
             <Fraicheur depuis={recu} cadence={30_000} />
+            <button
+              type="button" onClick={relireStripe} disabled={relecture}
+              className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border bg-white px-3 text-xs font-medium text-muted-foreground shadow-[0_1px_2px_rgba(16,24,40,0.04)] hover:text-foreground disabled:opacity-60"
+            >
+              {relecture ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+              Relire Stripe
+            </button>
             <Segments
               items={[{ key: "6", label: "6 mois" }, { key: "12", label: "12 mois" }, { key: "24", label: "24 mois" }] as const}
               actif={fenetre}
@@ -684,6 +706,8 @@ export default function RevenusPage() {
           </>
         }
       />
+
+      {data && <BandeauSource data={data} />}
 
       <GrilleKpi>
         <Kpi
@@ -766,6 +790,14 @@ export default function RevenusPage() {
           )}
       </Panneau>
 
+      <Panneau
+        titre="Relevé des encaissements pour déclaration"
+        desc="Chiffre d'affaires encaissé par mois, trimestre ou année civile, avec remboursements, frais Stripe, net et virements. Exportable en CSV."
+        icone={<FileText className="h-3.5 w-3.5" />}
+      >
+        {!data24 ? <Squelette lignes={8} /> : <ReleveDeclaration data={data24} onSelectionMois={choisir} />}
+      </Panneau>
+
       {data && (
         <div className="grid gap-5 xl:grid-cols-2 xl:gap-6">
           <Panneau titre="Nouveaux clients et renouvellements" desc="Premiers paiements et échéances suivantes, empilés : le haut de la courbe est le total encaissé.">
@@ -794,7 +826,9 @@ export default function RevenusPage() {
         <div id="detail-mois" className="scroll-mt-20">
           <Panneau
             titre={`Détail du mois · ${nomMois(moisChoisi.mois, "long")}`}
-            desc="Chaque ligne est une facture Stripe payée, au centime près."
+            desc={data.source.type === "stripe"
+              ? "Chaque ligne est un paiement réussi lu dans Stripe, au centime près, avec ses frais et son reçu."
+              : "Chaque ligne est un paiement du journal interne (Stripe indisponible)."}
             actions={
               <div className="flex items-center gap-1">
                 <button
@@ -806,7 +840,7 @@ export default function RevenusPage() {
                 >
                   <ChevronLeft className="h-4 w-4" />
                 </button>
-                <Puce>{euros(moisChoisi.encaisse_cents, 2)}</Puce>
+                <Puce>{euros(moisChoisi.ca_cents, 2)}</Puce>
                 <button
                   type="button"
                   aria-label="Mois suivant"
@@ -832,14 +866,7 @@ export default function RevenusPage() {
         {!data ? <Squelette lignes={6} /> : <Echeancier echeances={data.echeancier} />}
       </Panneau>
 
-      <Panneau
-        titre="Tableau mois par mois"
-        desc="Cliquez une ligne pour afficher le détail du mois."
-        bodyClassName="p-0 sm:p-0"
-      >
-        {!data ? <div className="p-5"><Squelette lignes={6} /></div>
-          : <div className="px-4 py-4 sm:px-5"><Recapitulatif mois={data.mois} selection={selection} onSelection={choisir} /></div>}
-      </Panneau>
+
     </div>
   );
 }

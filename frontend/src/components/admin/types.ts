@@ -210,14 +210,33 @@ export interface PaiementRecu {
   email: string | null;
   plan: Formule;
   montant_cents: number;
-  /** Premier encaissement de l'abonnement, ou échéance suivante. */
+  rembourse_cents: number;
+  /** Frais Stripe et net crédité — `null` quand la source est le journal interne. */
+  frais_cents: number | null;
+  net_cents: number | null;
+  /** Premier encaissement du client, ou échéance suivante. */
   nature: "nouveau" | "renouvellement";
   motif: string | null;
+  charge_id: string | null;
+  /** Reçu Stripe officiel du paiement. */
+  recu_url: string | null;
+  facture_id: string | null;
+  source: "stripe" | "journal";
 }
 
 export interface MoisRevenu {
   mois: string; // AAAA-MM, fuseau Europe/Paris
+  /** Débits réussis, bruts. */
   encaisse_cents: number;
+  rembourse_cents: number;
+  /** Chiffre d'affaires encaissé = brut − remboursements. */
+  ca_cents: number;
+  frais_cents: number;
+  net_cents: number;
+  /** Virements arrivés sur le compte bancaire ce mois-là. */
+  verse_cents: number;
+  nb_remboursements: number;
+  frais_connus: boolean;
   nb_paiements: number;
   nouveaux_cents: number;
   renouvellements_cents: number;
@@ -245,11 +264,29 @@ export interface Echeance {
   stripe_subscription_id: string | null;
 }
 
+export interface EcartRapprochement {
+  date: string;
+  email: string | null;
+  montant_cents: number;
+  charge_id?: string | null;
+}
+
 export interface RevenusData {
   fuseau: string;
+  source: { type: "stripe" | "journal"; lu_le: string | null; erreur: string | null };
+  rapprochement: {
+    verifie: boolean;
+    absents_du_journal: EcartRapprochement[];
+    absents_de_stripe: EcartRapprochement[];
+  };
   mois: MoisRevenu[];
   totaux: {
     periode_cents: number;
+    brut_cents: number;
+    rembourse_cents: number;
+    frais_cents: number;
+    net_cents: number;
+    verse_cents: number;
     mois_courant_cents: number;
     mois_precedent_cents: number | null;
     variation_pct: number | null;
