@@ -16,7 +16,9 @@ import { CreditCard, Gauge, Hourglass, Loader2, RefreshCw, Users, Wallet } from 
 import { Button } from "@/components/ui/button";
 import { adminApi } from "@/lib/api";
 import { EnTetePage, GrilleKpi, Kpi, depuis, eur, num } from "@/components/admin/ui";
-import { useAbonnements, useDashboard } from "@/components/admin/data";
+import { useAbonnements, useDashboard, useRevenus } from "@/components/admin/data";
+import { Fraicheur, useRecuLe } from "@/components/admin/relief";
+import RevenusApercu from "@/components/admin/vues/RevenusApercu";
 import BandeauAlertes from "@/components/admin/vues/BandeauAlertes";
 import EnDirect from "@/components/admin/vues/EnDirect";
 import RentabiliteProfils from "@/components/admin/vues/RentabiliteProfils";
@@ -24,6 +26,8 @@ import RentabiliteProfils from "@/components/admin/vues/RentabiliteProfils";
 export default function PilotagePage() {
   const { data: dashboard } = useDashboard();
   const { data: abos } = useAbonnements();
+  const { data: revenus } = useRevenus(6);
+  const recu = useRecuLe(abos);
   const [retraining, setRetraining] = useState(false);
   const r = abos?.repartition;
 
@@ -48,31 +52,41 @@ export default function PilotagePage() {
           ? `Modèle v${dashboard.modele.version} · entraîné ${depuis(dashboard.modele.trained_at)}`
           : undefined}
         actions={
+          <>
+          <Fraicheur depuis={recu} cadence={30_000} />
           <Button variant="brand" onClick={lancerRetrain} disabled={retraining} className="min-h-[2.75rem]">
             {retraining ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
             Ré-entraîner
           </Button>
+          </>
         }
       />
 
       <GrilleKpi>
         <Kpi
-          label="Revenu mensuel"
-          valeur={abos ? eur(abos.resume.mrr) : "—"}
-          sub={abos ? `${eur(abos.resume.arr)} par an` : undefined}
+          label="Encaissé ce mois"
+          nombre={revenus ? revenus.totaux.mois_courant_cents / 100 : null}
+          format={(v) => eur(v)}
+          sub={abos ? `Récurrent ${eur(abos.resume.mrr)}/mois · ${eur(abos.resume.arr)}/an` : undefined}
           icone={<Wallet className="h-4 w-4" />}
           accent="or"
+          tendance={revenus?.totaux.variation_pct}
+          tendanceLabel="vs mois préc."
+          serie={revenus?.mois.map((m) => m.encaisse_cents / 100)}
+          href="/admin/revenus"
         />
         <Kpi
           label="Payants"
-          valeur={num(r?.payants)}
+          nombre={r?.payants ?? null}
+          format={(v) => num(Math.round(v))}
           sub={r ? `Standard ${r.par_formule.standard.payants} · Expert ${r.par_formule.expert.payants}` : undefined}
           icone={<CreditCard className="h-4 w-4" />}
           accent="ok"
         />
         <Kpi
           label="En essai"
-          valeur={num(r?.essais)}
+          nombre={r?.essais ?? null}
+          format={(v) => num(Math.round(v))}
           sub={abos
             ? abos.resume.fin_essai_sous_3j > 0
               ? `${abos.resume.fin_essai_sous_3j} finissent sous 3 j`
@@ -83,7 +97,9 @@ export default function PilotagePage() {
         />
         <Kpi
           label="Comptes"
-          valeur={num(r?.comptes)}
+          nombre={r?.comptes ?? null}
+          format={(v) => num(Math.round(v))}
+          accent="violet"
           sub={dashboard ? `+${dashboard.users.nouveaux_7j} cette semaine` : undefined}
           icone={<Users className="h-4 w-4" />}
         />
@@ -97,6 +113,8 @@ export default function PilotagePage() {
           <BandeauAlertes />
         </div>
       </div>
+
+      <RevenusApercu />
 
       <RentabiliteProfils />
     </div>

@@ -262,7 +262,7 @@ export default function ParisTab({ data }: { data?: ParisPayload }) {
             <select
               value={actif?.type ?? ""}
               onChange={(e) => setSelected(e.target.value)}
-              className="min-h-[2.25rem] rounded-lg border border-border bg-card px-2 text-[11px] font-medium text-foreground"
+              className="min-h-[2.25rem] bt-verre rounded-lg px-2 text-[11px] font-medium text-foreground"
             >
               {types.map((t) => (
                 <option key={t.type} value={t.type}>{t.type}</option>

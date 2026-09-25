@@ -1,0 +1,306 @@
+/*
+ * Console d'administration — thème « cockpit 3D » (refonte du 2026-09-25).
+ *
+ * Tout est confiné sous `.bt-admin` : le site public garde son thème clair,
+ * seule la console bascule en sombre profond.
+ *
+ * Deux mécanismes :
+ *   1. les jetons du thème (`--card`, `--muted`, `--border`…) sont redéfinis,
+ *      donc tout ce qui peint avec `bg-card`, `text-muted-foreground`, etc.
+ *      passe en sombre sans toucher une ligne de JSX ;
+ *   2. les teintes pâles codées en dur dans les écrans (`bg-emerald-50`,
+ *      `text-red-700`…) sont REMAPPÉES vers leur équivalent lisible sur fond
+ *      noir. Un vert 700 sur un fond #0B0E17 tombe sous 3:1 de contraste ; le
+ *      vert 400 y dépasse 7:1.
+ *
+ * La profondeur vient de trois couches : un fond à halos + sol en perspective,
+ * des surfaces en verre avec un liseré de lumière en haut, et des ombres portées
+ * longues. Toutes les animations se coupent sous `prefers-reduced-motion`.
+ */
+
+.bt-admin {
+  --background: 230 35% 4%;
+  --foreground: 40 25% 96%;
+  --card: 230 28% 8%;
+  --card-foreground: 40 25% 96%;
+  --popover: 230 28% 8%;
+  --popover-foreground: 40 25% 96%;
+  --primary: 38 92% 50%;
+  --primary-foreground: 230 35% 6%;
+  --secondary: 230 22% 13%;
+  --secondary-foreground: 40 25% 96%;
+  --muted: 230 22% 13%;
+  --muted-foreground: 225 16% 70%;
+  --accent: 230 22% 14%;
+  --accent-foreground: 40 25% 96%;
+  --destructive: 0 78% 60%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 230 20% 17%;
+  --input: 230 22% 13%;
+  --ring: 38 92% 55%;
+
+  --bt-or: #f5b544;
+  --bt-or-vif: #ffcf66;
+  --bt-vert: #34d399;
+  --bt-rouge: #f87171;
+  --bt-ambre: #fbbf24;
+  --bt-ciel: #38bdf8;
+  --bt-violet: #a78bfa;
+
+  color-scheme: dark;
+  color: hsl(var(--foreground));
+  background-color: hsl(var(--background));
+  position: relative;
+  isolation: isolate;
+}
+
+/* ── Fond : halos colorés + sol quadrillé en perspective ───────────────────── */
+.bt-admin::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -2;
+  pointer-events: none;
+  background:
+    radial-gradient(60rem 40rem at 12% -10%, rgba(245, 158, 11, 0.16), transparent 60%),
+    radial-gradient(50rem 36rem at 95% 10%, rgba(56, 189, 248, 0.10), transparent 60%),
+    radial-gradient(40rem 30rem at 60% 110%, rgba(167, 139, 250, 0.12), transparent 60%),
+    linear-gradient(180deg, #070912 0%, #05060b 100%);
+}
+.bt-admin::after {
+  content: "";
+  position: fixed;
+  left: -50%;
+  right: -50%;
+  bottom: -10vh;
+  height: 55vh;
+  z-index: -1;
+  pointer-events: none;
+  background-image:
+    linear-gradient(rgba(245, 181, 68, 0.10) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(245, 181, 68, 0.10) 1px, transparent 1px);
+  background-size: 64px 64px;
+  transform: perspective(700px) rotateX(62deg);
+  transform-origin: 50% 100%;
+  mask-image: linear-gradient(to top, rgba(0, 0, 0, 0.9), transparent 85%);
+  -webkit-mask-image: linear-gradient(to top, rgba(0, 0, 0, 0.9), transparent 85%);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .bt-admin::after { animation: bt-sol 18s linear infinite; }
+}
+@keyframes bt-sol {
+  from { background-position: 0 0, 0 0; }
+  to { background-position: 0 64px, 0 0; }
+}
+
+/* ── Surfaces en verre ─────────────────────────────────────────────────────── */
+.bt-verre {
+  position: relative;
+  background:
+    linear-gradient(160deg, rgba(255, 255, 255, 0.055) 0%, rgba(255, 255, 255, 0.015) 40%, rgba(0, 0, 0, 0.12) 100%),
+    hsl(var(--card) / 0.78);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.07),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.5),
+    0 1px 2px rgba(0, 0, 0, 0.6),
+    0 24px 48px -24px rgba(0, 0, 0, 0.85);
+  backdrop-filter: blur(14px) saturate(140%);
+  -webkit-backdrop-filter: blur(14px) saturate(140%);
+}
+/* Liseré de lumière sur l'arête supérieure — c'est lui qui « décolle » la carte. */
+.bt-verre::before {
+  content: "";
+  position: absolute;
+  inset: 0 12% auto 12%;
+  height: 1px;
+  pointer-events: none;
+  background: linear-gradient(90deg, transparent, rgba(255, 207, 102, 0.55), transparent);
+  opacity: 0.55;
+}
+.bt-relief {
+  transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.35s ease, border-color 0.35s ease;
+}
+@media (hover: hover) and (prefers-reduced-motion: no-preference) {
+  .bt-relief:hover {
+    transform: translateY(-3px);
+    border-color: rgba(245, 181, 68, 0.28);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.09),
+      0 2px 4px rgba(0, 0, 0, 0.6),
+      0 34px 60px -28px rgba(0, 0, 0, 0.95),
+      0 0 0 1px rgba(245, 181, 68, 0.10),
+      0 0 40px -12px rgba(245, 181, 68, 0.25);
+  }
+}
+
+/* Carte inclinable (composant <Relief3D>) : la rotation vient de variables CSS
+   posées au mouvement du pointeur, le reflet suit le même point. */
+.bt-tilt {
+  transform-style: preserve-3d;
+  transform: perspective(900px) rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg)) translateZ(0);
+  transition: transform 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+  will-change: transform;
+}
+.bt-tilt[data-actif="1"] { transition: transform 0.08s linear; }
+.bt-tilt > .bt-reflet {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: radial-gradient(420px circle at var(--gx, 50%) var(--gy, 0%), rgba(255, 255, 255, 0.09), transparent 45%);
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+.bt-tilt[data-actif="1"] > .bt-reflet { opacity: 1; }
+.bt-tilt .bt-pop { transform: translateZ(28px); }
+.bt-tilt .bt-pop-sm { transform: translateZ(14px); }
+
+/* Texte en dégradé or pour les très grands chiffres. */
+.bt-or-texte {
+  background: linear-gradient(180deg, #fff3d1 0%, #ffcf66 45%, #d98f16 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  filter: drop-shadow(0 2px 10px rgba(245, 158, 11, 0.25));
+}
+/* Un text-shadow sous un texte transparent s'affiche À TRAVERS lui et l'éteint. */
+.bt-or-texte, .bt-or-texte * { text-shadow: none !important; }
+.bt-chiffre-3d {
+  text-shadow:
+    0 1px 0 rgba(0, 0, 0, 0.6),
+    0 2px 0 rgba(0, 0, 0, 0.45),
+    0 8px 22px rgba(0, 0, 0, 0.55);
+}
+
+/* Anneau lumineux autour d'une icône. */
+.bt-halo {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.25),
+    inset 0 -2px 6px rgba(0, 0, 0, 0.35),
+    0 6px 18px -6px var(--halo, rgba(245, 158, 11, 0.6));
+}
+
+/* Apparition en cascade. */
+@media (prefers-reduced-motion: no-preference) {
+  .bt-entree { animation: bt-entree 0.6s cubic-bezier(0.16, 1, 0.3, 1) both; }
+  .bt-balayage::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background: linear-gradient(105deg, transparent 40%, rgba(255, 255, 255, 0.06) 50%, transparent 60%);
+    background-size: 250% 100%;
+    animation: bt-balayage 6s ease-in-out infinite;
+    border-radius: inherit;
+  }
+}
+@keyframes bt-entree {
+  from { opacity: 0; transform: translateY(14px) scale(0.985); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes bt-balayage {
+  0%, 60% { background-position: 150% 0; }
+  100% { background-position: -50% 0; }
+}
+
+/* Anneau 3D (composant <Anneau3D>) — couches empilées en Z = épaisseur réelle. */
+.bt-anneau-scene { perspective: 900px; }
+.bt-anneau {
+  position: relative;
+  transform-style: preserve-3d;
+  transform: rotateX(58deg) rotateZ(var(--rz, -20deg));
+}
+@media (prefers-reduced-motion: no-preference) {
+  .bt-anneau[data-tourne="1"] { animation: bt-rotation 40s linear infinite; }
+}
+@keyframes bt-rotation {
+  from { transform: rotateX(58deg) rotateZ(0deg); }
+  to { transform: rotateX(58deg) rotateZ(360deg); }
+}
+.bt-anneau > i {
+  position: absolute;
+  inset: 0;
+  border-radius: 9999px;
+  -webkit-mask: radial-gradient(circle, transparent 54%, #000 55%);
+  mask: radial-gradient(circle, transparent 54%, #000 55%);
+}
+
+/* ── Barres de défilement ──────────────────────────────────────────────────── */
+.bt-admin ::-webkit-scrollbar-track { background: transparent; }
+.bt-admin ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.12); }
+.bt-admin ::-webkit-scrollbar-thumb:hover { background: var(--bt-or); }
+
+/* ── Remappage des teintes pâles codées en dur ─────────────────────────────── */
+.bt-admin :is(.text-emerald-600, .text-emerald-700, .text-emerald-800, .text-emerald-900) { color: var(--bt-vert); }
+.bt-admin :is(.text-red-600, .text-red-700, .text-red-800) { color: var(--bt-rouge); }
+.bt-admin :is(.text-amber-600, .text-amber-700, .text-amber-800, .text-amber-900, .text-orange-800, .text-brand-gold-dark) { color: var(--bt-ambre); }
+.bt-admin :is(.text-sky-700, .text-sky-800, .text-blue-700) { color: var(--bt-ciel); }
+.bt-admin :is(.text-violet-700, .text-violet-800) { color: var(--bt-violet); }
+.bt-admin .text-rose-800 { color: #fb7185; }
+.bt-admin :is(.text-slate-600, .text-slate-700) { color: #cbd5e1; }
+.bt-admin .text-gray-900 { color: hsl(var(--foreground)); }
+
+.bt-admin :is(.bg-emerald-50, .bg-emerald-50\/30, .bg-emerald-50\/50, .bg-emerald-50\/60, .bg-emerald-100) { background-color: rgba(16, 185, 129, 0.12); }
+.bt-admin :is(.bg-red-50, .bg-red-50\/40, .bg-red-50\/60) { background-color: rgba(239, 68, 68, 0.12); }
+.bt-admin :is(.bg-amber-50, .bg-amber-50\/30, .bg-amber-50\/40, .bg-amber-50\/60, .bg-amber-100, .bg-brand-gold-light) { background-color: rgba(245, 158, 11, 0.12); }
+.bt-admin :is(.bg-brand-gold-light\/40, .bg-brand-gold-light\/60) { background-color: rgba(245, 158, 11, 0.09); }
+.bt-admin :is(.bg-sky-50, .bg-sky-100, .bg-blue-50) { background-color: rgba(56, 189, 248, 0.12); }
+.bt-admin :is(.bg-violet-50, .bg-violet-100) { background-color: rgba(167, 139, 250, 0.14); }
+.bt-admin .bg-rose-100 { background-color: rgba(251, 113, 133, 0.14); }
+.bt-admin :is(.bg-slate-100, .bg-slate-200) { background-color: rgba(148, 163, 184, 0.14); }
+.bt-admin .bg-slate-300 { background-color: #64748b; }
+.bt-admin .bg-white { background-color: hsl(var(--card)); }
+.bt-admin .bg-brand-dark { background-color: #1d2233; }
+
+.bt-admin .border-emerald-200 { border-color: rgba(52, 211, 153, 0.32); }
+.bt-admin .border-red-200 { border-color: rgba(248, 113, 113, 0.34); }
+.bt-admin .border-amber-200 { border-color: rgba(251, 191, 36, 0.32); }
+.bt-admin .border-violet-200 { border-color: rgba(167, 139, 250, 0.34); }
+.bt-admin .border-blue-200 { border-color: rgba(56, 189, 248, 0.32); }
+.bt-admin .border-gray-100 { border-color: hsl(var(--border)); }
+
+.bt-admin :is(.ring-emerald-200\/70) { --tw-ring-color: rgba(52, 211, 153, 0.3); }
+.bt-admin :is(.ring-amber-200, .ring-amber-200\/70) { --tw-ring-color: rgba(251, 191, 36, 0.3); }
+.bt-admin :is(.ring-sky-200\/70) { --tw-ring-color: rgba(56, 189, 248, 0.3); }
+.bt-admin :is(.ring-violet-200\/70) { --tw-ring-color: rgba(167, 139, 250, 0.3); }
+.bt-admin :is(.ring-slate-200) { --tw-ring-color: rgba(148, 163, 184, 0.25); }
+
+/* ── Recharts : axes, grilles, infobulles lisibles sur fond sombre ─────────── */
+.bt-admin .recharts-cartesian-axis-tick-value,
+.bt-admin .recharts-cartesian-axis-tick text,
+.bt-admin .recharts-polar-angle-axis-tick-value { fill: #9aa3b8 !important; }
+.bt-admin .recharts-cartesian-axis-line,
+.bt-admin .recharts-cartesian-axis-tick-line { stroke: rgba(255, 255, 255, 0.12) !important; }
+.bt-admin .recharts-cartesian-grid line { stroke: rgba(255, 255, 255, 0.06) !important; }
+.bt-admin .recharts-surface [stroke="#4B5563"],
+.bt-admin .recharts-surface [stroke="#6B7280"],
+.bt-admin .recharts-surface [stroke="#374151"] { stroke: #7c869e !important; }
+.bt-admin .recharts-surface [fill="#4B5563"],
+.bt-admin .recharts-surface [fill="#374151"],
+.bt-admin .recharts-surface text[style*="fill"] { fill: #d6dbe7 !important; }
+.bt-admin .recharts-label { fill: #aab2c5 !important; }
+.bt-admin .recharts-legend-item-text { color: #c3c9d8 !important; }
+.bt-admin .recharts-default-tooltip {
+  background: rgba(12, 15, 26, 0.92) !important;
+  border: 1px solid rgba(245, 181, 68, 0.25) !important;
+  border-radius: 12px !important;
+  box-shadow: 0 20px 40px -12px rgba(0, 0, 0, 0.9) !important;
+  backdrop-filter: blur(10px);
+  color: #eef1f7 !important;
+}
+.bt-admin .recharts-tooltip-label { color: #ffcf66 !important; font-weight: 600; }
+.bt-admin .recharts-tooltip-cursor { fill: rgba(255, 255, 255, 0.04) !important; }
+/* Profondeur : les courbes rayonnent, les barres portent une ombre. */
+.bt-admin .recharts-line-curve { filter: drop-shadow(0 0 5px rgba(255, 255, 255, 0.18)) drop-shadow(0 6px 6px rgba(0, 0, 0, 0.5)); }
+.bt-admin .recharts-bar-rectangle path,
+.bt-admin .recharts-bar-rectangle rect { filter: drop-shadow(0 6px 8px rgba(0, 0, 0, 0.55)); }
+.bt-admin .recharts-area-area { filter: drop-shadow(0 10px 14px rgba(0, 0, 0, 0.45)); }
+.bt-admin .recharts-pie-sector path { filter: drop-shadow(0 8px 10px rgba(0, 0, 0, 0.55)); }
+
+/* Tableaux : lignes qui se soulèvent au survol. */
+.bt-admin tbody tr { transition: background-color 0.2s ease, box-shadow 0.2s ease; }
+.bt-admin tbody tr:hover { background-color: rgba(245, 181, 68, 0.045); box-shadow: inset 3px 0 0 0 rgba(245, 181, 68, 0.6); }
+
+/* Sonner et les popovers Radix vivent hors de `.bt-admin` : pas de remappage ici. */
+.bt-admin .hover\:bg-amber-50\/40:hover { background-color: rgba(245, 158, 11, 0.12); }

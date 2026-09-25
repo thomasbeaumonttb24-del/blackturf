@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import AdminShell from "@/components/admin/shell/AdminShell";
+import "./admin.css";
 
 /**
  * Console d'administration : `noindex`, un titre à elle, et depuis la refonte

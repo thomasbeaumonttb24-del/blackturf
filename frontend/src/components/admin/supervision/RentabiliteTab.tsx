@@ -22,7 +22,7 @@ import { CalendarDays, TrendingDown } from "lucide-react";
 import { ChartTooltip, GRID, axisLine, axisTick, tickLine } from "@/components/charts/chart-kit";
 import {
   DIVERGING_NEG, DIVERGING_POS, Empty, Note, Section, StatTile,
-  eur, num, pct, signedEur, signedPct, tone,
+  eur, num, pct, signedEur, signedPct, tone, DegradeZero, offsetZero,
 } from "./kit";
 import type { RentabilitePayload } from "./types";
 
@@ -111,10 +111,7 @@ export default function RentabiliteTab({ data }: { data?: RentabilitePayload }) 
         <ResponsiveContainer width="100%" height={260}>
           <ComposedChart data={chart} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
             <defs>
-              <linearGradient id="capitalNeg" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor={DIVERGING_NEG} stopOpacity={0.05} />
-                <stop offset="100%" stopColor={DIVERGING_NEG} stopOpacity={0.22} />
-              </linearGradient>
+<DegradeZero id="capital" offset={offsetZero(chart.map((c) => c.cumul_net))} />
             </defs>
             <CartesianGrid {...GRID} />
             <XAxis dataKey="label" tick={axisTick} axisLine={axisLine} tickLine={tickLine} minTickGap={24} />
@@ -127,7 +124,7 @@ export default function RentabiliteTab({ data }: { data?: RentabilitePayload }) 
             <Legend verticalAlign="bottom" height={28} wrapperStyle={{ fontSize: 11, paddingTop: 8 }} />
             <Area
               type="monotone" dataKey="cumul_net" name="Capital réel"
-              stroke={DIVERGING_NEG} strokeWidth={2} fill="url(#capitalNeg)" isAnimationActive={false}
+stroke="url(#capital-trait)" strokeWidth={2.5} fill="url(#capital-aire)" isAnimationActive
             />
             <Line
               type="monotone" dataKey="cumul_net_winsor" name={`Plafonné à ${cap}× la mise`}
