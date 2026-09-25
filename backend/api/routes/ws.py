@@ -15,7 +15,7 @@ from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends, Query
 from starlette.websockets import WebSocketState
 from jose import JWTError, jwt
-from sqlalchemy import select, and_, desc
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 # Plans autorisés sur les flux value bets — même ensemble que require_pro (auth.py).
@@ -25,9 +25,10 @@ PLANS_ABONNES = ("starter", "standard", "expert")
 
 from api.config import get_settings
 from db.database import get_db, async_session_factory
-from db.models import Participation, CoteHistorique, ValueBet, Course, Cheval, User
+from db.models import Participation, CoteHistorique, Cheval, User
 from db.redis_client import get_redis
 from services.valuebets_visibilite import filtres_sql as vb_filtres_sql
+from services.valuebets_lecture import ligne as vb_ligne, requete as vb_requete
 
 settings = get_settings()
 log = structlog.get_logger()
@@ -304,35 +305,13 @@ async def ws_value_bets(websocket: WebSocket, token: str = Query(default="")):
             # ouverte, fenêtre 6 h, délai Standard) : ce flux REMPLACE la liste REST
             # côté navigateur dès qu'il a parlé, il doit donc en être la copie exacte
             # — même plafond de 100 (à 20, il tronquait une journée chargée).
-            q = (
-                select(ValueBet, Participation, Cheval, Course)
-                .join(Participation, Participation.participation_id == ValueBet.participation_id)
-                .join(Cheval, Cheval.cheval_id == Participation.cheval_id)
-                .join(Course, Course.course_id == ValueBet.course_id)
-                .where(and_(*vb_filtres_sql(plan)))
-                .order_by(desc(ValueBet.ev_max))
-                .limit(100)
-            )
-            rows = (await db.execute(q)).all()
-            vbs = [
-                {
-                    "vb_id": vb.vb_id,
-                    "course_id": vb.course_id,
-                    "hippodrome_nom": course.hippodrome_nom,
-                    "hippodrome": course.hippodrome_nom,
-                    "date_heure": course.date_heure.isoformat(),
-                    "nom_cheval": cheval.nom,
-                    "numero": part.numero,
-                    "cote_pmu": part.cote_pmu,
-                    "ev_max": round(vb.ev_max, 4),
-                    "niveau": vb.niveau,
-                    "meilleure_source": vb.meilleure_source,
-                    "actif": vb.actif,
-                    "spi_detected": vb.spi_detected,
-                    "spi_score": round(vb.spi_score, 3) if vb.spi_score else None,
-                }
-                for vb, part, cheval, course in rows
-            ]
+            rows = (await db.execute(vb_requete(list(vb_filtres_sql(plan)), 100))).all()
+            vbs = []
+            for row in rows:
+                d = vb_ligne(*row)
+                d["date_heure"] = d["date_heure"].isoformat() if d["date_heure"] else None
+                d["detecte_a"] = d["detecte_a"].isoformat() if d["detecte_a"] else None
+                vbs.append(d)
         await websocket.send_json({
             "type": "value_bets",
             "timestamp": datetime.now(timezone.utc).isoformat(),
