@@ -18,14 +18,14 @@ import { useState } from "react";
 import { AlertTriangle, CreditCard, Gift, Hourglass, Wallet } from "lucide-react";
 import { cn, formatDateTime } from "@/lib/utils";
 import {
-  BadgeFormule, BarreRepartition, CelluleCompte, EnTetePage, Encart, Etat, GrilleKpi, Kpi,
+  BadgeFormule, BarreRepartition, CelluleCompte, EnTetePage, Encart, Etat, GrilleKpi, Kpi, MiniRepartition,
   Panneau, PointLive, Puce, Segments, Squelette, TH, Tableau, VoirPlus, Vide, depuis, eur, num,
   type Colonne,
 } from "@/components/admin/ui";
 import { incidentsPaiement, useAbonnements, useEnLigne } from "@/components/admin/data";
 import SuiviDeparts from "@/components/admin/vues/SuiviDeparts";
 import CompteARebours from "@/components/admin/vues/CompteARebours";
-import { Anneau3D, Fraicheur, useRecuLe } from "@/components/admin/relief";
+import { Anneau, Fraicheur, useRecuLe } from "@/components/admin/graphes";
 import {
   MOUVEMENT_LABELS, MOUVEMENT_TONS,
   type AbonneLigne, type CompteOffert, type MouvementAbo, type Repartition,
@@ -104,7 +104,7 @@ function Renouvellement({ a }: { a: AbonneLigne }) {
         nature={resilie ? "fin_acces" : "renouvellement"}
         horizon={a.periodicite === "annual" ? 365 : 31}
       />
-      <div className={cn("mt-1 text-[11px] font-medium", resilie ? "text-white/50" : "text-emerald-300/80")}>
+      <div className={cn("mt-1 text-[11px]", resilie ? "text-muted-foreground" : "text-muted-foreground")}>
         {resilie ? "Fin d'accès — ne sera pas débité" : `Renouvellement · ${montant(a.montant_cents)}`}
       </div>
     </div>
@@ -117,7 +117,7 @@ const COLONNES_PAYANTS: Colonne<AbonneLigne>[] = [
   { titre: "État", rendu: etatPayant },
   { titre: "Prochain renouvellement", rendu: (a) => <Renouvellement a={a} /> },
   { titre: "Client depuis", rendu: (a) => <span className="whitespace-nowrap">{dateCourte(a.depuis)}</span> },
-  { titre: "Montant", rendu: (a) => <span className="font-bold text-white">{montant(a.montant_cents)}</span>, droite: true },
+  { titre: "Montant", rendu: (a) => <span className="font-semibold text-foreground">{montant(a.montant_cents)}</span>, droite: true },
 ];
 
 const COLONNES_ESSAIS: Colonne<AbonneLigne>[] = [
@@ -148,9 +148,9 @@ const COLONNES_OFFERTS: Colonne<CompteOffert>[] = [
 function Formules({ r }: { r: Repartition }) {
   const cellule = "px-3 py-2.5 text-right text-[13px] font-semibold tabular-nums";
   return (
-    <div className="overflow-hidden rounded-xl border border-white/[0.07] bg-black/20">
+    <div className="overflow-hidden rounded-lg border border-border">
       <table className="w-full border-collapse">
-        <thead className="bg-white/[0.03]">
+        <thead className="bg-muted/50">
           <tr>
             <th scope="col" className={cn(TH, "px-3")}>Formule</th>
             <th scope="col" className={cn(TH, "px-3 text-right")}>Payants</th>
@@ -184,10 +184,7 @@ function jourMouvement(iso: string): string {
 }
 
 const POINT_TON: Record<string, string> = {
-  ok: "bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.9)]",
-  attention: "bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.9)]",
-  alerte: "bg-red-400 shadow-[0_0_8px_rgba(248,113,113,0.9)]",
-  neutre: "bg-slate-400",
+  ok: "bg-emerald-600", attention: "bg-amber-500", alerte: "bg-red-600", neutre: "bg-slate-300",
 };
 
 function Journal({ mouvements }: { mouvements: MouvementAbo[] }) {
@@ -210,7 +207,7 @@ function Journal({ mouvements }: { mouvements: MouvementAbo[] }) {
                   {jour}
                 </div>
               )}
-              <div className="flex items-center gap-3 border-b border-white/[0.05] py-2.5 transition-colors last:border-0 hover:bg-white/[0.02]">
+              <div className="flex items-center gap-3 border-b border-border/60 py-2.5 last:border-0">
                 <span className={cn("h-2 w-2 shrink-0 rounded-full", POINT_TON[ton])} aria-hidden />
                 <div className="min-w-0 flex-1">
                   <div className={cn("truncate text-[13px] font-medium", ton === "alerte" && "text-red-700")}>
@@ -240,7 +237,7 @@ function Journal({ mouvements }: { mouvements: MouvementAbo[] }) {
 /* ───────────────────────────── page ───────────────────────────── */
 
 export default function AbonnementsPage() {
-  const { data, isValidating } = useAbonnements();
+  const { data } = useAbonnements();
   const recu = useRecuLe(data);
   const { data: live } = useEnLigne();
   const [onglet, setOnglet] = useState<Onglet>("payants");
@@ -252,9 +249,9 @@ export default function AbonnementsPage() {
       icone={<CreditCard className="h-4 w-4" />}
       actions={
         <>
-          <Fraicheur depuis={recu} enCours={isValidating && !data} cadence={30_000} />
+          <Fraicheur depuis={recu} cadence={30_000} />
           {live?.disponible && (
-            <span className="inline-flex h-9 items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 text-[13px] font-semibold text-emerald-800">
+            <span className="inline-flex h-8 items-center gap-2 rounded-md border border-border bg-white px-2.5 text-xs font-medium text-foreground">
               <PointLive /> {num(live.total)} en ligne
             </span>
           )}
@@ -268,7 +265,7 @@ export default function AbonnementsPage() {
       <div className="space-y-5 sm:space-y-6">
         {entete}
         <GrilleKpi>
-          {[0, 1, 2, 3].map((i) => <div key={i} className="bt-verre h-[9rem] animate-pulse rounded-2xl" />)}
+          {[0, 1, 2, 3].map((i) => <div key={i} className="bt-verre h-[8rem] animate-pulse rounded-xl" />)}
         </GrilleKpi>
         <Panneau><Squelette lignes={6} /></Panneau>
       </div>
@@ -310,7 +307,10 @@ export default function AbonnementsPage() {
           label="Payants"
           nombre={r.payants}
           format={(v) => num(Math.round(v))}
-          sub={`Standard ${r.par_formule.standard.payants} · Expert ${r.par_formule.expert.payants}`}
+          sub={<MiniRepartition parts={[
+            { label: "Standard", n: r.par_formule.standard.payants, couleur: "#6f8bab" },
+            { label: "Expert", n: r.par_formule.expert.payants, couleur: "#a8741a" },
+          ]} />}
           icone={<CreditCard className="h-4 w-4" />}
           accent="ok"
         />
@@ -318,11 +318,17 @@ export default function AbonnementsPage() {
           label="En essai"
           nombre={r.essais}
           format={(v) => num(Math.round(v))}
-          sub={s.en_essai_sans_carte > 0
-            ? `dont ${s.en_essai_sans_carte} sans carte`
-            : s.fin_essai_sous_3j > 0
-              ? `${s.fin_essai_sous_3j} finissent sous 3 j`
-              : `Standard ${r.par_formule.standard.essais} · Expert ${r.par_formule.expert.essais}`}
+          sub={
+            <>
+              <MiniRepartition parts={[
+                { label: "Avec carte", n: s.en_essai_avec_carte, couleur: "#27456b" },
+                { label: "Sans carte", n: s.en_essai_sans_carte, couleur: "#c9d5e3" },
+              ]} />
+              <div className="mt-1.5">
+                {s.fin_essai_sous_3j > 0 ? `${s.fin_essai_sous_3j} finissent sous 3 jours` : "Aucun ne finit sous 3 jours"}
+              </div>
+            </>
+          }
           icone={<Hourglass className="h-4 w-4" />}
           accent="bleu"
         />
@@ -330,7 +336,10 @@ export default function AbonnementsPage() {
           label="Offerts"
           nombre={r.offerts}
           format={(v) => num(Math.round(v))}
-          sub={`Standard ${r.par_formule.standard.offerts} · Expert ${r.par_formule.expert.offerts}`}
+          sub={<MiniRepartition parts={[
+            { label: "Standard", n: r.par_formule.standard.offerts, couleur: "#6f8bab" },
+            { label: "Expert", n: r.par_formule.expert.offerts, couleur: "#a8741a" },
+          ]} />}
           icone={<Gift className="h-4 w-4" />}
           accent="violet"
         />
@@ -345,19 +354,19 @@ export default function AbonnementsPage() {
       <Panneau titre="Répartition des comptes" actions={<Puce>{num(r.comptes)} comptes</Puce>}>
         <div className="grid gap-6 lg:grid-cols-[auto_1fr] lg:items-center">
           <div className="flex justify-center">
-            <Anneau3D
-              taille={210}
+            <Anneau
+              taille={176}
               parts={[
-                { cle: "payants", label: "Payants", n: r.payants, couleur: "#10b981" },
-                { cle: "essais", label: "En essai", n: r.essais, couleur: "#0ea5e9" },
-                { cle: "offerts", label: "Offerts", n: r.offerts, couleur: "#8b5cf6" },
-                { cle: "gratuits", label: "Gratuits", n: r.gratuits, couleur: "#475569" },
+                { cle: "payants", label: "Payants", n: r.payants, couleur: "#0f7b5a" },
+                { cle: "essais", label: "En essai", n: r.essais, couleur: "#27456b" },
+                { cle: "offerts", label: "Offerts", n: r.offerts, couleur: "#6b5b95" },
+                { cle: "gratuits", label: "Gratuits", n: r.gratuits, couleur: "#d5d9de" },
               ]}
               centre={
-                <div className="rounded-xl bg-black/45 px-3 py-1.5 backdrop-blur">
-                  <div className="text-[10px] font-semibold uppercase tracking-widest text-white/50">Comptes</div>
-                  <div className="bt-or-texte text-2xl font-black tabular-nums">{num(r.comptes)}</div>
-                </div>
+                <>
+                  <div className="text-[11px] text-muted-foreground">Comptes</div>
+                  <div className="text-2xl font-semibold tabular-nums">{num(r.comptes)}</div>
+                </>
               }
             />
           </div>
@@ -365,10 +374,10 @@ export default function AbonnementsPage() {
         <BarreRepartition
           total={r.comptes}
           segments={[
-            { cle: "payants", label: "Payants", n: r.payants, couleur: "bg-emerald-500" },
-            { cle: "essais", label: "En essai", n: r.essais, couleur: "bg-sky-500" },
-            { cle: "offerts", label: "Offerts", n: r.offerts, couleur: "bg-violet-500" },
-            { cle: "gratuits", label: "Gratuits", n: r.gratuits, couleur: "bg-slate-300" },
+            { cle: "payants", label: "Payants", n: r.payants, couleur: "bg-[#0f7b5a]" },
+            { cle: "essais", label: "En essai", n: r.essais, couleur: "bg-[#27456b]" },
+            { cle: "offerts", label: "Offerts", n: r.offerts, couleur: "bg-[#6b5b95]" },
+            { cle: "gratuits", label: "Gratuits", n: r.gratuits, couleur: "bg-[#d5d9de]" },
           ]}
         />
         <Formules r={r} />
@@ -377,7 +386,7 @@ export default function AbonnementsPage() {
       </Panneau>
 
       <Panneau bodyClassName="p-0 sm:p-0">
-        <div className="border-b border-white/[0.06] p-2 sm:px-4">
+        <div className="border-b border-border/80 p-2 sm:px-4">
           <Segments
             items={onglets}
             actif={onglet}

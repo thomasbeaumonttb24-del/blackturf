@@ -200,7 +200,7 @@ export default function SupervisionIAPage() {
             <div
               role="group"
               aria-label="Fenêtre d'analyse"
-              className="flex overflow-hidden rounded-xl border border-white/[0.07] bg-black/30 p-1 shadow-[inset_0_2px_6px_rgba(0,0,0,0.5)]"
+              className="flex gap-0.5 overflow-hidden rounded-lg border border-border bg-muted/70 p-0.5"
             >
               {FENETRES.map((f) => (
                 <button
@@ -208,10 +208,10 @@ export default function SupervisionIAPage() {
                   onClick={() => setDays(f.days)}
                   aria-pressed={days === f.days}
                   className={cn(
-                    "min-h-[2.25rem] rounded-lg px-3 text-xs font-semibold transition-all",
+                    "min-h-[2rem] rounded-md px-3 text-xs font-medium transition-colors",
                     days === f.days
-                      ? "bg-gradient-to-b from-amber-300 to-amber-600 text-[#1a1203] shadow-[0_6px_16px_-6px_rgba(245,158,11,0.8)]"
-                      : "text-muted-foreground hover:bg-white/5 hover:text-foreground",
+                      ? "bg-white text-foreground shadow-[0_1px_2px_rgba(16,24,40,0.08),0_0_0_1px_rgba(16,24,40,0.04)]"
+                      : "text-muted-foreground hover:text-foreground",
                   )}
                 >
                   {f.label}
@@ -221,14 +221,14 @@ export default function SupervisionIAPage() {
             <button
               onClick={() => setLive((v) => !v)}
               title={live ? "Mettre le rafraîchissement en pause" : "Reprendre le rafraîchissement"}
-              className="inline-flex min-h-[2.5rem] items-center gap-1.5 rounded-xl border border-white/[0.08] bg-white/[0.04] px-3 text-xs font-semibold text-muted-foreground shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] transition-colors hover:border-amber-300/40 hover:text-foreground"
+              className="inline-flex min-h-[2.25rem] items-center gap-1.5 rounded-lg border border-border bg-white px-3 text-xs font-medium text-muted-foreground shadow-[0_1px_2px_rgba(16,24,40,0.04)] transition-colors hover:text-foreground"
             >
               {live ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
               {live ? "Pause" : "Reprendre"}
             </button>
             <button
               onClick={() => refreshPulse()}
-              className="inline-flex min-h-[2.5rem] items-center gap-1.5 rounded-xl border border-white/[0.08] bg-white/[0.04] px-3 text-xs font-semibold text-muted-foreground shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] transition-colors hover:border-amber-300/40 hover:text-foreground"
+              className="inline-flex min-h-[2.25rem] items-center gap-1.5 rounded-lg border border-border bg-white px-3 text-xs font-medium text-muted-foreground shadow-[0_1px_2px_rgba(16,24,40,0.04)] transition-colors hover:text-foreground"
             >
               <RefreshCw className="h-3.5 w-3.5" />
               <span className="hidden sm:inline">Actualiser</span>
@@ -246,7 +246,7 @@ export default function SupervisionIAPage() {
 
       {/* Onglets collants : sur une page de 4 000 px, revenir en haut pour
           changer de vue est une corvée qu'aucun tableau de bord n'impose. */}
-      <div className="sticky top-14 z-20 -mx-3 bg-[#070912]/70 px-3 py-2 backdrop-blur-xl sm:-mx-5 sm:px-5 lg:top-0">
+      <div className="sticky top-14 z-20 -mx-3 bg-[hsl(45_14%_97%/0.92)] px-3 py-2 backdrop-blur sm:-mx-5 sm:px-5 lg:top-0">
         <Segments items={TABS} actif={tab} onChange={setTab} />
       </div>
 

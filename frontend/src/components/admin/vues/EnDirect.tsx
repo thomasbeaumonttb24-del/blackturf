@@ -11,7 +11,7 @@
 import { Radio } from "lucide-react";
 import { BadgeFormule, Initiales, Panneau, PointLive, Squelette, T, Vide, num } from "../ui";
 import { useEnLigne } from "../data";
-import { Compteur } from "../relief";
+import { Compteur } from "../graphes";
 
 function ilYa(s: number | null): string {
   if (s == null) return "";
@@ -42,7 +42,7 @@ export default function EnDirect({ className }: { className?: string }) {
       ) : (
         <>
           <div className="flex items-end gap-4">
-            <div className="bt-or-texte text-6xl font-black leading-none tracking-tight tabular-nums">
+            <div className="text-5xl font-semibold leading-none tracking-tight tabular-nums">
               <Compteur valeur={data.total} format={(v) => num(Math.round(v))} />
             </div>
             <div className="pb-0.5 text-[13px] leading-snug text-muted-foreground">
@@ -52,7 +52,7 @@ export default function EnDirect({ className }: { className?: string }) {
           </div>
 
           {data.comptes.length > 0 && (
-            <ul className="mt-4 divide-y divide-white/[0.05] border-t border-white/[0.06]">
+            <ul className="mt-4 divide-y divide-border/70 border-t border-border/70">
               {data.comptes.slice(0, 8).map((c) => (
                 <li key={c.user_id} className="flex items-center gap-3 py-2.5">
                   <Initiales email={c.email} />
@@ -73,7 +73,7 @@ export default function EnDirect({ className }: { className?: string }) {
               <div className={T.etiquette}>Pages ouvertes</div>
               <div className="mt-2 flex flex-wrap gap-1.5">
                 {data.pages.map((p) => (
-                  <span key={p.chemin} className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-xs shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
+                  <span key={p.chemin} className="inline-flex items-center gap-1.5 rounded-md border border-border bg-muted/50 px-2 py-1 text-xs">
                     <span className="max-w-[180px] truncate">{p.chemin}</span>
                     <b className="tabular-nums">{p.n}</b>
                   </span>

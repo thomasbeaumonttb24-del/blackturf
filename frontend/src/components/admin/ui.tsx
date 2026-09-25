@@ -27,7 +27,7 @@
 import * as React from "react";
 import { ChevronDown, Info } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { Compteur, Relief3D, Sparkline } from "./relief";
+import { Compteur, PALETTE, Sparkline } from "./graphes";
 
 /* ─────────────────────────── échelle typographique ─────────────────────── */
 
@@ -153,21 +153,23 @@ export function EnTetePage({
   icone?: React.ReactNode;
 }) {
   return (
-    <header className="bt-entree flex flex-col items-start gap-3 sm:flex-row sm:items-end sm:justify-between">
+    <header className="bt-entree flex flex-col items-start gap-3 border-b border-border pb-4 sm:flex-row sm:items-end sm:justify-between sm:pb-5">
       <div className="flex min-w-0 items-start gap-3">
         {/* Sur téléphone, la barre du haut affiche déjà le nom de l'écran, et il
             reste visible en défilant. Le répéter 60 px plus bas mangeait un
             tiers du premier écran pour ne rien apprendre : le titre reste dans
             le document (structure, lecteurs d'écran) mais sort du visuel. */}
         {icone && (
-          <span className="bt-halo mt-0.5 hidden h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-amber-300 via-amber-500 to-amber-700 text-[#1a1203] lg:flex [&_svg]:h-5 [&_svg]:w-5">
+          <span className="mt-1 hidden h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-border bg-white text-foreground/70 shadow-[0_1px_2px_rgba(16,24,40,0.05)] lg:flex [&_svg]:h-[18px] [&_svg]:w-[18px]">
             {icone}
           </span>
         )}
         <div className="min-w-0">
-          <div className="hidden text-[11px] font-semibold uppercase tracking-[0.18em] text-amber-300/80 lg:block">Console BlackTurf</div>
-          <h1 className={cn("font-display text-2xl font-bold tracking-tight text-white sm:text-3xl", "sr-only lg:not-sr-only")}>{titre}</h1>
-          {desc && <p className={cn("max-w-2xl lg:mt-1", T.meta, "leading-relaxed")}>{desc}</p>}
+          <div className="hidden text-xs font-medium text-muted-foreground lg:block">
+            Administration <span className="mx-1 text-border">/</span> <span className="text-foreground/80">{titre}</span>
+          </div>
+          <h1 className={cn("text-2xl font-semibold tracking-tight text-foreground", "sr-only lg:not-sr-only lg:mt-0.5")}>{titre}</h1>
+          {desc && <p className={cn("max-w-3xl lg:mt-1", "text-[13px] leading-relaxed text-muted-foreground")}>{desc}</p>}
         </div>
       </div>
       {actions && <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div>}
@@ -193,16 +195,16 @@ export function Panneau({
   return (
     <section
       className={cn(
-        "bt-verre bt-relief bt-entree overflow-hidden rounded-2xl",
-        ton !== "neutre" && t.bord,
+        "bt-verre bt-entree overflow-hidden rounded-xl",
+        ton === "alerte" && t.bord,
         className,
       )}
     >
       {(titre || actions) && (
-        <header className="flex flex-col gap-2.5 border-b border-white/[0.06] bg-gradient-to-r from-white/[0.03] to-transparent px-4 py-3.5 sm:flex-row sm:items-start sm:justify-between sm:gap-4 sm:px-5">
+        <header className="flex flex-col gap-2.5 border-b border-border/80 px-4 py-3.5 sm:flex-row sm:items-start sm:justify-between sm:gap-4 sm:px-5">
           <div className="flex min-w-0 items-start gap-2.5">
             {icone && (
-              <span className={cn("bt-halo mt-px flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border", t.pastille)}>
+              <span className={cn("mt-px flex h-6 w-6 shrink-0 items-center justify-center rounded-md border", t.pastille)}>
                 {icone}
               </span>
             )}
@@ -216,7 +218,7 @@ export function Panneau({
       )}
       <div className={cn("p-4 sm:p-5", bodyClassName)}>{children}</div>
       {pied && (
-        <footer className={cn("border-t border-white/[0.06] bg-black/20 px-4 py-2.5 sm:px-5", T.meta)}>
+        <footer className={cn("border-t border-border/80 bg-muted/50 px-4 py-2.5 sm:px-5", T.meta)}>
           {pied}
         </footer>
       )}
@@ -274,8 +276,8 @@ export function Repliable({
   return (
     <section
       className={cn(
-        "bt-verre bt-relief bt-entree overflow-hidden rounded-2xl",
-        ton !== "neutre" && t.bord,
+        "bt-verre bt-entree overflow-hidden rounded-xl",
+        ton === "alerte" && t.bord,
       )}
     >
       <div className={cn("px-3 sm:px-5", ouvert && "border-b border-border/60")}>
@@ -287,7 +289,7 @@ export function Repliable({
           className="group flex min-h-[3.25rem] w-full items-center gap-3 py-2.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-card"
         >
           {icone && (
-            <span className={cn("bt-halo flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border", t.pastille)}>
+            <span className={cn("flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border", t.pastille)}>
               {icone}
             </span>
           )}
@@ -369,7 +371,7 @@ export function Tuile({
   return (
     <div
       className={cn(
-        "bt-verre bt-relief rounded-xl p-3 sm:p-3.5",
+        "bt-verre rounded-lg p-3 sm:p-3.5",
         ton === "alerte" ? "border-red-200 bg-red-50/40"
           : ton === "attention" ? "border-amber-200 bg-amber-50/40"
           : "",
@@ -388,7 +390,7 @@ export function Tuile({
           </span>
         )}
       </div>
-      <div className={cn("bt-chiffre-3d mt-1.5", T.chiffre, TONS[ton].texte)}>{valeur}</div>
+      <div className={cn("mt-1.5", T.chiffre, TONS[ton].texte)}>{valeur}</div>
       {sub && <div className="mt-0.5 text-xs leading-snug text-muted-foreground">{sub}</div>}
       {pied && <div className="mt-2">{pied}</div>}
     </div>
@@ -416,7 +418,7 @@ export function GrilleTuiles({
 
 export function Vide({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex min-h-[7rem] items-center justify-center rounded-xl border border-dashed border-white/10 bg-white/[0.02] px-6 py-8 text-center text-[13px] text-muted-foreground">
+    <div className="flex min-h-[7rem] items-center justify-center rounded-lg border border-dashed border-border bg-muted/40 px-6 py-8 text-center text-[13px] text-muted-foreground">
       {children}
     </div>
   );
@@ -526,7 +528,7 @@ export function Carte({
   return (
     <div
       className={cn(
-        "bt-verre rounded-xl p-3",
+        "bt-verre rounded-lg p-3",
         ton === "alerte" ? "border-red-200 bg-red-50/40"
           : ton === "attention" ? "border-amber-200 bg-amber-50/40"
           : ton === "ok" ? "border-emerald-200 bg-emerald-50/30"
@@ -581,7 +583,7 @@ export function Segments<K extends string>({
     <div
       role="tablist"
       className={cn(
-        "flex snap-x gap-1 overflow-x-auto rounded-xl border border-white/[0.07] bg-black/30 p-1 shadow-[inset_0_2px_6px_rgba(0,0,0,0.5)] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
+        "flex snap-x gap-0.5 overflow-x-auto rounded-lg border border-border bg-muted/70 p-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
         className,
       )}
     >
@@ -594,11 +596,11 @@ export function Segments<K extends string>({
             aria-selected={on}
             onClick={() => onChange(t.key)}
             className={cn(
-              "flex shrink-0 snap-start items-center gap-1.5 whitespace-nowrap rounded-lg px-3 font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-              taille === "compact" ? "min-h-[2.25rem] text-xs" : "min-h-[2.5rem] text-[13px]",
+              "flex shrink-0 snap-start items-center gap-1.5 whitespace-nowrap rounded-md px-3 font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+              taille === "compact" ? "min-h-[2rem] text-xs" : "min-h-[2.25rem] text-[13px]",
               on
-                ? "bg-gradient-to-b from-amber-300 to-amber-600 text-[#1a1203] shadow-[0_6px_16px_-6px_rgba(245,158,11,0.8),inset_0_1px_0_rgba(255,255,255,0.5)]"
-                : "text-muted-foreground hover:bg-white/5 hover:text-foreground",
+                ? "bg-white text-foreground shadow-[0_1px_2px_rgba(16,24,40,0.08),0_0_0_1px_rgba(16,24,40,0.04)]"
+                : "text-muted-foreground hover:text-foreground",
             )}
           >
             {t.label}
@@ -606,7 +608,7 @@ export function Segments<K extends string>({
               <span
                 className={cn(
                   "inline-flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] font-bold tabular-nums",
-                  on ? "bg-black/25 text-[#1a1203]" : "bg-destructive/20 text-red-300",
+                  on ? "bg-red-50 text-red-700" : "bg-red-50 text-red-700",
                 )}
               >
                 {t.badge > 99 ? "99+" : t.badge}
@@ -624,7 +626,7 @@ export function Squelette({ lignes = 3, className }: { lignes?: number; classNam
   return (
     <div className={cn("space-y-2", className)} aria-busy="true" aria-live="polite">
       {Array.from({ length: lignes }).map((_, i) => (
-        <div key={i} className="h-4 animate-pulse rounded bg-white/[0.06]" style={{ width: `${100 - i * 12}%` }} />
+        <div key={i} className="h-4 animate-pulse rounded bg-muted" style={{ width: `${100 - i * 12}%` }} />
       ))}
       <span className="sr-only">Chargement en cours</span>
     </div>
@@ -634,27 +636,26 @@ export function Squelette({ lignes = 3, className }: { lignes?: number; classNam
 /** Barre horizontale de polarité, pour lire un ROI sans lire le chiffre. */
 export function BarrePolarite({ value, max }: { value: number | null; max: number }) {
   if (value == null || !isFinite(value) || max <= 0) {
-    return <div className="h-1.5 w-full rounded-full bg-white/[0.06]" />;
+    return <div className="h-1.5 w-full rounded-full bg-muted" />;
   }
   const frac = Math.min(Math.abs(value) / max, 1) * 50;
   return (
-    <div className="relative h-1.5 w-full rounded-full bg-white/[0.06] shadow-[inset_0_1px_2px_rgba(0,0,0,0.6)]">
+    <div className="relative h-1.5 w-full rounded-full bg-muted">
       <div className="absolute inset-y-0 left-1/2 w-px bg-border" />
       <div
         className="absolute inset-y-0 rounded-full"
         style={{
           left: value >= 0 ? "50%" : `${50 - frac}%`,
           width: `${frac}%`,
-          background: value >= 0 ? "linear-gradient(90deg,#059669,#34d399)" : "linear-gradient(90deg,#f87171,#dc2626)",
-          boxShadow: value >= 0 ? "0 0 8px rgba(52,211,153,0.6)" : "0 0 8px rgba(248,113,113,0.6)",
+          background: value >= 0 ? DIVERGING_POS : DIVERGING_NEG,
         }}
       />
     </div>
   );
 }
 
-export const DIVERGING_POS = "#34D399";
-export const DIVERGING_NEG = "#F87171";
+export const DIVERGING_POS = "#0F7B5A";
+export const DIVERGING_NEG = "#B42318";
 
 /* ─────────────────────── tableau de bord (2026-09-14) ──────────────────── */
 // L'exploitant jugeait la console « illisible, trop d'infos inutiles ». Ces
@@ -663,25 +664,24 @@ export const DIVERGING_NEG = "#F87171";
 // d'explication sous chaque titre.
 
 const ACCENTS_KPI = {
-  neutre: { icone: "from-slate-300 to-slate-500 text-slate-950", halo: "rgba(148,163,184,0.55)", lueur: "rgba(148,163,184,0.18)", trait: "#94a3b8" },
-  or: { icone: "from-amber-200 via-amber-400 to-amber-600 text-[#1a1203]", halo: "rgba(245,158,11,0.7)", lueur: "rgba(245,158,11,0.22)", trait: "#f5b544" },
-  ok: { icone: "from-emerald-200 via-emerald-400 to-emerald-600 text-emerald-950", halo: "rgba(16,185,129,0.65)", lueur: "rgba(16,185,129,0.2)", trait: "#34d399" },
-  bleu: { icone: "from-sky-200 via-sky-400 to-sky-600 text-sky-950", halo: "rgba(56,189,248,0.65)", lueur: "rgba(56,189,248,0.2)", trait: "#38bdf8" },
-  violet: { icone: "from-violet-200 via-violet-400 to-violet-600 text-violet-950", halo: "rgba(167,139,250,0.65)", lueur: "rgba(167,139,250,0.2)", trait: "#a78bfa" },
-  rouge: { icone: "from-red-200 via-red-400 to-red-600 text-red-950", halo: "rgba(248,113,113,0.65)", lueur: "rgba(248,113,113,0.2)", trait: "#f87171" },
+  neutre: "#6b7079",
+  or: PALETTE.or,
+  ok: PALETTE.vert,
+  bleu: PALETTE.ardoise,
+  violet: PALETTE.violet,
+  rouge: PALETTE.rouge,
 } as const;
 
 export type AccentKpi = keyof typeof ACCENTS_KPI;
-export const couleurAccent = (a: AccentKpi) => ACCENTS_KPI[a].trait;
+export const couleurAccent = (a: AccentKpi) => ACCENTS_KPI[a];
 
 /**
- * Grand chiffre d'en-tête d'écran, en relief : la carte s'incline sous le
- * pointeur, l'icône et le chiffre flottent au-dessus du plan (translateZ), un
- * halo de la couleur de l'accent éclaire le coin.
+ * Grand chiffre d'en-tête d'écran, façon rapport financier : libellé, valeur,
+ * variation signée, mini-courbe, puis une ligne de contexte.
  *
- * `nombre` + `format` : le chiffre roule vers sa nouvelle valeur à chaque
- * rafraîchissement. `serie` : mini-courbe réelle sous le chiffre. `tendance` :
- * variation signée, en %.
+ * `nombre` + `format` : la valeur glisse vers sa nouvelle valeur à chaque
+ * rafraîchissement. `serie` : historique réel sous le chiffre. `tendance` :
+ * variation en %, verte si elle monte, rouge si elle descend.
  */
 export function Kpi({
   label, valeur, sub, icone, accent = "neutre", nombre, format, serie, tendance, tendanceLabel, href,
@@ -698,54 +698,71 @@ export function Kpi({
   tendanceLabel?: string;
   href?: string;
 }) {
-  const a = ACCENTS_KPI[accent];
+  const couleur = ACCENTS_KPI[accent];
   const corps = (
-    <Relief3D className="bt-verre bt-entree h-full overflow-hidden rounded-2xl p-4 sm:p-5">
-      <span
-        aria-hidden
-        className="pointer-events-none absolute -right-10 -top-10 h-36 w-36 rounded-full blur-2xl"
-        style={{ background: a.lueur }}
-      />
-      <div className="relative flex items-start justify-between gap-3">
-        <span className={cn(T.etiquette, "leading-tight text-white/60")}>{label}</span>
-        {icone && (
-          <span
-            className={cn("bt-halo bt-pop flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br", a.icone)}
-            style={{ ["--halo" as string]: a.halo }}
-            aria-hidden
-          >
-            {icone}
-          </span>
-        )}
+    <div className={cn("bt-verre bt-entree flex h-full flex-col rounded-xl p-4 sm:p-5", href && "bt-relief")}>
+      <div className="flex items-center justify-between gap-3">
+        <span className="flex items-center gap-2 text-[13px] font-medium text-muted-foreground">
+          <span aria-hidden className="h-2 w-2 rounded-[3px]" style={{ background: couleur }} />
+          {label}
+        </span>
+        {icone && <span className="shrink-0 text-muted-foreground/60 [&_svg]:h-4 [&_svg]:w-4" aria-hidden>{icone}</span>}
       </div>
-      <div
-        className={cn(
-          "bt-pop-sm bt-chiffre-3d relative mt-1 text-[28px] font-bold leading-none tracking-tight tabular-nums sm:text-[34px]",
-          accent === "or" ? "bt-or-texte" : "text-white",
-        )}
-      >
+      <div className="mt-2.5 text-[26px] font-semibold leading-none tracking-tight tabular-nums text-foreground sm:text-[30px]">
         {nombre !== undefined && format ? <Compteur valeur={nombre} format={format} /> : valeur}
       </div>
       {(tendance != null && isFinite(tendance)) && (
-        <div className="relative mt-2 flex flex-wrap items-center gap-1.5 text-xs">
+        <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs">
           <span
             className={cn(
-              "inline-flex items-center whitespace-nowrap rounded-full px-1.5 py-0.5 font-bold tabular-nums",
-              tendance > 0 ? "bg-emerald-400/15 text-emerald-300" : tendance < 0 ? "bg-red-400/15 text-red-300" : "bg-white/10 text-white/70",
+              "inline-flex items-center gap-0.5 whitespace-nowrap rounded px-1.5 py-0.5 font-semibold tabular-nums",
+              tendance > 0 ? "bg-emerald-50 text-emerald-700" : tendance < 0 ? "bg-red-50 text-red-700" : "bg-muted text-muted-foreground",
             )}
           >
-            {tendance > 0 ? "▲" : tendance < 0 ? "▼" : "■"} {signedPct(tendance)}
+            {tendance > 0 ? "↑" : tendance < 0 ? "↓" : "→"} {signedPct(tendance)}
           </span>
-          {tendanceLabel && <span className="text-white/50">{tendanceLabel}</span>}
+          {tendanceLabel && <span className="text-muted-foreground">{tendanceLabel}</span>}
         </div>
       )}
-      {sub && <div className="relative mt-2 text-xs leading-snug text-white/55">{sub}</div>}
       {serie && serie.filter((v) => v != null).length > 1 && (
-        <Sparkline valeurs={serie} couleur={a.trait} className="relative mt-3" hauteur={34} />
+        <Sparkline valeurs={serie} couleur={couleur} className="mt-3" hauteur={36} />
       )}
-    </Relief3D>
+      {sub && <div className="mt-auto pt-3 text-xs leading-snug text-muted-foreground">{sub}</div>}
+    </div>
   );
-  return href ? <a href={href} className="block h-full rounded-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">{corps}</a> : corps;
+  return href
+    ? <a href={href} className="block h-full rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">{corps}</a>
+    : corps;
+}
+
+/**
+ * Répartition compacte pour le bas d'une carte KPI : une barre fine et, sous
+ * elle, chaque part nommée avec son effectif. Donne le « de quoi est fait ce
+ * chiffre » sans ouvrir un autre écran.
+ */
+export function MiniRepartition({
+  parts,
+}: {
+  parts: ReadonlyArray<{ label: string; n: number; couleur: string }>;
+}) {
+  const total = parts.reduce((s, p) => s + Math.max(0, p.n), 0);
+  return (
+    <div>
+      <div className="flex h-1.5 w-full gap-[2px] overflow-hidden rounded-full bg-muted">
+        {total > 0 && parts.filter((p) => p.n > 0).map((p) => (
+          <div key={p.label} className="h-full" style={{ width: `${(p.n / total) * 100}%`, background: p.couleur }} />
+        ))}
+      </div>
+      <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
+        {parts.map((p) => (
+          <span key={p.label} className="inline-flex items-center gap-1.5">
+            <span aria-hidden className="h-1.5 w-1.5 rounded-full" style={{ background: p.couleur }} />
+            {p.label} <b className="font-semibold tabular-nums text-foreground">{nf.format(p.n)}</b>
+          </span>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 export function GrilleKpi({ children }: { children: React.ReactNode }) {
@@ -755,21 +772,15 @@ export function GrilleKpi({ children }: { children: React.ReactNode }) {
 /** Point vert « en direct ». L'animation se coupe si l'OS demande moins de mouvement. */
 export function PointLive({ className }: { className?: string }) {
   return (
-    <span className={cn("relative flex h-2.5 w-2.5 shrink-0", className)} aria-hidden>
-      <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-60 motion-safe:animate-ping" />
-      <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-emerald-400 shadow-[0_0_10px_rgba(52,211,153,0.9)]" />
+    <span className={cn("relative flex h-2 w-2 shrink-0", className)} aria-hidden>
+      <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-500 opacity-40 motion-safe:animate-ping" />
+      <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-600" />
     </span>
   );
 }
 
-/** Couleurs vives des segments, pour les lueurs (classes Tailwind → hex). */
-const HEX_SEGMENT: Record<string, string> = {
-  "bg-emerald-500": "#10b981", "bg-sky-500": "#0ea5e9", "bg-violet-500": "#8b5cf6",
-  "bg-slate-300": "#64748b", "bg-amber-500": "#f59e0b", "bg-red-500": "#ef4444",
-};
-
-/** Une proportion en une barre en relief (tube éclairé par le haut), puis la
- *  légende chiffrée — la couleur n'est jamais seule à porter l'information. */
+/** Une proportion en une barre, puis la légende chiffrée — la couleur n'est
+ *  jamais seule à porter l'information. */
 export function BarreRepartition({
   segments, total,
 }: {
@@ -782,36 +793,25 @@ export function BarreRepartition({
       <div
         role="img"
         aria-label={segments.map((s) => `${s.label} : ${s.n}`).join(", ")}
-        className="flex h-5 w-full gap-1 overflow-hidden rounded-full bg-black/40 p-[3px] shadow-[inset_0_2px_6px_rgba(0,0,0,0.8),0_1px_0_rgba(255,255,255,0.05)]"
+        className="flex h-2.5 w-full gap-[2px] overflow-hidden rounded-full bg-muted"
       >
         {t > 0 && segments.filter((s) => s.n > 0).map((s) => (
-          <div
-            key={s.cle}
-            className={cn("relative h-full rounded-full transition-[width] duration-1000 ease-out", s.couleur)}
-            style={{
-              width: `${(s.n / t) * 100}%`,
-              boxShadow: `inset 0 2px 1px rgba(255,255,255,0.45), inset 0 -3px 4px rgba(0,0,0,0.35), 0 0 14px ${HEX_SEGMENT[s.couleur] ?? "transparent"}`,
-            }}
-          />
+          <div key={s.cle} className={cn("h-full", s.couleur)} style={{ width: `${(s.n / t) * 100}%` }} />
         ))}
       </div>
-      <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-4">
+      <dl className="mt-4 grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-4">
         {segments.map((s) => (
-          <div key={s.cle} className="flex items-start gap-2 rounded-xl border border-white/[0.06] bg-white/[0.02] p-2.5">
-            <span
-              className={cn("mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full", s.couleur)}
-              style={{ boxShadow: `0 0 10px ${HEX_SEGMENT[s.couleur] ?? "transparent"}` }}
-              aria-hidden
-            />
-            <div className="min-w-0">
-              <dt className="text-xs text-muted-foreground">{s.label}</dt>
-              <dd className="bt-chiffre-3d text-xl font-bold leading-tight tabular-nums text-white">
-                {nf.format(s.n)}
-                <span className="ml-1.5 text-xs font-medium text-muted-foreground">
-                  {t > 0 ? pct((s.n / t) * 100, 0) : "—"}
-                </span>
-              </dd>
-            </div>
+          <div key={s.cle} className="min-w-0">
+            <dt className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <span className={cn("h-2 w-2 shrink-0 rounded-[3px]", s.couleur)} aria-hidden />
+              {s.label}
+            </dt>
+            <dd className="mt-0.5 text-lg font-semibold leading-tight tabular-nums text-foreground">
+              {nf.format(s.n)}
+              <span className="ml-1.5 text-xs font-normal text-muted-foreground">
+                {t > 0 ? pct((s.n / t) * 100, 0) : "—"}
+              </span>
+            </dd>
           </div>
         ))}
       </dl>
@@ -820,8 +820,8 @@ export function BarreRepartition({
 }
 
 const TEINTES_AVATAR = [
-  "bg-amber-100 text-amber-800", "bg-emerald-100 text-emerald-800", "bg-sky-100 text-sky-800",
-  "bg-violet-100 text-violet-800", "bg-rose-100 text-rose-800", "bg-slate-200 text-slate-700",
+  "bg-[#f3ead8] text-[#7a5412]", "bg-[#e3eee9] text-[#0f5f47]", "bg-[#e4eaf2] text-[#27456b]",
+  "bg-[#ebe7f2] text-[#57497d]", "bg-[#f1e6e4] text-[#8a3a2e]", "bg-[#ecebe7] text-[#4b5058]",
 ];
 
 /** Pastille d'initiales, couleur stable par adresse — repère visuel d'une ligne. */
@@ -834,7 +834,7 @@ export function Initiales({ email }: { email: string }) {
   return (
     <span
       aria-hidden
-      className={cn("flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[11px] font-bold ring-1 ring-inset ring-white/10 shadow-[inset_0_1px_0_rgba(255,255,255,0.15),0_4px_10px_-4px_rgba(0,0,0,0.8)]", TEINTES_AVATAR[h % TEINTES_AVATAR.length])}
+      className={cn("flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold", TEINTES_AVATAR[h % TEINTES_AVATAR.length])}
     >
       {texte}
     </span>
@@ -854,12 +854,12 @@ export function CelluleCompte({ email, detail }: { email: string; detail?: React
 }
 
 const FORMULES: Record<string, { texte: string; classe: string }> = {
-  expert: { texte: "Expert", classe: "bg-amber-50 text-amber-800 ring-amber-200" },
-  pro: { texte: "Expert", classe: "bg-amber-50 text-amber-800 ring-amber-200" },
-  standard: { texte: "Standard", classe: "bg-slate-100 text-slate-700 ring-slate-200" },
-  starter: { texte: "Standard", classe: "bg-slate-100 text-slate-700 ring-slate-200" },
+  expert: { texte: "Expert", classe: "bg-[#faf3e4] text-[#7a5412] ring-[#ecd9b0]" },
+  pro: { texte: "Expert", classe: "bg-[#faf3e4] text-[#7a5412] ring-[#ecd9b0]" },
+  standard: { texte: "Standard", classe: "bg-[#eef2f7] text-[#27456b] ring-[#d3dce8]" },
+  starter: { texte: "Standard", classe: "bg-[#eef2f7] text-[#27456b] ring-[#d3dce8]" },
   free: { texte: "Gratuit", classe: "bg-card text-muted-foreground ring-border" },
-  admin: { texte: "Admin", classe: "bg-gradient-to-b from-amber-300 to-amber-600 text-[#1a1203] ring-amber-300/40" },
+  admin: { texte: "Admin", classe: "bg-[#1b2230] text-white ring-[#1b2230]" },
 };
 
 export function BadgeFormule({ plan, periodicite }: { plan: string | null | undefined; periodicite?: string | null }) {
@@ -926,7 +926,7 @@ export function Tableau<L>({
           <DefilementX label={label}>
             <table className="w-full min-w-[640px] border-collapse">
               <thead>
-                <tr className="border-b border-white/10 bg-white/[0.02]">
+                <tr className="border-b border-border bg-muted/50">
                   {colonnes.map((c) => (
                     <th key={c.titre} scope="col" className={cn(TH, c.droite && "text-right", c.className)}>{c.titre}</th>
                   ))}

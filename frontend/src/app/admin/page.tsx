@@ -15,9 +15,9 @@ import { toast } from "sonner";
 import { CreditCard, Gauge, Hourglass, Loader2, RefreshCw, Users, Wallet } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { adminApi } from "@/lib/api";
-import { EnTetePage, GrilleKpi, Kpi, depuis, eur, num } from "@/components/admin/ui";
+import { EnTetePage, GrilleKpi, Kpi, MiniRepartition, depuis, eur, num } from "@/components/admin/ui";
 import { useAbonnements, useDashboard, useRevenus } from "@/components/admin/data";
-import { Fraicheur, useRecuLe } from "@/components/admin/relief";
+import { Fraicheur, useRecuLe } from "@/components/admin/graphes";
 import RevenusApercu from "@/components/admin/vues/RevenusApercu";
 import BandeauAlertes from "@/components/admin/vues/BandeauAlertes";
 import EnDirect from "@/components/admin/vues/EnDirect";
@@ -54,7 +54,7 @@ export default function PilotagePage() {
         actions={
           <>
           <Fraicheur depuis={recu} cadence={30_000} />
-          <Button variant="brand" onClick={lancerRetrain} disabled={retraining} className="min-h-[2.75rem]">
+          <Button onClick={lancerRetrain} disabled={retraining} className="h-9 rounded-lg bg-[#1b2230] px-3.5 text-[13px] font-medium text-white hover:bg-[#2c3547]">
             {retraining ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
             Ré-entraîner
           </Button>
@@ -69,7 +69,7 @@ export default function PilotagePage() {
           format={(v) => eur(v)}
           sub={abos ? `Récurrent ${eur(abos.resume.mrr)}/mois · ${eur(abos.resume.arr)}/an` : undefined}
           icone={<Wallet className="h-4 w-4" />}
-          accent="or"
+          accent="bleu"
           tendance={revenus?.totaux.variation_pct}
           tendanceLabel="vs mois préc."
           serie={revenus?.mois.map((m) => m.encaisse_cents / 100)}
@@ -79,7 +79,12 @@ export default function PilotagePage() {
           label="Payants"
           nombre={r?.payants ?? null}
           format={(v) => num(Math.round(v))}
-          sub={r ? `Standard ${r.par_formule.standard.payants} · Expert ${r.par_formule.expert.payants}` : undefined}
+          sub={r ? (
+            <MiniRepartition parts={[
+              { label: "Standard", n: r.par_formule.standard.payants, couleur: "#6f8bab" },
+              { label: "Expert", n: r.par_formule.expert.payants, couleur: "#a8741a" },
+            ]} />
+          ) : undefined}
           icone={<CreditCard className="h-4 w-4" />}
           accent="ok"
         />
@@ -87,11 +92,19 @@ export default function PilotagePage() {
           label="En essai"
           nombre={r?.essais ?? null}
           format={(v) => num(Math.round(v))}
-          sub={abos
-            ? abos.resume.fin_essai_sous_3j > 0
-              ? `${abos.resume.fin_essai_sous_3j} finissent sous 3 j`
-              : "aucun ne finit sous 3 j"
-            : undefined}
+          sub={abos ? (
+            <>
+              <MiniRepartition parts={[
+                { label: "Avec carte", n: abos.resume.en_essai_avec_carte, couleur: "#27456b" },
+                { label: "Sans carte", n: abos.resume.en_essai_sans_carte, couleur: "#c9d5e3" },
+              ]} />
+              <div className="mt-1.5">
+                {abos.resume.fin_essai_sous_3j > 0
+                  ? `${abos.resume.fin_essai_sous_3j} finissent sous 3 jours`
+                  : "Aucun ne finit sous 3 jours"}
+              </div>
+            </>
+          ) : undefined}
           icone={<Hourglass className="h-4 w-4" />}
           accent="bleu"
         />
@@ -100,7 +113,17 @@ export default function PilotagePage() {
           nombre={r?.comptes ?? null}
           format={(v) => num(Math.round(v))}
           accent="violet"
-          sub={dashboard ? `+${dashboard.users.nouveaux_7j} cette semaine` : undefined}
+          sub={r ? (
+            <>
+              <MiniRepartition parts={[
+                { label: "Payants", n: r.payants, couleur: "#0f7b5a" },
+                { label: "Essais", n: r.essais, couleur: "#27456b" },
+                { label: "Offerts", n: r.offerts, couleur: "#6b5b95" },
+                { label: "Gratuits", n: r.gratuits, couleur: "#d5d9de" },
+              ]} />
+              {dashboard && <div className="mt-1.5">+{dashboard.users.nouveaux_7j} inscrits cette semaine</div>}
+            </>
+          ) : undefined}
           icone={<Users className="h-4 w-4" />}
         />
       </GrilleKpi>
