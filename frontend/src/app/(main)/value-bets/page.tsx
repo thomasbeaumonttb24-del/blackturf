@@ -19,7 +19,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { IdentiteCheval } from "@/components/courses/identite-cheval";
 import { Reveal, Tilt } from "@/components/track-record/effets";
-import { Compteur, Plan3D, SectionTitre, nf } from "@/components/espace/kit";
+import { Compteur, Etoiles, Plan3D, SectionTitre, nf } from "@/components/espace/kit";
 import { useAuth } from "@/hooks/useAuth";
 import { useValueBetsStream } from "@/hooks/useWebSocket";
 import { predictionsApi } from "@/lib/api";
@@ -94,10 +94,8 @@ const cote = (x?: number | null) => (x == null ? "—" : nf(x, 1));
 // ─── Briques ────────────────────────────────────────────────────
 function Niveau({ n, avecLibelle }: { n: number; avecLibelle?: boolean }) {
   return (
-    <span className="inline-flex items-center gap-1.5 whitespace-nowrap" aria-label={`Niveau ${n} sur 4, ${NIVEAU_LABEL[n] ?? ""}`}>
-      <span className="text-[10px] tracking-[0.1em] text-amber-600" aria-hidden="true">
-        {"●".repeat(Math.max(0, Math.min(4, n)))}<span className="text-stone-200">{"●".repeat(Math.max(0, 4 - n))}</span>
-      </span>
+    <span className="inline-flex items-center gap-1.5 whitespace-nowrap" title={NIVEAU_LABEL[n]}>
+      <Etoiles n={n} />
       {avecLibelle && <span className="text-[11px] font-medium text-stone-600">{NIVEAU_LABEL[n]}</span>}
     </span>
   );
@@ -514,8 +512,8 @@ export default function ValueBetsPage() {
           <div className="flex flex-wrap items-center gap-1.5">
             <span className="mr-1 text-[11px] font-medium uppercase tracking-[0.14em] text-stone-500">Niveau</span>
             {[2, 3, 4].map((n) => (
-              <button key={n} onClick={() => setNiveauMin(n)} aria-pressed={niveauMin === n} className={puce(niveauMin === n)}>
-                {n === 4 ? "4" : `${n} et +`}
+              <button key={n} onClick={() => setNiveauMin(n)} aria-pressed={niveauMin === n} className={cn(puce(niveauMin === n), "inline-flex items-center gap-1.5")}>
+                <Etoiles n={n} taille="h-3 w-3" vides={false} />{n < 4 && <span>et +</span>}
               </button>
             ))}
             <span className="mx-2 hidden h-5 w-px bg-stone-200 sm:block" aria-hidden="true" />

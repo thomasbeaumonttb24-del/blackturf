@@ -10,6 +10,7 @@
  */
 
 import { useEffect, useId, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { Star } from "lucide-react";
 import { Reveal } from "@/components/track-record/effets";
 import { cn } from "@/lib/utils";
 
@@ -200,5 +201,23 @@ export function Plan3D({ children, sens = 1, className }: { children: ReactNode;
       <div className="scene3d-plan">{children}</div>
       <div className="pointer-events-none absolute inset-x-[14%] -bottom-7 -z-10 h-9 rounded-[100%] bg-stone-900/20 blur-2xl" aria-hidden="true" />
     </div>
+  );
+}
+
+/** Niveau d'un pari de valeur, de 1 à 4 étoiles. */
+export function Etoiles({ n, taille = "h-3.5 w-3.5", vides = true, className }: {
+  n: number;
+  taille?: string;
+  /** Faux : n'affiche que les étoiles pleines (boutons de filtre sur fond sombre). */
+  vides?: boolean;
+  className?: string;
+}) {
+  const k = Math.max(0, Math.min(4, n));
+  return (
+    <span role="img" className={cn("inline-flex items-center gap-0.5", className)} aria-label={`${k} étoile${k > 1 ? "s" : ""} sur 4`}>
+      {Array.from({ length: vides ? 4 : k }).map((_, i) => (
+        <Star key={i} aria-hidden="true" className={cn(taille, i < k ? "fill-amber-500 text-amber-500" : "fill-stone-200 text-stone-200")} />
+      ))}
+    </span>
   );
 }

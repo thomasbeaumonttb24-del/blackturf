@@ -20,7 +20,7 @@ import { fr } from "date-fns/locale";
 import { Button } from "@/components/ui/button";
 import { CasaqueNumero, IdentiteCheval } from "@/components/courses/identite-cheval";
 import { Reveal, Tilt, useReveal } from "@/components/track-record/effets";
-import { Anneau, Compteur, CourbeCapital, Plan3D, SectionTitre, nf } from "@/components/espace/kit";
+import { Anneau, Compteur, CourbeCapital, Etoiles, Plan3D, SectionTitre, nf } from "@/components/espace/kit";
 import { useRequireAuth } from "@/hooks/useAuth";
 import { bankrollApi, predictionsApi, coursesApi, statsApi } from "@/lib/api";
 import { RUBRIQUES } from "@/lib/navigation";
@@ -176,13 +176,9 @@ function PariDuJourCarte({ p }: { p: PariDuJour }) {
   );
 }
 
-/** Niveau d'un pari de valeur, de 1 à 4, en pastilles discrètes. */
+/** Niveau d'un pari de valeur, de 1 à 4 étoiles. */
 function Niveau({ n }: { n: number }) {
-  return (
-    <span className="whitespace-nowrap text-[10px] tracking-[0.1em] text-amber-600" aria-label={`Niveau ${n} sur 4`} title={`Niveau ${n} sur 4`}>
-      {"●".repeat(Math.max(0, Math.min(4, n)))}<span className="text-stone-200">{"●".repeat(Math.max(0, 4 - n))}</span>
-    </span>
-  );
+  return <Etoiles n={n} taille="h-3 w-3" />;
 }
 
 /** Sans pari du jour (tôt le matin, jour sans course) : une carte vers le programme. */
