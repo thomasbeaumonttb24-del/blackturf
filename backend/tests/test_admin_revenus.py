@@ -96,3 +96,98 @@ async def test_revenus_prevision_couvre_des_mois_entiers(client: AsyncClient, ad
     futurs = [p for p in data["prevision"] if p["mois"] > courant]
     assert len(futurs) == 3
     assert all(p["prevu_cents"] == 1200 for p in futurs)
+
+
+# ─────────────────────────────────────────────────────────────
+# Source Stripe (2026-09-25) : l'écran montrait 19 € quand deux abonnés avaient
+# payé — le journal interne avait un trou. Les montants viennent désormais de
+# l'API Stripe ; le journal sert au rapprochement.
+# ─────────────────────────────────────────────────────────────
+def _livre(now, *, avec_remboursement=False):
+    from services.revenus_stripe import Encaissement, Grand_livre, Remboursement, Virement
+    livre = Grand_livre(lu_le=now.timestamp())
+    livre.encaissements = [
+        Encaissement("ch_a", now - timedelta(minutes=30), 1900, 0, 57, 1843, "eur",
+                     "cus_a", "payant@x.fr", "in_a", "https://pay.stripe.com/receipts/a", "Abonnement Expert"),
+        Encaissement("ch_b", now - timedelta(minutes=20), 1200, 0, 43, 1157, "eur",
+                     "cus_b", "oublie@x.fr", "in_b", "https://pay.stripe.com/receipts/b", "Abonnement Standard"),
+    ]
+    if avec_remboursement:
+        livre.remboursements = [Remboursement("re_b", "ch_b", now - timedelta(minutes=10), 1200, -1200, "oublie@x.fr")]
+    livre.virements = [Virement("po_1", now - timedelta(minutes=5), 3000, "paid")]
+    return livre
+
+
+async def test_revenus_lus_chez_stripe_et_rapproches(client: AsyncClient, admin_headers, db, monkeypatch):
+    from api.config import get_settings
+    from services import revenus_stripe
+    now = datetime.now(timezone.utc)
+    a = User(user_id=str(uuid.uuid4()), email="payant@x.fr", plan="expert", stripe_customer_id="cus_a")
+    b = User(user_id=str(uuid.uuid4()), email="oublie@x.fr", plan="standard", stripe_customer_id="cus_b")
+    db.add_all([a, b])
+    # Le journal ne connaît QUE le premier paiement : c'est le trou constaté en prod.
+    db.add(SubscriptionEvent(event_id=str(uuid.uuid4()), user_id=a.user_id, email="payant@x.fr",
+                             type="paiement_recu", plan="expert", stripe_subscription_id="sub_a",
+                             montant_cents=1900, created_at=now - timedelta(minutes=29)))
+    await db.commit()
+
+    monkeypatch.setattr(get_settings(), "stripe_secret_key", "sk_test_local")
+    monkeypatch.setattr(revenus_stripe, "lire", lambda cle, depuis, forcer=False: _livre(now))
+
+    data = (await client.get("/admin/api/revenus?mois=2", headers=admin_headers)).json()
+    assert data["source"]["type"] == "stripe"
+    m = data["mois"][-1]
+    assert m["encaisse_cents"] == 3100          # les DEUX paiements, pas seulement le journalisé
+    assert m["ca_cents"] == 3100
+    assert m["frais_cents"] == 100
+    assert m["net_cents"] == 3000
+    assert m["verse_cents"] == 3000
+    assert m["par_formule"] == {"standard": 1200, "expert": 1900}
+    assert {p["recu_url"] for p in m["paiements"]} == {
+        "https://pay.stripe.com/receipts/a", "https://pay.stripe.com/receipts/b"}
+    # Le rapprochement nomme le paiement que le journal a manqué.
+    assert [e["email"] for e in data["rapprochement"]["absents_du_journal"]] == ["oublie@x.fr"]
+    assert data["rapprochement"]["absents_de_stripe"] == []
+
+
+async def test_revenus_remboursement_deduit_du_chiffre_d_affaires(client: AsyncClient, admin_headers, monkeypatch):
+    from api.config import get_settings
+    from services import revenus_stripe
+    now = datetime.now(timezone.utc)
+    monkeypatch.setattr(get_settings(), "stripe_secret_key", "sk_test_local")
+    monkeypatch.setattr(revenus_stripe, "lire", lambda cle, depuis, forcer=False: _livre(now, avec_remboursement=True))
+
+    data = (await client.get("/admin/api/revenus?mois=2", headers=admin_headers)).json()
+    m = data["mois"][-1]
+    assert m["encaisse_cents"] == 3100
+    assert m["rembourse_cents"] == 1200
+    assert m["ca_cents"] == 1900
+    assert m["net_cents"] == 3000 - 1200
+    assert data["totaux"]["periode_cents"] == 1900
+
+
+async def test_revenus_stripe_injoignable_repli_signale(client: AsyncClient, admin_headers, monkeypatch):
+    from api.config import get_settings
+    from services import revenus_stripe
+
+    def _panne(*_a, **_k):
+        raise RuntimeError("stripe down")
+
+    monkeypatch.setattr(get_settings(), "stripe_secret_key", "sk_test_local")
+    monkeypatch.setattr(revenus_stripe, "lire", _panne)
+    data = (await client.get("/admin/api/revenus?mois=2", headers=admin_headers)).json()
+    assert data["source"]["type"] == "journal"
+    assert "Stripe" in data["source"]["erreur"]
+    assert data["rapprochement"]["verifie"] is False
+
+
+async def test_seuls_les_debits_reussis_et_captures_sont_de_l_argent_encaisse():
+    from services.revenus_stripe import _encaissement
+    base = {"id": "ch", "created": 1_760_000_000, "amount": 1200, "amount_captured": 1200,
+            "amount_refunded": 0, "currency": "eur", "customer": "cus",
+            "billing_details": {"email": "a@x.fr"},
+            "balance_transaction": {"fee": 43, "net": 1157}}
+    ok = _encaissement({**base, "status": "succeeded", "paid": True, "captured": True})
+    assert (ok.montant_cents, ok.frais_cents, ok.net_cents, ok.email) == (1200, 43, 1157, "a@x.fr")
+    assert _encaissement({**base, "status": "failed", "paid": False}) is None
+    assert _encaissement({**base, "status": "succeeded", "paid": True, "captured": False}) is None

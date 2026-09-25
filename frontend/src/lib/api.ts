@@ -294,8 +294,8 @@ export const adminApi = {
   dashboard: () => api.get("/dashboard", { baseURL: `${API_URL}/admin/api` }),
   enLigne: () => api.get("/en-ligne", { baseURL: `${API_URL}/admin/api` }),
   // Encaissements RÉELS par mois (journal `paiement_recu`) + échéancier des prélèvements.
-  revenus: (mois = 12) =>
-    api.get("/revenus", { baseURL: `${API_URL}/admin/api`, params: { mois } }),
+  revenus: (mois = 12, actualiser = false) =>
+    api.get("/revenus", { baseURL: `${API_URL}/admin/api`, params: { mois, actualiser } }),
   users: (params?: Record<string, unknown>) =>
     api.get("/users", { baseURL: `${API_URL}/admin/api`, params }),
   userDetail: (id: string) =>

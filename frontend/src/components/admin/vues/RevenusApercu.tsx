@@ -23,7 +23,7 @@ const nomMois = (cle: string, long = false) => {
 export default function RevenusApercu({ className }: { className?: string }) {
   const { data } = useRevenus(6);
   const points = (data?.mois ?? []).map((m) => ({
-    cle: m.mois, label: nomMois(m.mois), encaisse: m.encaisse_cents / 100, n: m.nb_paiements,
+    cle: m.mois, label: nomMois(m.mois), encaisse: m.ca_cents / 100, n: m.nb_paiements,
   }));
   const prochains = (data?.echeancier ?? []).filter((e) => e.montant_cents > 0).slice(0, 5);
 
