@@ -474,11 +474,35 @@ async def job_warm_caches() -> None:
                 log.warning("jobs.warm_cache.failed", url=u, err=str(e)[:120])
 
 
+async def job_defi_entretien() -> None:
+    """Toutes les heures — Défi du mois : rattrape les paris non réglés (rapport
+    publié tard, course annulée) et rétablit le plan des récompenses échues."""
+    try:
+        from db.database import AsyncSessionLocal
+        from services.defi import expirer_recompenses, regler_en_attente
+
+        async with AsyncSessionLocal() as session:
+            n_regles = await regler_en_attente(session)
+            n_expires = await expirer_recompenses(session)
+        if n_regles or n_expires:
+            log.info("jobs.defi_entretien", regles=n_regles, expires=n_expires)
+    except Exception as e:
+        log.error("jobs.defi_entretien.error", error=str(e))
+
+
 def start_scheduler() -> None:
     scheduler = get_scheduler()
 
     # Sélection horodatée à partir de 10 h Paris. Les passages suivants reprennent
     # les échecs transitoires sans refaire un envoi déjà accepté par Resend.
+    scheduler.add_job(
+        job_defi_entretien,
+        CronTrigger(minute=7, timezone="Europe/Paris"),
+        id="defi_entretien",
+        replace_existing=True,
+        misfire_grace_time=1800,
+    )
+
     scheduler.add_job(
         job_morning_digest,
         CronTrigger(hour=10, minute="0,15,30,45", timezone="Europe/Paris"),

@@ -167,6 +167,85 @@ export const bankrollApi = {
   export: () => api.get("/bankroll/export", { responseType: "blob" }),
 };
 
+// ─── Défi du mois ──────────────────────────────────────────────────────────
+export type DefiTypePari = "Simple Gagnant" | "Simple Placé" | "Couplé Gagnant" | "Couplé Placé";
+
+export type DefiRegles = {
+  capital_mensuel: number;
+  points_min: number;
+  points_max: number;
+  min_paris_classement: number;
+  max_paris_par_course: number;
+  verrou_minutes: number;
+  recompenses: { rang: number; plan: string; jours: number }[];
+  types: DefiTypePari[];
+  mois: string;
+};
+
+export type DefiPari = {
+  pari_id: string;
+  course_id: string;
+  course_label: string | null;
+  date_heure: string | null;
+  type_pari: DefiTypePari;
+  chevaux: number[];
+  points: number;
+  origine: "plan" | "perso";
+  statut: "en_attente" | "gagne" | "perd" | "rembourse";
+  rapport: number | null;
+  points_retour: number | null;
+  engage_at: string;
+};
+
+export type DefiStats = {
+  nb_paris: number;
+  nb_gagnes: number;
+  nb_en_attente: number;
+  points_nets: number;
+  roi: number | null;
+};
+
+export type DefiLigne = DefiStats & {
+  rang: number | null;
+  nom: string;
+  solde: number;
+  classe: boolean;
+  hors_concours: boolean;
+  moi: boolean;
+};
+
+export type DefiMoi = DefiStats & {
+  mois: string;
+  nom: string;
+  rang: number | null;
+  nb_classes: number;
+  solde: number;
+  plan: DefiStats;
+  perso: DefiStats;
+  paris: DefiPari[];
+};
+
+export type DefiCourse = {
+  ouvert: boolean;
+  limite: string;
+  solde: number | null;
+  tendance: { nb_joueurs: number; nb_paris: number; cheval_plus_joue: number | null };
+  mes_paris: DefiPari[];
+};
+
+export type DefiPalmares = { mois: string; rang: number; nom: string; solde: number; plan_offert: string }[];
+
+export const defiApi = {
+  regles: () => api.get<DefiRegles>("/defi/regles"),
+  classement: (mois?: string) =>
+    api.get<{ mois: string; nb_joueurs: number; lignes: DefiLigne[] }>("/defi/classement", { params: { mois } }),
+  moi: (mois?: string) => api.get<DefiMoi>("/defi/moi", { params: { mois } }),
+  course: (courseId: string) => api.get<DefiCourse>(`/defi/course/${courseId}`),
+  palmares: () => api.get<DefiPalmares>("/defi/palmares"),
+  engager: (data: { course_id: string; type_pari: DefiTypePari; chevaux: number[]; points: number }) =>
+    api.post<DefiPari>("/defi/paris", data),
+};
+
 export const strategiesApi = {
   list: () => api.get("/strategies"),
   create: (data: Record<string, unknown>) => api.post("/strategies", data),
@@ -291,6 +370,10 @@ export const adminApi = {
   supprimerJetonInstagram: () =>
     api.delete("/integrations/instagram", { baseURL: `${API_URL}/admin/api` }),
 
+  defiCloture: (mois?: string) =>
+    api.get("/defi/cloture", { baseURL: `${API_URL}/admin/api`, params: { mois } }),
+  defiRecompense: (mois: string, rang: number) =>
+    api.post("/defi/recompenses", { mois, rang }, { baseURL: `${API_URL}/admin/api` }),
   dashboard: () => api.get("/dashboard", { baseURL: `${API_URL}/admin/api` }),
   enLigne: () => api.get("/en-ligne", { baseURL: `${API_URL}/admin/api` }),
   users: (params?: Record<string, unknown>) =>

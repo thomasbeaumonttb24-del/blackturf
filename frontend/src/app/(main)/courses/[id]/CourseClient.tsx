@@ -8,7 +8,7 @@ import {
   RefreshCw, ShieldAlert, Newspaper, TrendingDown, Activity, CheckCircle2,
   MapPin, Ruler, Users, Clock, Trophy, Tag, FileText, Target, Pencil, Tv,
   HelpCircle, X, Minus, ShieldCheck, Gauge, Flame, LockKeyhole, Radio, WalletCards,
-  Sparkles,
+  Sparkles, Medal,
 } from "lucide-react";
 import Link from "next/link";
 import { CasaquesProvider, CasaqueNumero, IdentiteCheval } from "@/components/courses/identite-cheval";
@@ -26,6 +26,8 @@ import {
 } from "@/components/courses/insights";
 import { PronosticEmailPopup } from "@/components/courses/PronosticEmailPopup";
 import { CX, PROFILS_MISE, PlanMiseDisplay, type MisePlan } from "@/components/courses/plan-mise";
+import { DefiCourseCard, type DefiPrefill } from "@/components/defi/DefiCourseCard";
+import type { DefiTypePari } from "@/lib/api";
 import { Anneau, PartantsSection } from "@/components/courses/partants";
 import { BandeauOnglet, CARTE_CLS, CARTE_STYLE, IconeTuile, LienOnglet, Pastille, PastilleDirect, SuiteOnglets, difficulteCourse } from "@/components/courses/course-ui";
 import {
@@ -489,12 +491,14 @@ function MiseCalculatorWidget({
   profil,
   predictions,
   statut,
+  onJouerDefi,
 }: {
   courseId: string;
   userPlan: string | undefined;
   profil: string;
   predictions: Prediction[] | null;
   statut?: string;
+  onJouerDefi?: (type: DefiTypePari, chevaux: number[]) => void;
 }) {
   const [montant, setMontant] = useState("");
   const [plan, setPlan] = useState<MisePlan | null>(null);
@@ -659,6 +663,7 @@ function MiseCalculatorWidget({
       onChangeProfil={switchProfil}
       onClose={() => setPlan(null)}
       onSave={saveBets}
+      onJouerDefi={statut === "a_venir" ? onJouerDefi : undefined}
     />
   );
 
@@ -2113,14 +2118,16 @@ export default function CoursePage({
   const [showGlossaire, setShowGlossaire] = useState(false);
   // Onglet affiché. Null = on suit le statut de la course (résultats si courue,
   // synthèse sinon) ; dès que le visiteur choisit, son choix prime.
-  type Onglet = "synthese" | "partants" | "marche" | "plan" | "resultats";
+  type Onglet = "synthese" | "partants" | "marche" | "plan" | "defi" | "resultats";
   const [onglet, setOnglet] = useState<Onglet | null>(null);
+  // Ticket du plan de mise envoyé vers le Défi du mois (pré-remplissage).
+  const [defiPrefill, setDefiPrefill] = useState<DefiPrefill | null>(null);
   // Cheval à ouvrir en arrivant sur « Partants » depuis un autre onglet.
   const [chevalCible, setChevalCible] = useState<number | null>(null);
   useEffect(() => {
     const lire = () => {
       const h = window.location.hash.replace("#", "");
-      if (["synthese", "partants", "marche", "plan", "resultats"].includes(h)) setOnglet(h as Onglet);
+      if (["synthese", "partants", "marche", "plan", "defi", "resultats"].includes(h)) setOnglet(h as Onglet);
     };
     lire();
     window.addEventListener("hashchange", lire);
@@ -2388,6 +2395,7 @@ export default function CoursePage({
     { cle: "partants" as const, label: "Partants", icone: Users, pastille: course.nb_partants },
     { cle: "marche" as const, label: "Marché", icone: TrendingUp, pastille: null as number | null },
     { cle: "plan" as const, label: "Plan de mise", icone: Calculator, pastille: null as number | null },
+    { cle: "defi" as const, label: "Défi du mois", icone: Medal, pastille: null as number | null },
     ...(course.statut === "termine"
       ? [{ cle: "resultats" as const, label: "Résultats", icone: Trophy, pastille: null as number | null }]
       : []),
@@ -2398,6 +2406,7 @@ export default function CoursePage({
     partants: "La fiche détaillée de chaque cheval",
     marche: "Cotes en direct et argent engagé",
     plan: "Vos paris selon votre budget",
+    defi: "Misez vos points, visez un abonnement offert",
     resultats: "Arrivée officielle et rapports",
   };
   /** Change d'onglet — depuis la barre, un raccourci ou un lien interne. Avec un
@@ -3337,11 +3346,32 @@ export default function CoursePage({
                 profil={profil}
                 predictions={predictions}
                 statut={course.statut}
+                onJouerDefi={(type, chevaux) => {
+                  setDefiPrefill({ type, chevaux, cle: Date.now() });
+                  allerA("defi");
+                }}
               />
             </div>
           </div>
           </div>
           </div>
+        )}
+
+        {/* ═══ DÉFI DU MOIS — ouvert à tout compte, sans quota ni plan de mise ═══ */}
+        {ongletActif === "defi" && (
+          <>
+            <BandeauOnglet
+              icone={Medal}
+              titre="Défi du mois"
+              sousTitre="Pariez vos points sur cette course : le meilleur solde du mois gagne un abonnement"
+            />
+            <DefiCourseCard
+              courseId={id}
+              partants={course.partants}
+              connecte={!!user}
+              prefill={defiPrefill}
+            />
+          </>
         )}
 
         {/* ═══ RÉSULTATS ═══ */}

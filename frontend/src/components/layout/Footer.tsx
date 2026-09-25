@@ -26,6 +26,7 @@ const COLUMNS: Array<{
       R.resultats,
       { ...R.parisDeValeur, prive: true },
       R.performances,
+      R.defi,
       R.methode,
       { ...R.suiviCapital, prive: true },
       { ...R.assistant, prive: true },

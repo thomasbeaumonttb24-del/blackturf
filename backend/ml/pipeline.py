@@ -1467,6 +1467,17 @@ async def run_post_course(course_id: str) -> None:
     except Exception as e:
         log.warning("pipeline.bet_plan_settle_skip", course_id=course_id, err=str(e)[:140])
 
+    # ── 6f. Défi du mois : régler les paris en points de la course sur la même
+    # arrivée officielle, pour que le classement bouge dès l'arrivée.
+    try:
+        from services.defi import regler_course as _regler_defi
+        async with AsyncSessionLocal() as defi_session:
+            _nd = await _regler_defi(defi_session, course_id)
+            if _nd:
+                log.info("pipeline.defi_settled", course_id=course_id, n=_nd)
+    except Exception as e:
+        log.warning("pipeline.defi_settle_skip", course_id=course_id, err=str(e)[:140])
+
     # 7. Retrain déclenché en JOURNÉE — désactivé par défaut depuis le 25/08/2026.
     #
     # `rq worker ml default` est un processus UNIQUE : tant qu'il entraîne, il ne

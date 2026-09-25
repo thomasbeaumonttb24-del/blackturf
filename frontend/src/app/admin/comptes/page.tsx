@@ -18,9 +18,10 @@
  */
 
 import { useMemo, useState } from "react";
+import Link from "next/link";
 import { toast } from "sonner";
 import {
-  Ban, Download, RotateCcw, Search, Trash2, Users, Wallet,
+  Ban, Download, Medal, RotateCcw, Search, Trash2, Users, Wallet,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { adminApi } from "@/lib/api";
@@ -207,12 +208,20 @@ export default function ComptesPage() {
         icone={<Users className="h-4 w-4" />}
         desc="Portefeuilles, abonnements et actions par compte. Cliquer un nom ouvre sa fiche complète."
         actions={
-          <button
-            onClick={exporter}
-            className="inline-flex min-h-[2.75rem] items-center gap-2 rounded-xl border border-border px-4 text-[13px] font-semibold transition-colors hover:border-brand-gold/50 hover:text-brand-gold-dark"
-          >
-            <Download className="h-4 w-4" aria-hidden /> Export CSV
-          </button>
+          <div className="flex flex-wrap gap-2">
+            <Link
+              href="/admin/defi"
+              className="inline-flex min-h-[2.75rem] items-center gap-2 rounded-xl border border-border px-4 text-[13px] font-semibold transition-colors hover:border-brand-gold/50 hover:text-brand-gold-dark"
+            >
+              <Medal className="h-4 w-4" aria-hidden /> Défi du mois
+            </Link>
+            <button
+              onClick={exporter}
+              className="inline-flex min-h-[2.75rem] items-center gap-2 rounded-xl border border-border px-4 text-[13px] font-semibold transition-colors hover:border-brand-gold/50 hover:text-brand-gold-dark"
+            >
+              <Download className="h-4 w-4" aria-hidden /> Export CSV
+            </button>
+          </div>
         }
       />
 

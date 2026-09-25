@@ -9,10 +9,12 @@
 import { useState } from "react";
 import {
   AlertTriangle, CheckCircle2, ChevronDown, Flame, Gauge, Info, Loader2,
-  LockKeyhole, Pencil, Radio, ShieldCheck, TrendingUp, WalletCards, Zap,
+  LockKeyhole, Medal, Pencil, Radio, ShieldCheck, TrendingUp, WalletCards, Zap,
 } from "lucide-react";
 import { CasaqueNumero } from "@/components/courses/identite-cheval";
 import { ModuleQuinte, type ModuleQuinteData } from "@/components/courses/ModuleQuinte";
+import { TYPES_DEFI } from "@/components/defi/kit";
+import type { DefiTypePari } from "@/lib/api";
 
 /** Cheval d'un pari du plan.
  *  `cote` est le prix que le MOTEUR a utilisé pour construire le pari (cote figée au
@@ -138,13 +140,15 @@ export const CX = {
   sg: "var(--font-space-grotesk), sans-serif",
 } as const;
 
-export function PlanMiseDisplay({ plan, profil, switching, onChangeProfil, onClose, onSave }: {
+export function PlanMiseDisplay({ plan, profil, switching, onChangeProfil, onClose, onSave, onJouerDefi }: {
   plan: MisePlan;
   profil: string;
   switching: boolean;
   onChangeProfil: (profil: string) => void;
   onClose: () => void;
   onSave: () => Promise<number>;
+  /** Envoie un ticket vers le Défi du mois (types du défi seulement). */
+  onJouerDefi?: (type: DefiTypePari, chevaux: number[]) => void;
 }) {
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved">("idle");
   const handleSave = async () => {
@@ -294,6 +298,15 @@ export function PlanMiseDisplay({ plan, profil, switching, onChangeProfil, onClo
                       <div style={{ marginTop: 2, fontFamily: CX.sg, fontSize: 15, fontWeight: 700, color: CX.emDeep, fontVariantNumeric: "tabular-nums" }}>~{p.gain_potentiel.toFixed(0)}€</div>
                     </div>
                   </div>
+                  {onJouerDefi && TYPES_DEFI.some((t) => t.type === p.type) && (
+                    <button
+                      type="button"
+                      onClick={() => onJouerDefi(p.type as DefiTypePari, p.chevaux.map((c) => c.numero))}
+                      style={{ marginTop: 8, minHeight: 32, display: "inline-flex", alignItems: "center", gap: 5, borderRadius: 8, border: `1px solid ${CX.goldBd}`, background: CX.goldBg, padding: "4px 10px", fontSize: 11, fontWeight: 650, color: CX.goldDeep, cursor: "pointer" }}
+                    >
+                      <Medal className="h-3.5 w-3.5" aria-hidden="true" /> Jouer ce pari au Défi du mois
+                    </button>
+                  )}
                   {p.raisons && p.raisons.length > 0 && (
                     <details style={{ marginTop: 8 }}>
                       <summary style={{ minHeight: 32, cursor: "pointer", fontSize: 10.5, color: CX.goldDeep, fontWeight: 650, listStyle: "none", display: "inline-flex", alignItems: "center", gap: 4 }} className="select-none">

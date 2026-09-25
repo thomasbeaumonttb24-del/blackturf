@@ -504,7 +504,7 @@ async def delete_user(
     survit chez Stripe : rien ici ne le touche.
     """
     from api.routes.stripe_routes import STATUTS_VIVANTS
-    from db.models import Bankroll, Recommandation, Strategie
+    from db.models import Bankroll, DefiPari, DefiRecompense, Recommandation, Strategie
 
     user = (await db.execute(select(User).where(User.user_id == user_id))).scalar_one_or_none()
     if not user:
@@ -535,6 +535,10 @@ async def delete_user(
     # base refuse la suppression et la transaction entière repart en arrière.
     supprime["paris"] = (await db.execute(
         delete(BankrollEntry).where(BankrollEntry.user_id == user_id))).rowcount or 0
+    supprime["defi_paris"] = (await db.execute(
+        delete(DefiPari).where(DefiPari.user_id == user_id))).rowcount or 0
+    supprime["defi_recompenses"] = (await db.execute(
+        delete(DefiRecompense).where(DefiRecompense.user_id == user_id))).rowcount or 0
     # Un pari d'un AUTRE compte pourrait pointer une reco de celui-ci : on coupe
     # le lien plutôt que de faire échouer la suppression sur une contrainte.
     await db.execute(

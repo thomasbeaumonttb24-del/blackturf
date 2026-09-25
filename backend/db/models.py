@@ -1063,6 +1063,71 @@ class BankrollEntry(Base):
 
 
 # ─────────────────────────────────────────────
+# Défi du mois (concours en points)
+# ─────────────────────────────────────────────
+class DefiPari(Base):
+    """Pari engagé dans le Défi du mois — immuable une fois créé.
+
+    À l'inverse de ``BankrollEntry`` (journal libre, modifiable), rien ici n'est
+    déclaré par le joueur au-delà de son CHOIX : course, type, chevaux, points.
+    La limite de dépôt (départ prévu), l'origine plan/perso, le rapport et le
+    résultat sont posés par le serveur. C'est ce qui rend le classement non
+    trichable : on ne peut ni parier une arrivée connue, ni retoucher un perdant.
+    """
+    __tablename__ = "defi_paris"
+
+    pari_id: Mapped[str] = mapped_column(String(36), primary_key=True, default=gen_uuid)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.user_id"), index=True)
+    mois: Mapped[str] = mapped_column(String(7), nullable=False)  # "2026-09", heure de Paris
+    course_id: Mapped[str] = mapped_column(ForeignKey("courses.course_id"), index=True)
+    type_pari: Mapped[str] = mapped_column(String(30), nullable=False)
+    chevaux: Mapped[list] = mapped_column(JSON, nullable=False)   # [3] / [3, 7]
+    points: Mapped[int] = mapped_column(Integer, nullable=False)
+    origine: Mapped[str] = mapped_column(String(10), nullable=False)  # plan / perso
+    engage_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    # en_attente / gagne / perd / rembourse
+    statut: Mapped[str] = mapped_column(String(12), nullable=False, default="en_attente")
+    rapport: Mapped[float | None] = mapped_column(Float)          # rapport PMU base 1
+    points_retour: Mapped[float | None] = mapped_column(Float)    # brut : points × rapport
+    regle_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (
+        Index("ix_defi_paris_mois_user", "mois", "user_id"),
+    )
+
+
+class DefiRecompense(Base):
+    """Récompense attribuée à un gagnant du Défi du mois.
+
+    Un plan offert n'a pas d'échéance dans ``users.plan`` : sans cette ligne, un
+    mois Expert offert à la main le restait à vie. ``expire_at`` + le job
+    quotidien ``expirer_recompenses`` remettent ``plan_precedent`` — sauf si le
+    joueur a souscrit entre-temps (on ne rétrograde jamais un abonné payant).
+    """
+    __tablename__ = "defi_recompenses"
+
+    recompense_id: Mapped[str] = mapped_column(String(36), primary_key=True, default=gen_uuid)
+    mois: Mapped[str] = mapped_column(String(7), nullable=False)
+    rang: Mapped[int] = mapped_column(Integer, nullable=False)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.user_id"), index=True)
+    nom_public: Mapped[str] = mapped_column(String(40), nullable=False)  # figé pour le palmarès
+    solde: Mapped[float] = mapped_column(Float, nullable=False)
+    plan_offert: Mapped[str] = mapped_column(String(10), nullable=False)
+    plan_precedent: Mapped[str | None] = mapped_column(String(10))
+    # applique : plan posé, expirera ; manuel : abonné payant, geste à faire dans
+    # Stripe ; termine : échéance passée, plan précédent rétabli ; conserve :
+    # échéance passée mais le joueur a souscrit, rien touché.
+    statut: Mapped[str] = mapped_column(String(10), nullable=False)
+    attribue_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    expire_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("mois", "rang", name="uq_defi_recompense_mois_rang"),
+        UniqueConstraint("mois", "user_id", name="uq_defi_recompense_mois_user"),
+    )
+
+
+# ─────────────────────────────────────────────
 # Stratégies
 # ─────────────────────────────────────────────
 class Strategie(Base):

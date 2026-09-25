@@ -38,6 +38,7 @@ export const RUBRIQUES = {
   statistiques: r("/statistiques", "Mes statistiques", "Le bilan de vos paris"),
   strategies: r("/strategies", "Mes stratégies", "Vos règles de sélection"),
   communaute: r("/chat", "Communauté", "Le salon des membres"),
+  defi: r("/defi", "Défi du mois", "Le concours de pronostics en points", "Défi"),
   notifications: r("/notifications", "Notifications", "Vos alertes"),
   profil: r("/profil", "Mon profil", "Compte et abonnement"),
   methode: r("/pronostics-ia", "Comment marche l’IA", "Notre méthode expliquée"),

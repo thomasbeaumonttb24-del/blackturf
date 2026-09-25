@@ -9,7 +9,7 @@ from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from api.config import get_settings
 from api.routes import auth, courses, predictions, bankroll, admin, ws
 from api.routes import assistant, stripe_routes, strategies, stats, notifications
-from api.routes import telegram, newsletter, integrations, presence, chat, pronostic_email
+from api.routes import telegram, newsletter, integrations, presence, chat, pronostic_email, defi
 from db.database import engine, Base
 from db.redis_client import get_redis, close_redis
 
@@ -162,6 +162,8 @@ app.include_router(newsletter.router, prefix="/api/v1", tags=["newsletter"])
 app.include_router(pronostic_email.router, prefix="/api/v1", tags=["pronostic-email"])
 app.include_router(presence.router, prefix="/api/v1", tags=["presence"])
 app.include_router(chat.router, prefix="/api/v1", tags=["chat"])
+app.include_router(defi.router, prefix="/api/v1", tags=["defi"])
+app.include_router(defi.admin_router, prefix="/admin/api", tags=["defi"])
 app.include_router(integrations.router, prefix="/admin/api", tags=["integrations"])
 
 

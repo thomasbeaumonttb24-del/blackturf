@@ -12,7 +12,7 @@
 import Link from "next/link";
 import useSWR from "swr";
 import {
-  Activity, ArrowRight, ArrowUpRight, BarChart3, Calendar, CheckCircle2, Clock, Cpu, LockKeyhole,
+  Activity, ArrowRight, ArrowUpRight, Medal, BarChart3, Calendar, CheckCircle2, Clock, Cpu, LockKeyhole,
   Radio, Target, TrendingDown, TrendingUp, Trophy,
 } from "lucide-react";
 import { format } from "date-fns";
@@ -22,7 +22,8 @@ import { CasaqueNumero, IdentiteCheval } from "@/components/courses/identite-che
 import { Reveal, Tilt, useReveal } from "@/components/track-record/effets";
 import { Anneau, Compteur, CourbeCapital, Etoiles, Plan3D, SectionTitre, nf } from "@/components/espace/kit";
 import { useRequireAuth } from "@/hooks/useAuth";
-import { bankrollApi, predictionsApi, coursesApi, statsApi } from "@/lib/api";
+import { bankrollApi, predictionsApi, coursesApi, statsApi, defiApi } from "@/lib/api";
+import { formatPts } from "@/components/defi/kit";
 import { RUBRIQUES } from "@/lib/navigation";
 import { cn, planLabel } from "@/lib/utils";
 import { disciplineLabel, heureParis, titleCase } from "@/lib/seo";
@@ -554,6 +555,28 @@ interface EtatModele {
   drift_severity?: string;
 }
 
+/** Encart « Défi du mois » : solde et rang du joueur, pour le faire revenir parier. */
+function EncartDefi() {
+  const { data } = useSWR("/defi/moi", () => defiApi.moi().then((r) => r.data), { refreshInterval: 120_000 });
+  return (
+    <Link href={RUBRIQUES.defi.href}
+      className="group mt-5 flex items-center gap-4 rounded-2xl bg-gradient-to-b from-amber-50 to-amber-100/60 p-4 ring-1 ring-inset ring-amber-200">
+      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white text-amber-700 ring-1 ring-amber-200">
+        <Medal className="h-[18px] w-[18px]" aria-hidden="true" />
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block text-sm font-medium text-stone-900">{RUBRIQUES.defi.label}</span>
+        <span className="block truncate text-xs text-stone-600">
+          {!data ? RUBRIQUES.defi.description
+            : data.nb_paris === 0 ? "Vos points du mois vous attendent : 1er pari ?"
+            : `${formatPts(data.solde)} · ${data.rang != null ? `${data.rang}${data.rang === 1 ? "er" : "e"} sur ${data.nb_classes}` : `${data.nb_paris} pari${data.nb_paris > 1 ? "s" : ""}`}`}
+        </span>
+      </span>
+      <ArrowRight className="h-4 w-4 shrink-0 text-amber-700 transition-transform group-hover:translate-x-0.5" aria-hidden="true" />
+    </Link>
+  );
+}
+
 function Outils({ modele }: { modele?: EtatModele }) {
   const derive = modele?.drift_severity && modele.drift_severity !== "none";
   return (
@@ -562,6 +585,7 @@ function Outils({ modele }: { modele?: EtatModele }) {
         <span className="h-px w-5 bg-amber-600/70" aria-hidden="true" /> Accès rapide
       </span>
       <h2 className="mt-3 font-display text-xl font-medium tracking-tight text-stone-900 sm:text-[1.65rem]">Vos outils</h2>
+      <EncartDefi />
       <ul className="mt-5 divide-y divide-stone-100">
         {OUTILS.map(({ r, icone: Icone }) => (
           <li key={r.href}>

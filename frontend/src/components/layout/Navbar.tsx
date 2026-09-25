@@ -31,6 +31,7 @@ const NAV_LINKS_PUBLIC: NavLink[] = [
   R.resultats,
   { ...R.parisDeValeur, prive: true },
   R.performances,
+  R.defi,
   R.tarifs,
 ];
 
@@ -43,6 +44,7 @@ const NAV_LINKS_AUTH: NavLink[] = [
   R.resultats,
   { ...R.parisDeValeur, prive: true },
   R.performances,
+  R.defi,
 ];
 
 // ── Search palette ──────────────────────────────────────────────────────────

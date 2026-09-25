@@ -58,7 +58,7 @@ interface Destination {
 const DESTINATIONS: Destination[] = [
   { href: "/admin", label: "Pilotage", court: "Pilotage", icone: Gauge },
   { href: "/admin/abonnements", label: "Abonnements", court: "Abonnés", icone: CreditCard },
-  { href: "/admin/comptes", label: "Comptes", court: "Comptes", icone: Users },
+  { href: "/admin/comptes", label: "Comptes", court: "Comptes", icone: Users, prefixe: ["/admin/defi"] },
   { href: "/admin/algorithme", label: "Algorithme", court: "Algo", icone: Brain },
   {
     href: "/admin/systeme", label: "Système", court: "Système", icone: Server,
