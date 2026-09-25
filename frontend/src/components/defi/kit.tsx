@@ -20,12 +20,42 @@ export const DEFI_REGLES_DEFAUT = {
   ],
 };
 
-export const TYPES_DEFI = [
-  { type: "Simple Gagnant", nb: 1, aide: "Votre cheval termine 1er" },
-  { type: "Simple Placé", nb: 1, aide: "Votre cheval termine dans les places payées" },
-  { type: "Couplé Gagnant", nb: 2, aide: "Vos 2 chevaux font les 2 premiers, dans n'importe quel ordre" },
-  { type: "Couplé Placé", nb: 2, aide: "Vos 2 chevaux sont tous les deux placés" },
-] as const;
+/** Familles de paris à ORDRE : les chevaux se lisent dans l'ordre joué (1er, 2e…). */
+const TYPES_A_ORDRE = new Set(["Couplé Ordre", "Trio Ordre", "Super 4", "Tiercé", "Quarté+", "Quinté+"]);
+
+/** Type du défi d'un libellé de pari, du défi ou du plan de mise : « Tiercé Ordre » et
+ *  « Tiercé Désordre » → « Tiercé », « Mini Multi en 5 » → « Multi »… null si le
+ *  pari n'existe pas au défi (module Quinté+ en champ, etc.). */
+export function typeDefi(typePari: string): string | null {
+  const t = typePari || "";
+  if (t.includes("Multi en")) return "Multi";
+  for (const f of ["Tiercé", "Quarté+", "Quinté+"]) if (t.startsWith(f)) return f;
+  const connus = ["Simple Gagnant", "Simple Placé", "Couplé Gagnant", "Couplé Placé", "Couplé Ordre",
+    "Trio", "Trio Ordre", "2sur4", "Super 4", "Pick5"];
+  return connus.includes(t) ? t : null;
+}
+
+export function estAOrdre(typePari: string): boolean {
+  return TYPES_A_ORDRE.has(typeDefi(typePari) ?? "");
+}
+
+/** Chevaux d'un pari, lisibles : « 3 – 7 – 1 » à l'ordre, « 3 + 7 + 1 » sinon. */
+export function chevauxLisibles(typePari: string, chevaux: number[]): string {
+  return chevaux.map((n) => `n°${n}`).join(estAOrdre(typePari) ? " – " : " + ");
+}
+
+/** Combinaisons couvertes par une formule (2sur4 et Pick5 en champ réduit). */
+export function combinaisons(typePari: string, n: number): number {
+  const c = (k: number) => {
+    let r = 1;
+    for (let i = 0; i < k; i++) r = (r * (n - i)) / (i + 1);
+    return Math.round(r);
+  };
+  const t = typeDefi(typePari);
+  if (t === "2sur4" && n > 2) return c(2);
+  if (t === "Pick5" && n > 5) return c(5);
+  return 1;
+}
 
 /** Nombre à la française avec une espace insécable classique comme séparateur des
  *  milliers : l'espace fine (U+202F) que produit `toLocaleString` n'existe pas dans
@@ -93,8 +123,12 @@ export function ResultatPari({ p }: { p: DefiPari }) {
     <span className={cn("font-display text-[14px] font-bold tabular-nums",
       net > 0 ? "text-emerald-700" : net < 0 ? "text-rose-700" : "text-slate-600")}>
       {formatPts(net, true)}
-      {p.statut === "gagne" && p.rapport != null && (
-        <span className="ml-1 text-[11px] font-medium text-slate-500">({p.points} × {formatNombre(p.rapport, 2)})</span>
+      {p.statut === "gagne" && p.rapport != null && p.points_retour != null && (
+        <span className="ml-1 text-[11px] font-medium text-slate-500">
+          {Math.abs(p.points * p.rapport - p.points_retour) < 0.2
+            ? <>({p.points} × {formatNombre(p.rapport, 2)})</>
+            : <>(formule · rapport {formatNombre(p.rapport, 2)})</>}
+        </span>
       )}
     </span>
   );

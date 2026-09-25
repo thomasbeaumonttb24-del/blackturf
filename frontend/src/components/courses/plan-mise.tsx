@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 import { CasaqueNumero } from "@/components/courses/identite-cheval";
 import { ModuleQuinte, type ModuleQuinteData } from "@/components/courses/ModuleQuinte";
-import { TYPES_DEFI } from "@/components/defi/kit";
+import { typeDefi } from "@/components/defi/kit";
 import type { DefiTypePari } from "@/lib/api";
 
 /** Cheval d'un pari du plan.
@@ -286,10 +286,10 @@ export function PlanMiseDisplay({ plan, profil, switching, onChangeProfil, onClo
                       <div style={{ marginTop: 2, fontFamily: CX.sg, fontSize: 15, fontWeight: 700, color: CX.emDeep, fontVariantNumeric: "tabular-nums" }}>~{p.gain_potentiel.toFixed(0)}€</div>
                     </div>
                   </div>
-                  {onJouerDefi && TYPES_DEFI.some((t) => t.type === p.type) && (
+                  {onJouerDefi && typeDefi(p.type) && (
                     <button
                       type="button"
-                      onClick={() => onJouerDefi(p.type as DefiTypePari, p.chevaux.map((c) => c.numero))}
+                      onClick={() => onJouerDefi(typeDefi(p.type) as DefiTypePari, p.chevaux.map((c) => c.numero))}
                       style={{ marginTop: 8, minHeight: 32, display: "inline-flex", alignItems: "center", gap: 5, borderRadius: 8, border: `1px solid ${CX.goldBd}`, background: CX.goldBg, padding: "4px 10px", fontSize: 11, fontWeight: 650, color: CX.goldDeep, cursor: "pointer" }}
                     >
                       <Medal className="h-3.5 w-3.5" aria-hidden="true" /> Jouer ce pari au Défi du mois

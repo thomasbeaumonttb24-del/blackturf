@@ -14,7 +14,7 @@ import { DefiConcept } from "@/components/defi/DefiConcept";
 import { DecorRayons, TropheeSvg } from "@/components/defi/illustrations";
 import {
   Avatar, CompteRebours, DEFI_CARTE, DEFI_FOND, DEFI_REGLES_DEFAUT, DefiEntete, LigneClassement,
-  OriginePari, PastilleDirect, Podium, ResultatPari, StatutPari, formatPts, joursRestants, moisLabel, planLabel, formatNombre } from "@/components/defi/kit";
+  OriginePari, PastilleDirect, Podium, ResultatPari, StatutPari, formatPts, joursRestants, moisLabel, planLabel, formatNombre, chevauxLisibles } from "@/components/defi/kit";
 import { cn } from "@/lib/utils";
 
 const CARTE = DEFI_CARTE;
@@ -237,9 +237,9 @@ function Reglement({ regles }: { regles: DefiRegles }) {
       <ol className="list-decimal space-y-2 border-t border-stone-100 pb-5 pl-10 pr-5 pt-4 text-[12.5px] leading-relaxed text-slate-700">
         <li><b>Participation gratuite</b>, réservée aux personnes majeures ayant un compte BlackTurf à l&apos;adresse e-mail confirmée et un pseudo, quel que soit l&apos;abonnement. Aucun achat ni aucun pari en argent réel n&apos;est demandé : les points n&apos;ont aucune valeur monétaire et ne s&apos;échangent pas.</li>
         <li>Chaque mois (calendrier de Paris), chaque joueur reçoit <b>{formatNombre(regles.capital_mensuel, 2)} points</b>. Le solde repart à {formatNombre(regles.capital_mensuel, 2)} le 1<sup>er</sup> du mois suivant.</li>
-        <li>Paris proposés : Simple Gagnant, Simple Placé, Couplé Gagnant et Couplé Placé, sur les courses où le PMU les ouvre. Mise de <b>{regles.points_min} à {regles.points_max} points</b> par pari, au plus <b>{regles.max_paris_par_course} paris par course</b>.</li>
+        <li>Tous les paris que le PMU ouvre sur la course sont proposés : Simple Gagnant et Placé, Couplé Gagnant, Placé et Ordre, Trio et Trio Ordre, Tiercé, 2sur4, Multi (ou Mini Multi), Super 4, Quarté+, Quinté+ et Pick5. Mise de <b>{regles.points_min} à {regles.points_max} points</b> par pari, au plus <b>{regles.max_paris_par_course} paris par course</b>. Pour les paris à l&apos;ordre, l&apos;ordre de sélection des chevaux est l&apos;ordre d&apos;arrivée joué.</li>
         <li>Les paris ferment <b>{regles.verrou_minutes} minutes avant le départ prévu</b>, à l&apos;heure du serveur. Un pari validé est définitif : ni modifiable, ni annulable.</li>
-        <li>Un pari gagnant rapporte <b>points misés × rapport PMU officiel</b> publié à l&apos;arrivée, le même pour tous les joueurs, quel que soit l&apos;opérateur où chacun joue en vrai. Un cheval non-partant, une course annulée ou un rapport jamais publié dans les 72 heures remboursent la mise.</li>
+        <li>Un pari gagnant rapporte <b>points misés × rapport PMU officiel</b> (pour 1 € misé) publié à l&apos;arrivée, le même pour tous les joueurs, quel que soit l&apos;opérateur où chacun joue en vrai. Tiercé, Quarté+ et Quinté+ sont réglés comme un ticket PMU : rapport Ordre si l&apos;ordre joué est exact, sinon Désordre, sinon Bonus. Une formule à plusieurs chevaux (2sur4 ou Pick5 au-delà du minimum) répartit la mise sur ses combinaisons ; le Multi est réglé au rapport de la formule jouée (en 4, 5, 6 ou 7). Un cheval non-partant, une course annulée ou un rapport jamais publié dans les 72 heures remboursent la mise.</li>
         <li>Le pari porte l&apos;étiquette « Plan BlackTurf » quand il reprend un pari du plan de mise que vous avez consulté sur la course, « Perso » sinon. L&apos;étiquette n&apos;a pas d&apos;effet sur le classement.</li>
         <li>Sont classés les joueurs ayant engagé au moins <b>{regles.min_paris_classement} paris</b> dans le mois, par solde décroissant ; à égalité, le plus grand nombre de paris gagnants puis le premier pari le plus ancien l&apos;emportent.</li>
         <li>Récompenses : {lots}. Elles sont remises après la clôture du mois, une fois tous les paris réglés et les comptes vérifiés. Un abonné payant reçoit l&apos;équivalent en déduction de son abonnement. Les récompenses sont nominatives et ne s&apos;échangent pas contre de l&apos;argent.</li>
@@ -380,7 +380,7 @@ export default function DefiPage() {
               <li key={p.pari_id} className="flex flex-col justify-between gap-2 rounded-2xl bg-white p-4 ring-1 ring-inset ring-[#ECE7DC]">
                 <div className="flex items-start justify-between gap-2">
                   <Link href={`/courses/${p.course_id}#defi`} className="min-w-0 hover:underline">
-                    <div className="text-[13px] font-bold text-slate-900">{p.type_pari} {p.chevaux.map((n) => `n°${n}`).join(" + ")}</div>
+                    <div className="text-[13px] font-bold text-slate-900">{p.type_pari} {chevauxLisibles(p.type_pari, p.chevaux)}</div>
                     <div className="truncate text-[11.5px] text-slate-500">
                       {p.course_label}{p.date_heure && <> · {new Date(p.date_heure).toLocaleString("fr-FR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}</>}
                     </div>

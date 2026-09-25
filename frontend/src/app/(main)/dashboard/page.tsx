@@ -23,7 +23,7 @@ import { Reveal, Tilt, useReveal } from "@/components/track-record/effets";
 import { Anneau, Compteur, Etoiles, Plan3D, SectionTitre, nf } from "@/components/espace/kit";
 import { useRequireAuth } from "@/hooks/useAuth";
 import { defiApi, predictionsApi, coursesApi, statsApi, type DefiMoi } from "@/lib/api";
-import { BOUTON_OR, CompteRebours, DEFI_CARTE, DefiEntete, ResultatPari, formatPts, moisLabel } from "@/components/defi/kit";
+import { BOUTON_OR, CompteRebours, DEFI_CARTE, DefiEntete, ResultatPari, formatPts, moisLabel, chevauxLisibles } from "@/components/defi/kit";
 import { DefiClassementLive } from "@/components/defi/DefiClassementLive";
 import { RUBRIQUES } from "@/lib/navigation";
 import { cn, planLabel } from "@/lib/utils";
@@ -483,7 +483,7 @@ function PanneauDefi({ defi }: { defi?: DefiMoi }) {
             {derniers.map((p) => (
               <li key={p.pari_id} className="flex items-center justify-between gap-3 py-2.5">
                 <Link href={`/courses/${p.course_id}#defi`} className="min-w-0 text-sm text-stone-800 hover:underline">
-                  <span className="font-medium">{p.type_pari}</span> {p.chevaux.map((n) => `n°${n}`).join(" + ")}
+                  <span className="font-medium">{p.type_pari}</span> {chevauxLisibles(p.type_pari, p.chevaux)}
                   <span className="block truncate text-xs text-stone-500">{p.course_label}</span>
                 </Link>
                 <ResultatPari p={p} />

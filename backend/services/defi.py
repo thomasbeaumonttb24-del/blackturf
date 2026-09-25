@@ -56,14 +56,100 @@ RECOMPENSES: dict[int, tuple[str, int]] = {
 }
 _NIVEAU_PLAN = {"free": 0, "decouverte": 0, "standard": 1, "starter": 1, "expert": 2, "pro": 2}
 
-# Type de pari → (nombre de chevaux, drapeau de disponibilité du catalogue).
-# Quatre paris simples à régler exactement : on élargira s'il y a de la demande.
-TYPES_DEFI: dict[str, tuple[int, str]] = {
-    "Simple Gagnant": (1, "est_simple_gagnant"),
-    "Simple Placé": (1, "est_simple_place"),
-    "Couplé Gagnant": (2, "est_couple_gagnant"),
-    "Couplé Placé": (2, "est_couple_place"),
-}
+# Catalogue des paris du défi : TOUS les paris PMU que la course propose (d'après
+# `courses.paris_disponibles`, cf. bet_catalog), chacun avec son nombre de chevaux
+# et le rôle de l'ordre de sélection. Chaque ligne est réglable exactement par
+# `settle_pari` sur les rapports officiels (base 1 € = base 1 point).
+#
+#   ordre=True  : l'ordre de sélection est l'ordre d'arrivée joué (Couplé Ordre,
+#                 Trio Ordre, Super 4) ou l'ordre du ticket (Tiercé, Quarté+,
+#                 Quinté+ : Ordre si exact, sinon Désordre, sinon Bonus — comme un
+#                 ticket PMU unitaire).
+#   min < max   : formule à plusieurs chevaux (2sur4 et Pick5 en champ réduit,
+#                 Multi en 4 à 7) : la mise se répartit, le rapport suit la formule.
+CATALOGUE_DEFI: tuple[dict, ...] = (
+    {"type": "Simple Gagnant", "famille": "Simples", "min": 1, "max": 1, "ordre": False,
+     "drapeau": "est_simple_gagnant", "aide": "Votre cheval termine 1er."},
+    {"type": "Simple Placé", "famille": "Simples", "min": 1, "max": 1, "ordre": False,
+     "drapeau": "est_simple_place",
+     "aide": "Votre cheval finit dans les places payées (3 premiers, 2 sous 8 partants)."},
+    {"type": "Couplé Gagnant", "famille": "Couplés", "min": 2, "max": 2, "ordre": False,
+     "drapeau": "est_couple_gagnant", "aide": "Vos 2 chevaux font les 2 premiers, dans n'importe quel ordre."},
+    {"type": "Couplé Placé", "famille": "Couplés", "min": 2, "max": 2, "ordre": False,
+     "drapeau": "est_couple_place", "aide": "Vos 2 chevaux finissent tous deux dans les 3 premiers."},
+    {"type": "Couplé Ordre", "famille": "Couplés", "min": 2, "max": 2, "ordre": True,
+     "drapeau": "est_couple_ordre", "aide": "Vos 2 chevaux font 1er et 2e, dans l'ordre choisi."},
+    {"type": "Trio", "famille": "Trios & Tiercé", "min": 3, "max": 3, "ordre": False,
+     "drapeau": "est_trio", "aide": "Vos 3 chevaux font le podium, dans n'importe quel ordre."},
+    {"type": "Trio Ordre", "famille": "Trios & Tiercé", "min": 3, "max": 3, "ordre": True,
+     "drapeau": "est_trio_ordre", "aide": "Vos 3 chevaux font le podium, dans l'ordre choisi."},
+    {"type": "Tiercé", "famille": "Trios & Tiercé", "min": 3, "max": 3, "ordre": True,
+     "drapeau": "est_tierce",
+     "aide": "Les 3 premiers : rapport Ordre si l'ordre choisi est exact, sinon Désordre."},
+    {"type": "2sur4", "famille": "2sur4 & Multi", "min": 2, "max": 4, "ordre": False,
+     "drapeau": "est_2sur4",
+     "aide": "2 de vos chevaux dans les 4 premiers. Jusqu'à 4 chevaux : la mise se répartit sur les combinaisons."},
+    {"type": "Multi", "famille": "2sur4 & Multi", "min": 4, "max": 7, "ordre": False,
+     "drapeau": "est_multi",
+     "aide": "Les 4 premiers parmi vos 4 à 7 chevaux, dans n'importe quel ordre. Moins de chevaux, plus gros rapport."},
+    {"type": "Quarté+", "famille": "Quarté+, Quinté+ & plus", "min": 4, "max": 4, "ordre": True,
+     "drapeau": "est_quarte",
+     "aide": "Les 4 premiers : Ordre si exact, sinon Désordre ; Bonus si vos 3 premiers font le podium."},
+    {"type": "Quinté+", "famille": "Quarté+, Quinté+ & plus", "min": 5, "max": 5, "ordre": True,
+     "drapeau": "est_quinte",
+     "aide": "Les 5 premiers : Ordre, Désordre, puis Bonus 4sur5 et Bonus 3."},
+    {"type": "Super 4", "famille": "Quarté+, Quinté+ & plus", "min": 4, "max": 4, "ordre": True,
+     "drapeau": "est_super4", "aide": "Les 4 premiers dans l'ordre exact choisi."},
+    {"type": "Pick5", "famille": "Quarté+, Quinté+ & plus", "min": 5, "max": 7, "ordre": False,
+     "drapeau": "est_pick5",
+     "aide": "Les 5 premiers parmi vos chevaux, dans n'importe quel ordre. Au-delà de 5, la mise se répartit."},
+)
+TYPES_DEFI = {t["type"]: t for t in CATALOGUE_DEFI}
+
+
+def _libelle_multi(course: Course) -> str:
+    """« Mini Multi » sur les courses qui l'offrent à la place du Multi (champ
+    moyen), « Multi » sinon : les deux ont leur propre pool et leur propre rapport."""
+    codes = [str(c).upper() for c in (course.paris_disponibles or [])]
+    if any("MINI_MULTI" in c for c in codes):
+        return "Mini Multi"
+    if any("MULTI" in c for c in codes):
+        return "Multi"
+    return "Mini Multi" if 10 <= int(course.nb_partants or 0) <= 13 else "Multi"
+
+
+def types_disponibles(course: Course) -> list[dict]:
+    """Les paris du défi réellement ouverts par le PMU sur cette course."""
+    flags = derive_bet_flags(course.paris_disponibles, est_tierce=bool(course.est_tierce),
+                             est_quarte=bool(course.est_quarte), est_quinte=bool(course.est_quinte),
+                             est_2sur4=bool(course.est_2sur4), nb_partants=course.nb_partants)
+    out = []
+    for t in CATALOGUE_DEFI:
+        if not flags.get(t["drapeau"]):
+            continue
+        ligne = {k: v for k, v in t.items() if k != "drapeau"}
+        if t["type"] == "Multi":
+            ligne["libelle"] = _libelle_multi(course)
+        out.append(ligne)
+    return out
+
+
+def type_stocke(type_defi: str, nb_chevaux: int, course: Course) -> str:
+    """Libellé enregistré et réglé : « Multi en 5 » / « Mini Multi en 5 » pour le Multi."""
+    if type_defi == "Multi":
+        return f"{_libelle_multi(course)} en {nb_chevaux}"
+    return type_defi
+
+
+def famille_type(type_pari: str) -> str:
+    """Type du défi d'un libellé de pari (défi ou plan de mise)."""
+    t = type_pari or ""
+    if "Multi en" in t:
+        return "Multi"
+    for f in ("Tiercé", "Quarté+", "Quinté+"):
+        if t.startswith(f):
+            return f
+    return t
 
 STATUTS_COURSE_SANS_ARRIVEE = {"annule", "sans_resultat"}
 
@@ -146,16 +232,33 @@ async def _plans_emis(session, user_id: str, course_id: str) -> list[dict]:
     return [r for r in rows if isinstance(r, dict)]
 
 
+def _meme_pari(type_plan: str, nums_plan: list[int], type_defi: str, nums: list[int]) -> bool:
+    """Le pari du défi reprend-il ce pari du plan ?
+
+    Même famille (« Tiercé Ordre » et « Tiercé Désordre » du plan → « Tiercé »,
+    « Multi en 5 » → « Multi »…) et mêmes chevaux ; dans le même ordre quand
+    l'ordre compte des deux côtés (pari du plan à l'ordre et pari du défi à l'ordre).
+    """
+    if famille_type(type_plan) != famille_type(type_defi):
+        return False
+    if "Multi en" in type_plan and "Multi en" in type_defi and type_plan.split(" en ")[-1] != type_defi.split(" en ")[-1]:
+        return False
+    ordre_plan = type_plan in ("Couplé Ordre", "Trio Ordre", "Super 4", "Tiercé Ordre", "Quinté+")
+    ordre_defi = TYPES_DEFI.get(famille_type(type_defi), {}).get("ordre", False)
+    if ordre_plan and ordre_defi:
+        return nums_plan == nums
+    return sorted(nums_plan) == sorted(nums)
+
+
 async def detecter_origine(session, user_id: str, course_id: str,
                            type_pari: str, chevaux: list[int]) -> str:
     """« plan » si ce pari figure dans un plan de mise montré à ce joueur sur cette course."""
-    cible = sorted(chevaux)
     for plan in await _plans_emis(session, user_id, course_id):
         for niveau in plan.get("niveaux") or []:
             for pari in niveau.get("paris") or []:
-                nums = sorted(int(c["numero"]) for c in (pari.get("chevaux") or [])
-                              if c.get("numero") is not None)
-                if pari.get("type") == type_pari and nums == cible:
+                nums = [int(c["numero"]) for c in (pari.get("chevaux") or [])
+                        if c.get("numero") is not None]
+                if _meme_pari(str(pari.get("type") or ""), nums, type_pari, chevaux):
                     return "plan"
     return "perso"
 
@@ -167,14 +270,19 @@ async def engager_pari(session, user: User, course_id: str, type_pari: str,
 
     if not user.pseudo:
         raise DefiErreur("Choisissez un pseudo pour apparaître au classement avant de jouer.")
+    type_pari = famille_type(type_pari)
     if type_pari not in TYPES_DEFI:
         raise DefiErreur("Type de pari non proposé dans le défi.")
-    nb_attendu, drapeau = TYPES_DEFI[type_pari]
+    spec = TYPES_DEFI[type_pari]
     if not isinstance(points, int) or not POINTS_MIN <= points <= POINTS_MAX:
         raise DefiErreur(f"Mise entre {POINTS_MIN} et {POINTS_MAX} points.")
     nums = [int(n) for n in chevaux]
-    if len(nums) != nb_attendu or len(set(nums)) != nb_attendu:
-        raise DefiErreur(f"{type_pari} : choisissez {nb_attendu} cheva{'l' if nb_attendu == 1 else 'ux'}.")
+    if len(set(nums)) != len(nums) or not spec["min"] <= len(nums) <= spec["max"]:
+        if spec["min"] == spec["max"]:
+            attendu = f"{spec['min']} cheva{'l' if spec['min'] == 1 else 'ux'}"
+        else:
+            attendu = f"{spec['min']} à {spec['max']} chevaux différents"
+        raise DefiErreur(f"{type_pari} : choisissez {attendu}.")
 
     # Verrou sur la ligne du joueur jusqu'au commit : ses paris s'engagent l'un
     # après l'autre, donc deux clics simultanés ne peuvent pas dépasser ensemble le
@@ -196,10 +304,7 @@ async def engager_pari(session, user: User, course_id: str, type_pari: str,
     if deja >= MAX_PARIS_PAR_COURSE:
         raise DefiErreur(f"Maximum {MAX_PARIS_PAR_COURSE} paris par course.")
 
-    flags = derive_bet_flags(course.paris_disponibles, est_tierce=bool(course.est_tierce),
-                             est_quarte=bool(course.est_quarte), est_quinte=bool(course.est_quinte),
-                             est_2sur4=bool(course.est_2sur4), nb_partants=course.nb_partants)
-    if not flags.get(drapeau):
+    if type_pari not in {t["type"] for t in types_disponibles(course)}:
         raise DefiErreur(f"Le {type_pari} n'est pas proposé sur cette course.")
 
     partants = set((await session.execute(
@@ -211,10 +316,14 @@ async def engager_pari(session, user: User, course_id: str, type_pari: str,
     if not set(nums) <= partants:
         raise DefiErreur("Cheval inconnu ou non-partant.")
 
+    if len(nums) > len(partants):
+        raise DefiErreur("Plus de chevaux choisis que de partants.")
+
     mois = mois_de(course.date_heure)
     if await solde(session, user.user_id, mois) < points:
         raise DefiErreur("Solde de points insuffisant pour ce mois.")
 
+    type_pari = type_stocke(type_pari, len(nums), course)
     pari = DefiPari(
         user_id=user.user_id, mois=mois, course_id=course_id, type_pari=type_pari,
         chevaux=nums, points=points,
@@ -263,8 +372,8 @@ async def regler_course(session, course_id: str) -> int:
 
     n = 0
     for p in paris:
-        r = settle_pari(p.type_pari, list(p.chevaux), res.classement, res.rapports, nb_part,
-                        res.rapports_detail, non_partants)
+        r = regler_ticket(p.type_pari, list(p.chevaux), res.classement, res.rapports, nb_part,
+                          res.rapports_detail, non_partants)
         if r.get("rembourse"):
             p.statut, p.rapport, p.points_retour = "rembourse", 1.0, float(p.points)
         elif r["gagne"]:
@@ -285,6 +394,47 @@ async def regler_course(session, course_id: str) -> int:
         await session.commit()
         invalider_classement()
     return n
+
+
+def regler_ticket(type_pari: str, nums: list[int], classement: list[dict],
+                  rapports: Optional[dict], nb_partants: int,
+                  rapports_detail: Optional[dict], non_partants: set[int]) -> dict:
+    """Règle un pari du défi comme le PMU règle le ticket unitaire correspondant.
+
+    Tiercé, Quarté+ et Quinté+ se jouent dans un ordre : l'arrivée exacte paie le
+    rapport Ordre, sinon le Désordre, sinon (Quarté+/Quinté+) le Bonus. Les autres
+    types sont réglés tels quels par ``settle_pari``.
+    """
+    from services.bet_settlement import _RAPPORT_KEYS, _rapport_par_libelle
+
+    if type_pari == "Quinté+":
+        return settle_pari("Quinté+", nums, classement, rapports, nb_partants,
+                           rapports_detail, non_partants, ordre_joue=True)
+    if type_pari in ("Tiercé", "Quarté+"):
+        n = 3 if type_pari == "Tiercé" else 4
+        desordre = "Tiercé Désordre" if n == 3 else "Quarté+ Désordre"
+        base = settle_pari(desordre, nums, classement, rapports, nb_partants,
+                           rapports_detail, non_partants)
+        if base.get("rembourse") or not base["gagne"]:
+            return base
+        par_pos = {}
+        for e in classement or []:
+            try:
+                par_pos.setdefault(int(e["position"]), int(e["numero"]))
+            except (TypeError, ValueError, KeyError):
+                continue
+        exact = len(nums) == n and all(par_pos.get(i + 1) == nums[i] for i in range(n))
+        if exact:
+            cles = _RAPPORT_KEYS["Tiercé Ordre" if n == 3 else "Quarté+"]
+            ordre = _rapport_par_libelle(rapports_detail, cles, "Ordre", set(nums))
+            if ordre is None:
+                # Arrivée exacte mais rapport Ordre pas encore publié : on attend,
+                # plutôt que de payer le Désordre à un ticket qui vaut l'Ordre.
+                return {**base, "rapport_reel": None, "note": "Rapport Ordre pas encore publié."}
+            return {**base, "rapport_reel": ordre, "note": "Rang de gain : Ordre."}
+        return base
+    return settle_pari(type_pari, nums, classement, rapports, nb_partants,
+                       rapports_detail, non_partants)
 
 
 async def regler_en_attente(session) -> int:

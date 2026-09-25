@@ -98,7 +98,7 @@ async def regles():
         "verrou_minutes": int(defi.VERROU_AVANT_DEPART.total_seconds() // 60),
         "recompenses": [{"rang": r, "plan": p, "jours": j}
                         for r, (p, j) in sorted(defi.RECOMPENSES.items())],
-        "types": list(defi.TYPES_DEFI),
+        "types": [{k: v for k, v in t.items() if k != "drapeau"} for t in defi.CATALOGUE_DEFI],
         "mois": defi.mois_courant(),
     }
 
@@ -180,6 +180,8 @@ async def get_course(
         solde = await defi.solde(db, user.user_id, defi.mois_de(course.date_heure))
     return {
         "mois": defi.mois_de(course.date_heure),
+        # Les paris que le PMU ouvre sur CETTE course, dans l'ordre du catalogue.
+        "types": defi.types_disponibles(course),
         "ouvert": defi.depot_ouvert(course),
         "limite": defi.limite_depot(course),
         "solde": solde,

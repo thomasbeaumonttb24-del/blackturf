@@ -14,12 +14,12 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import useSWR from "swr";
 import { toast } from "sonner";
-import { ArrowRight, Check, Loader2, Lock, Ticket, Users } from "lucide-react";
-import { defiApi, type DefiCourse, type DefiRegles, type DefiTypePari } from "@/lib/api";
+import { ArrowRight, Check, Info, Loader2, Lock, Ticket, Users } from "lucide-react";
+import { defiApi, type DefiCourse, type DefiRegles, type DefiTypeInfo, type DefiTypePari } from "@/lib/api";
 import { CompteGratuitCta } from "@/components/billing/CompteGratuitCta";
 import { CasaqueNumero } from "@/components/courses/identite-cheval";
 import {
-  CompteRebours, DEFI_CARTE, DEFI_REGLES_DEFAUT, DefiEntete, OriginePari, ResultatPari, StatutPari, TYPES_DEFI,
+  CompteRebours, DEFI_CARTE, DEFI_REGLES_DEFAUT, DefiEntete, OriginePari, ResultatPari, StatutPari, chevauxLisibles, combinaisons, estAOrdre,
   formatPts, moisLabel, planLabel, formatNombre } from "@/components/defi/kit";
 import { cn } from "@/lib/utils";
 
@@ -64,7 +64,7 @@ export function DefiCourseCard({ courseId, partants, connecte, prefill }: {
     { refreshInterval: 30_000 },
   );
 
-  const [type, setType] = useState<DefiTypePari>("Simple Gagnant");
+  const [typeChoisi, setType] = useState<DefiTypePari>("Simple Gagnant");
   const [chevaux, setChevaux] = useState<number[]>([]);
   const [points, setPoints] = useState(25);
   const [envoi, setEnvoi] = useState(false);
@@ -79,28 +79,45 @@ export function DefiCourseCard({ courseId, partants, connecte, prefill }: {
     carteRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   }, [prefill]);
 
-  const nbRequis = TYPES_DEFI.find((t) => t.type === type)?.nb ?? 1;
+  // Paris ouverts par le PMU sur CETTE course (le serveur fait foi). Si le type
+  // choisi n'y est pas (course à champ réduit, ticket du plan non proposé…), on
+  // retombe sur le premier disponible.
+  const types = useMemo(() => data?.types ?? [], [data?.types]);
+  const spec = types.find((t) => t.type === typeChoisi) ?? types[0];
+  const type = spec?.type ?? typeChoisi;
+  const min = spec?.min ?? 1;
+  const max = spec?.max ?? 1;
+  const aOrdre = spec?.ordre ?? false;
+  const familles = useMemo(() => {
+    const m = new Map<string, DefiTypeInfo[]>();
+    for (const t of types) m.set(t.famille, [...(m.get(t.famille) ?? []), t]);
+    return [...m.entries()];
+  }, [types]);
+  const prefillRefuse = !!prefill && types.length > 0 && !types.some((t) => t.type === prefill.type);
+  const nomTicket = type === "Multi" ? `${spec?.libelle ?? "Multi"} en ${Math.max(min, chevaux.length)}` : type;
+  const nbCombis = combinaisons(type, chevaux.length);
   const jouables = useMemo(() => partants.filter((p) => !p.non_partant).sort((a, b) => a.numero - b.numero), [partants]);
   const mesParis = data?.mes_paris ?? [];
   const restants = regles.max_paris_par_course - mesParis.length;
   const solde = data?.solde ?? null;
   const pointsMax = Math.min(regles.points_max, Math.max(0, Math.floor(solde ?? regles.points_max)));
   const pointsJoues = Math.min(points, pointsMax);
-  const pret = chevaux.length === nbRequis && pointsJoues >= regles.points_min;
+  const pret = chevaux.length >= min && chevaux.length <= max && pointsJoues >= regles.points_min;
   const prix = regles.recompenses?.[0];
   const mois = data ? moisLabel(data.mois) : null;
 
-  function choisirType(t: DefiTypePari) {
-    setType(t);
-    const nb = TYPES_DEFI.find((x) => x.type === t)?.nb ?? 1;
-    setChevaux((c) => c.slice(0, nb));
+  function choisirType(t: DefiTypeInfo) {
+    setType(t.type);
+    setChevaux((c) => c.slice(0, t.max));
   }
 
+  // Cliquer un cheval l'ajoute à la fin (donc à la place suivante pour un pari à
+  // l'ordre) ; le recliquer le retire. Un pari à un cheval remplace le choix.
   function basculer(n: number) {
     setChevaux((c) => {
       if (c.includes(n)) return c.filter((x) => x !== n);
-      if (nbRequis === 1) return [n];
-      return c.length >= nbRequis ? [...c.slice(1), n] : [...c, n];
+      if (max === 1) return [n];
+      return c.length >= max ? c : [...c, n];
     });
   }
 
@@ -109,7 +126,7 @@ export function DefiCourseCard({ courseId, partants, connecte, prefill }: {
     setEnvoi(true);
     try {
       const { data: pari } = await defiApi.engager({ course_id: courseId, type_pari: type, chevaux, points: pointsJoues });
-      toast.success(`Pari validé : ${pari.points} pts sur ${pari.type_pari} ${pari.chevaux.map((n) => `n°${n}`).join(" + ")}`);
+      toast.success(`Pari validé : ${pari.points} pts sur ${pari.type_pari} ${chevauxLisibles(pari.type_pari, pari.chevaux)}`);
       setChevaux([]);
       await mutate();
     } catch (e) {
@@ -159,38 +176,88 @@ export function DefiCourseCard({ courseId, partants, connecte, prefill }: {
         <>
           {data.ouvert && restants > 0 && pointsMax >= regles.points_min ? (
             <>
-              <Etape n={1} titre="Type de pari">
-                <div className="grid grid-cols-2 gap-2">
-                  {TYPES_DEFI.map((t) => {
-                    const actif = type === t.type;
-                    return (
-                      <button key={t.type} type="button" onClick={() => choisirType(t.type)} aria-pressed={actif}
-                        className={cn("relative min-h-[64px] rounded-2xl px-3 py-2.5 text-left ring-1 ring-inset transition-all",
-                          actif ? "bg-amber-50 ring-2 ring-amber-500" : "bg-white ring-stone-200 hover:bg-stone-50")}>
-                        <span className="block text-[13px] font-bold text-slate-900">{t.type}</span>
-                        <span className="mt-0.5 block text-[11px] leading-snug text-slate-500">{t.aide}</span>
-                        {actif && <Check className="absolute right-2.5 top-2.5 h-4 w-4 text-amber-700" aria-hidden="true" />}
-                      </button>
-                    );
-                  })}
+              <Etape n={1} titre="Type de pari"
+                droite={<span className="text-[11px] text-slate-500">{types.length} pari{types.length > 1 ? "s" : ""} ouvert{types.length > 1 ? "s" : ""} sur cette course</span>}>
+                {prefillRefuse && (
+                  <p className="mb-3 rounded-xl bg-amber-50 px-3 py-2 text-[12px] text-amber-900 ring-1 ring-inset ring-amber-200">
+                    Le {prefill?.type} n&apos;est pas ouvert par le PMU sur cette course : choisissez un autre pari.
+                  </p>
+                )}
+                <div className="space-y-3">
+                  {familles.map(([famille, liste]) => (
+                    <div key={famille}>
+                      <div className="mb-1.5 text-[10.5px] font-bold uppercase tracking-[0.12em] text-slate-400">{famille}</div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {liste.map((t) => {
+                          const actif = type === t.type;
+                          return (
+                            <button key={t.type} type="button" onClick={() => choisirType(t)} aria-pressed={actif}
+                              className={cn("inline-flex min-h-[40px] items-center gap-1.5 rounded-xl px-3 text-[12.5px] font-semibold ring-1 ring-inset transition-all",
+                                actif ? "bg-gradient-to-b from-amber-50 to-amber-100 text-amber-950 ring-2 ring-amber-500" : "bg-white text-slate-700 ring-stone-200 hover:bg-stone-50")}>
+                              {actif && <Check className="h-3.5 w-3.5 text-amber-700" aria-hidden="true" />}
+                              {t.type === "Multi" ? t.libelle ?? "Multi" : t.type}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
                 </div>
+                {spec && (
+                  <div className="mt-3 flex items-start gap-2.5 rounded-xl bg-stone-50 px-3 py-2.5 ring-1 ring-inset ring-stone-200">
+                    <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-700" aria-hidden="true" />
+                    <div className="text-[12px] leading-relaxed text-slate-700">
+                      <b className="text-slate-900">{type === "Multi" ? spec.libelle ?? "Multi" : type}</b> · {spec.aide}
+                      <div className="mt-1 flex flex-wrap gap-1.5">
+                        <span className="rounded-full bg-white px-2 py-0.5 text-[10.5px] font-semibold text-slate-600 ring-1 ring-inset ring-stone-200">
+                          {min === max ? `${min} cheva${min > 1 ? "ux" : "l"}` : `${min} à ${max} chevaux`}
+                        </span>
+                        {aOrdre && <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[10.5px] font-semibold text-amber-800 ring-1 ring-inset ring-amber-200">L&apos;ordre compte</span>}
+                      </div>
+                    </div>
+                  </div>
+                )}
               </Etape>
 
-              <Etape n={2} titre={nbRequis === 1 ? "Votre cheval" : "Vos deux chevaux"}
-                droite={<span className={cn("rounded-full px-2 py-0.5 text-[11px] font-bold tabular-nums",
-                  chevaux.length === nbRequis ? "bg-emerald-50 text-emerald-700" : "bg-stone-100 text-slate-600")}>{chevaux.length}/{nbRequis}</span>}>
+              <Etape n={2}
+                titre={min === max ? (min === 1 ? "Votre cheval" : `Vos ${min} chevaux`) : `De ${min} à ${max} chevaux`}
+                droite={
+                  <span className="inline-flex items-center gap-2">
+                    {chevaux.length > 0 && (
+                      <button type="button" onClick={() => setChevaux([])} className="text-[11px] font-semibold text-slate-500 underline-offset-2 hover:underline">
+                        Effacer
+                      </button>
+                    )}
+                    <span className={cn("rounded-full px-2 py-0.5 text-[11px] font-bold tabular-nums",
+                      chevaux.length >= min ? "bg-emerald-50 text-emerald-700" : "bg-stone-100 text-slate-600")}>
+                      {chevaux.length}/{max}
+                    </span>
+                  </span>
+                }>
+                {aOrdre && (
+                  <p className="mb-2.5 text-[11.5px] leading-snug text-slate-600">
+                    Cliquez dans l&apos;<b className="text-slate-800">ordre d&apos;arrivée</b> que vous jouez : 1<sup>er</sup>, 2<sup>e</sup>… Recliquez un cheval pour le retirer.
+                  </p>
+                )}
                 <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3">
                   {jouables.map((p) => {
-                    const actif = chevaux.includes(p.numero);
+                    const place = chevaux.indexOf(p.numero);
+                    const actif = place >= 0;
+                    const plein = !actif && max > 1 && chevaux.length >= max;
                     return (
-                      <button key={p.numero} type="button" onClick={() => basculer(p.numero)} aria-pressed={actif}
-                        className={cn("flex min-h-[48px] items-center gap-2 rounded-xl px-2.5 py-1.5 text-left ring-1 ring-inset transition-all",
+                      <button key={p.numero} type="button" onClick={() => basculer(p.numero)} aria-pressed={actif} disabled={plein}
+                        className={cn("relative flex min-h-[48px] items-center gap-2 rounded-xl px-2.5 py-1.5 text-left ring-1 ring-inset transition-all disabled:cursor-not-allowed disabled:opacity-40",
                           actif ? "bg-amber-50 ring-2 ring-amber-500" : "bg-white ring-stone-200 hover:bg-stone-50")}>
                         <CasaqueNumero numero={p.numero} />
                         <span className="min-w-0 flex-1">
                           <span className="block truncate text-[12px] font-semibold text-slate-800">{p.nom_cheval}</span>
                           {p.cote_pmu != null && <span className="block text-[10.5px] tabular-nums text-slate-500">cote {formatNombre(p.cote_pmu, 2)}</span>}
                         </span>
+                        {actif && max > 1 && (
+                          <span className="absolute -right-1.5 -top-1.5 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-gradient-to-b from-amber-500 to-amber-700 px-1 text-[10px] font-bold text-white shadow ring-2 ring-white">
+                            {aOrdre ? `${place + 1}${place === 0 ? "er" : "e"}` : "✓"}
+                          </span>
+                        )}
                       </button>
                     );
                   })}
@@ -223,23 +290,29 @@ export function DefiCourseCard({ courseId, partants, connecte, prefill }: {
                   </div>
                   <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
                     <div className="flex flex-wrap items-center gap-1.5 text-[14px] font-bold text-slate-900">
-                      {type}
+                      {nomTicket}
                       {chevaux.length > 0
-                        ? chevaux.map((n, i) => <span key={n} className="inline-flex items-center gap-1">{i > 0 && <span className="text-slate-400">+</span>}<CasaqueNumero numero={n} /></span>)
-                        : <span className="text-[12.5px] font-medium text-slate-400">choisissez {nbRequis === 1 ? "un cheval" : "deux chevaux"}</span>}
+                        ? chevaux.map((n, i) => <span key={n} className="inline-flex items-center gap-1">{i > 0 && <span className="text-slate-400">{aOrdre ? "–" : "+"}</span>}<CasaqueNumero numero={n} /></span>)
+                        : <span className="text-[12.5px] font-medium text-slate-400">choisissez {min === max ? `${min} cheva${min > 1 ? "ux" : "l"}` : `${min} à ${max} chevaux`}</span>}
                     </div>
                     <span className="font-display text-[15px] font-bold tabular-nums text-slate-900">{pointsJoues} pts</span>
                   </div>
+                  {nbCombis > 1 && (
+                    <p className="mt-2 text-[11.5px] leading-relaxed text-slate-600">
+                      Formule {chevaux.length} chevaux : vos {pointsJoues} pts se répartissent sur <b className="text-slate-800">{nbCombis} combinaisons</b>,
+                      seules les gagnantes paient.
+                    </p>
+                  )}
                   <p className="mt-2 text-[11.5px] leading-relaxed text-slate-600">
-                    Si gagnant : <b className="text-slate-800">{pointsJoues} × rapport PMU officiel</b>
+                    Si gagnant : <b className="text-slate-800">{pointsJoues} × rapport PMU officiel</b>{nbCombis > 1 && <> × part des combinaisons gagnantes</>}
                     {coteIndicative != null && <> (≈ {formatPts(pointsJoues * coteIndicative)} à la cote actuelle ; le rapport final fait foi)</>}.
                     {" "}Définitif une fois validé : ni modifiable, ni annulable.
                   </p>
                   <button type="button" onClick={valider} disabled={!pret || envoi}
                     className="mt-3 inline-flex min-h-[50px] w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-b from-amber-600 to-amber-800 px-4 text-[14px] font-bold text-white shadow-[inset_0_1px_0_rgba(255,255,255,.25),0_10px_20px_-12px_rgba(146,64,14,.9)] transition-opacity disabled:cursor-not-allowed disabled:opacity-45">
                     {envoi ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
-                    {chevaux.length !== nbRequis
-                      ? `Choisissez ${nbRequis - chevaux.length} cheva${nbRequis - chevaux.length > 1 ? "ux" : "l"}`
+                    {chevaux.length < min
+                      ? `Choisissez encore ${min - chevaux.length} cheva${min - chevaux.length > 1 ? "ux" : "l"}`
                       : `Valider mon pari · ${pointsJoues} pts`}
                   </button>
                   <div className="mt-2 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-[11px] text-slate-500">
@@ -272,7 +345,7 @@ export function DefiCourseCard({ courseId, partants, connecte, prefill }: {
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-1.5 text-[13px] font-bold text-slate-900">
                         {p.type_pari}
-                        {p.chevaux.map((n, i) => <span key={n} className="inline-flex items-center gap-1">{i > 0 && <span className="text-slate-400">+</span>}<CasaqueNumero numero={n} /></span>)}
+                        {p.chevaux.map((n, i) => <span key={n} className="inline-flex items-center gap-1">{i > 0 && <span className="text-slate-400">{estAOrdre(p.type_pari) ? "–" : "+"}</span>}<CasaqueNumero numero={n} /></span>)}
                       </div>
                       <div className="mt-1.5 flex flex-wrap gap-1.5"><StatutPari statut={p.statut} /><OriginePari origine={p.origine} /></div>
                     </div>

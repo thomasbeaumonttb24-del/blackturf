@@ -13,6 +13,7 @@
  * une boîte modale sans échappatoire au clavier est un piège (WCAG 2.1.2).
  */
 
+import { chevauxLisibles } from "@/components/defi/kit";
 import * as React from "react";
 import useSWR from "swr";
 import { Loader2, X } from "lucide-react";
@@ -236,7 +237,7 @@ export default function FicheCompte({ userId, onClose }: { userId: string; onClo
                               {badgeResultat(b.statut)}
                             </div>
                             <p className="mt-1 truncate text-xs text-muted-foreground">
-                              {b.chevaux.map((n) => `n°${n}`).join(" + ")}
+                              {chevauxLisibles(b.type_pari, b.chevaux)}
                             </p>
                             <div className="mt-2 space-y-1 border-t border-border/60 pt-2">
                               <Champ label="Course">
@@ -286,7 +287,7 @@ export default function FicheCompte({ userId, onClose }: { userId: string; onClo
                                       <span className="ml-1 text-[10px] font-bold text-brand-gold-dark" title="Pari repris du plan de mise consulté">PLAN</span>
                                     )}
                                   </td>
-                                  <td className={cn(TD, "whitespace-nowrap")}>{b.chevaux.map((n) => `n°${n}`).join(" + ")}</td>
+                                  <td className={cn(TD, "whitespace-nowrap")}>{chevauxLisibles(b.type_pari, b.chevaux)}</td>
                                   <td className={cn(TD, "text-right tabular-nums")}>{pts(b.points)}</td>
                                   <td className={cn(TD, "text-right tabular-nums text-muted-foreground")}>
                                     {b.rapport ? b.rapport.toFixed(2) : "—"}

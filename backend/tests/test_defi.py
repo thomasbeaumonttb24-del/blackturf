@@ -100,7 +100,10 @@ async def test_origine_plan_seulement_si_le_joueur_a_vu_ce_plan(db):
 
 
 @pytest.mark.parametrize("type_pari, chevaux, points, message", [
-    ("Trio", [1, 2, 3], 10, "Type de pari"),
+    ("Report+", [1, 2], 10, "Type de pari"),
+    ("Tiercé", [1, 2], 10, "choisissez 3"),
+    ("Multi", [1, 2, 3], 10, "4 à 7"),
+    ("2sur4", [1, 2, 3, 5, 6], 10, "2 à 4"),
     ("Simple Gagnant", [1, 2], 10, "choisissez 1"),
     ("Couplé Gagnant", [2, 2], 10, "choisissez 2"),
     ("Simple Gagnant", [1], 5, "Mise entre"),
@@ -439,3 +442,139 @@ async def test_admin_liste_les_joueurs_du_defi(client, db, admin_headers):
     assert ligne["defi_points_mises"] == 100 and ligne["defi_solde"] == 1200
     assert ligne["defi_dernier_pari_at"] is not None
     assert "bankroll_initiale" not in ligne and "solde_actuel" not in ligne
+
+
+
+# ─── Catalogue complet des paris PMU ────────────────────────────────────────
+
+TOUS_LES_CODES = ["E_SIMPLE_GAGNANT", "E_SIMPLE_PLACE", "E_COUPLE_GAGNANT", "E_COUPLE_PLACE",
+                  "E_COUPLE_ORDRE", "E_TRIO", "E_TRIO_ORDRE", "E_DEUX_SUR_QUATRE", "E_SUPER_QUATRE",
+                  "E_TIERCE", "E_QUARTE_PLUS", "E_QUINTE_PLUS", "E_MULTI", "E_PICK5"]
+
+ARRIVEE_JACKPOT = (1, 4, 3, 10, 8)
+DETAIL_JACKPOT = {
+    "e_tierce": [
+        {"libelle": "e-Tiercé Ordre", "combinaison": "1-4-3", "rapport": 1479.9},
+        {"libelle": "e-Tiercé Désordre", "combinaison": "1-4-3", "rapport": 175.8},
+    ],
+    "e_quarte_plus": [
+        {"libelle": "e-Quarté+ Ordre", "combinaison": "1-4-3-10", "rapport": 2115.4},
+        {"libelle": "e-Quarté+ Désordre", "combinaison": "1-4-3-10", "rapport": 168.5},
+        {"libelle": "e-Bonus", "combinaison": "1-4-3", "rapport": 21.4},
+    ],
+    "e_quinte_plus": [
+        {"libelle": "e-Quinté+ Ordre", "combinaison": "1-4-3-10-8", "rapport": 11652.4},
+        {"libelle": "e-Quinté+ Désordre", "combinaison": "1-4-3-10-8", "rapport": 138.2},
+        {"libelle": "e-Bonus 4sur5", "combinaison": "1-4-3-10", "rapport": 4.8},
+        {"libelle": "e-Bonus 3", "combinaison": "1-4-3", "rapport": 4.0},
+    ],
+    "e_multi": [
+        {"libelle": "e-Multi en 4", "combinaison": "1-4-3-10", "rapport": 577.5},
+        {"libelle": "e-Multi en 5", "combinaison": "1-4-3-10", "rapport": 115.5},
+        {"libelle": "e-Multi en 6", "combinaison": "1-4-3-10", "rapport": 38.5},
+    ],
+    "deux_sur_quatre": [{"combinaison": "1-4", "rapport": 6.0}],
+    "couple_ordre": [{"combinaison": "1-4", "rapport": 31.0}],
+    "super_quatre": [{"combinaison": "1-4-3-10", "rapport": 900.0}],
+}
+AGREGAT_JACKPOT = {k: v[0]["rapport"] for k, v in DETAIL_JACKPOT.items()}
+
+
+async def test_catalogue_suit_les_paris_offerts_par_la_course(db):
+    c = await _course(db, nb=16, paris_disponibles=TOUS_LES_CODES)
+    types = [t["type"] for t in defi.types_disponibles(c)]
+    assert types == [t["type"] for t in defi.CATALOGUE_DEFI]
+    petite = await _course(db, course_id="C2", nb=6,
+                           paris_disponibles=["E_SIMPLE_GAGNANT", "E_SIMPLE_PLACE", "E_COUPLE_ORDRE", "E_TRIO_ORDRE"])
+    assert [t["type"] for t in defi.types_disponibles(petite)] == [
+        "Simple Gagnant", "Simple Placé", "Couplé Ordre", "Trio Ordre"]
+
+
+async def test_multi_ou_mini_multi_selon_la_course(db):
+    u = await _user(db)
+    await _course(db, nb=12, paris_disponibles=["E_SIMPLE_GAGNANT", "E_MINI_MULTI"])
+    p = await defi.engager_pari(db, u, "C1", "Multi", [1, 2, 3, 4, 5], 30)
+    assert p.type_pari == "Mini Multi en 5"
+    await _course(db, course_id="C2", nb=16, paris_disponibles=["E_MULTI"])
+    p2 = await defi.engager_pari(db, u, "C2", "Multi", [1, 2, 3, 4], 30)
+    assert p2.type_pari == "Multi en 4"
+
+
+async def test_pari_non_offert_sur_cette_course_refuse(db):
+    u = await _user(db)
+    await _course(db, nb=16, paris_disponibles=["E_SIMPLE_GAGNANT", "E_TRIO"])
+    with pytest.raises(defi.DefiErreur, match="pas proposé"):
+        await defi.engager_pari(db, u, "C1", "Quinté+", [1, 2, 3, 4, 5], 10)
+
+
+async def _jouer_et_regler(db, u, type_pari, chevaux, points=10, detail=DETAIL_JACKPOT):
+    cid = f"J{uuid.uuid4().hex[:6]}"
+    c = await _course(db, course_id=cid, nb=16, paris_disponibles=TOUS_LES_CODES)
+    p = await defi.engager_pari(db, u, cid, type_pari, chevaux, points)
+    await _arrivee(db, c, ordre=ARRIVEE_JACKPOT, rapports=AGREGAT_JACKPOT, detail=detail)
+    await defi.regler_course(db, cid)
+    await db.refresh(p)
+    return p
+
+
+@pytest.mark.parametrize("type_pari, chevaux, statut, rapport, retour", [
+    ("Tiercé", [1, 4, 3], "gagne", 1479.9, 14799.0),        # ordre exact → Ordre
+    ("Tiercé", [4, 1, 3], "gagne", 175.8, 1758.0),          # désordre
+    ("Tiercé", [1, 4, 8], "perd", None, 0.0),
+    ("Quarté+", [1, 4, 3, 10], "gagne", 2115.4, 21154.0),
+    ("Quarté+", [4, 1, 10, 3], "gagne", 168.5, 1685.0),
+    ("Quarté+", [1, 4, 3, 12], "gagne", 21.4, 214.0),       # Bonus
+    ("Quinté+", [1, 4, 3, 10, 8], "gagne", 11652.4, 116524.0),
+    ("Quinté+", [8, 4, 3, 10, 1], "gagne", 138.2, 1382.0),
+    ("Quinté+", [1, 4, 3, 10, 12], "gagne", 4.8, 48.0),     # Bonus 4sur5
+    ("Quinté+", [1, 4, 3, 11, 12], "gagne", 4.0, 40.0),     # Bonus 3
+    ("Couplé Ordre", [1, 4], "gagne", 31.0, 310.0),
+    ("Couplé Ordre", [4, 1], "perd", None, 0.0),
+    ("Super 4", [1, 4, 3, 10], "gagne", 900.0, 9000.0),
+    ("Super 4", [1, 4, 10, 3], "perd", None, 0.0),
+    ("2sur4", [1, 4], "gagne", 6.0, 60.0),
+    ("2sur4", [1, 4, 3, 12], "gagne", 6.0, 30.0),           # 3 paires sur 6 : 10 × 6 × 3/6
+    ("Multi", [1, 4, 3, 10], "gagne", 577.5, 5775.0),
+    ("Multi", [1, 4, 3, 10, 12], "gagne", 115.5, 1155.0),
+    ("Multi", [1, 4, 3, 12], "perd", None, 0.0),
+])
+async def test_reglement_de_chaque_type_au_rapport_officiel(db, type_pari, chevaux, statut, rapport, retour):
+    u = await _user(db)
+    p = await _jouer_et_regler(db, u, type_pari, chevaux)
+    assert (p.statut, p.rapport, p.points_retour) == (statut, rapport, retour)
+
+
+async def test_tierce_exact_attend_le_rapport_ordre_au_lieu_de_payer_le_desordre(db):
+    u = await _user(db)
+    detail = {**DETAIL_JACKPOT, "e_tierce": [DETAIL_JACKPOT["e_tierce"][1]]}  # Ordre absent
+    p = await _jouer_et_regler(db, u, "Tiercé", [1, 4, 3], detail=detail)
+    assert p.statut == "en_attente"
+
+
+async def test_origine_plan_pour_un_tierce_et_un_multi_du_plan(db):
+    from api.config import get_settings
+    from services.bet_plan_snapshots import subject_hash
+
+    u = await _user(db)
+    await _course(db, nb=16, paris_disponibles=TOUS_LES_CODES)
+    plan = {"niveaux": [{"niveau": "coup", "paris": [
+        {"type": "Tiercé Ordre", "chevaux": [{"numero": 3}, {"numero": 7}, {"numero": 1}]},
+        {"type": "Multi en 5", "chevaux": [{"numero": n} for n in (1, 2, 3, 4, 5)]},
+    ]}]}
+    db.add(BetPlanSnapshot(course_id="C1", subject_hash=subject_hash(u.user_id, get_settings().secret_key),
+                           profil="agressif", montant_demande=10, plan=plan, plan_hash="h",
+                           cotes_utilisees={}, algo_config={}, algo_version="t", nb_paris=2,
+                           montant_joue=5, emitted_at=MAINTENANT, is_pre_course=True))
+    await db.commit()
+    assert (await defi.engager_pari(db, u, "C1", "Tiercé", [3, 7, 1], 10)).origine == "plan"
+    assert (await defi.engager_pari(db, u, "C1", "Tiercé", [7, 3, 1], 10)).origine == "perso"
+    assert (await defi.engager_pari(db, u, "C1", "Multi", [5, 4, 3, 2, 1], 10)).origine == "plan"
+
+
+async def test_api_course_expose_les_types_disponibles(client, db, auth_headers):
+    await _course(db, nb=16, paris_disponibles=["E_SIMPLE_GAGNANT", "E_MULTI", "E_TIERCE"])
+    types = (await client.get("/api/v1/defi/course/C1", headers=auth_headers)).json()["types"]
+    assert [t["type"] for t in types] == ["Simple Gagnant", "Tiercé", "Multi"]
+    multi = types[2]
+    assert (multi["min"], multi["max"], multi["libelle"]) == (4, 7, "Multi")
+    assert types[1]["ordre"] is True and "drapeau" not in types[1]

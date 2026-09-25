@@ -158,7 +158,23 @@ export const pronosticEmailApi = {
 };
 
 // ─── Défi du mois ──────────────────────────────────────────────────────────
-export type DefiTypePari = "Simple Gagnant" | "Simple Placé" | "Couplé Gagnant" | "Couplé Placé";
+/** Type de pari du défi : l'un des 14 paris PMU (« Tiercé », « Multi »…). Le libellé
+ *  enregistré peut préciser la formule (« Multi en 5 », « Mini Multi en 6 »). */
+export type DefiTypePari = string;
+
+/** Un pari ouvert par le PMU sur la course, tel que le serveur le décrit. */
+export type DefiTypeInfo = {
+  type: DefiTypePari;
+  famille: string;
+  /** Nombre de chevaux : min = max pour un ticket unitaire, fourchette pour une formule. */
+  min: number;
+  max: number;
+  /** L'ordre de sélection est l'ordre d'arrivée joué. */
+  ordre: boolean;
+  aide: string;
+  /** « Multi » ou « Mini Multi » selon la course. */
+  libelle?: string;
+};
 
 export type DefiRegles = {
   capital_mensuel: number;
@@ -168,7 +184,7 @@ export type DefiRegles = {
   max_paris_par_course: number;
   verrou_minutes: number;
   recompenses: { rang: number; plan: string; jours: number }[];
-  types: DefiTypePari[];
+  types: DefiTypeInfo[];
   mois: string;
 };
 
@@ -226,6 +242,8 @@ export type DefiMoi = DefiStats & {
 export type DefiCourse = {
   /** Mois du défi auquel la course appartient (calendrier de Paris). */
   mois: string;
+  /** Paris ouverts par le PMU sur cette course. */
+  types: DefiTypeInfo[];
   ouvert: boolean;
   limite: string;
   solde: number | null;
