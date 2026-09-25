@@ -127,6 +127,8 @@ async function sitemapPages(): Promise<Response> {
     // Le palmarès est passé en `index` le 2026-08-26 mais était resté hors du sitemap.
     // Son contenu chiffré est régénéré toutes les quinze minutes.
     { loc: `${BASE}/track-record`, lastmod: debutDeJournee },
+    // Défi du mois : classement public, mis à jour après chaque arrivée.
+    { loc: `${BASE}/defi`, lastmod: debutDeJournee },
     { loc: `${BASE}/guides`, lastmod: iso(MAJ.guides) },
     { loc: `${BASE}/guides/types-de-paris-pmu`, lastmod: iso(MAJ.guideTypesParis) },
     { loc: `${BASE}/guides/comment-lire-la-musique`, lastmod: iso(MAJ.guideMusique) },

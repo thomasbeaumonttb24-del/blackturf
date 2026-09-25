@@ -300,7 +300,7 @@ export default function ComptesPage() {
                     <Champ label="Défi du mois">
                       {pts(u.defi_solde)}
                       <span className="ml-1 text-xs font-normal text-muted-foreground">
-                        {u.defi_rang != null ? `· ${u.defi_rang}e` : "· non classé"}
+                        {u.defi_rang != null ? `· ${u.defi_rang}${u.defi_rang === 1 ? "er" : "e"}` : "· non classé"}
                       </span>
                     </Champ>
                     <Champ label="Résultat">
@@ -397,7 +397,7 @@ export default function ComptesPage() {
                           <td className={cn(TD, "text-right")}>
                             <div className="tabular-nums">{pts(u.defi_solde)}</div>
                             <div className="text-[11px] tabular-nums text-muted-foreground">
-                              {u.defi_rang != null ? `${u.defi_rang}e du mois` : "non classé"}
+                              {u.defi_rang != null ? `${u.defi_rang}${u.defi_rang === 1 ? "er" : "e"} du mois` : "non classé"}
                             </div>
                           </td>
                           <td className={cn(TD, "text-right")}>

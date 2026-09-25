@@ -25,6 +25,7 @@ interface LigneCloture {
   email: string;
   plan: string;
   solde: number;
+  points_mises: number;
   nb_paris: number;
   nb_gagnes: number;
   roi: number | null;
@@ -135,7 +136,7 @@ export default function AdminDefiPage() {
                       <span className="font-normal text-muted-foreground">{l.email}</span>
                     </div>
                     <div className="text-[12px] tabular-nums text-muted-foreground">
-                      {formatPts(l.solde)} · {l.nb_paris} paris · {l.nb_gagnes} gagnés · plan {l.plan}
+                      {formatPts(l.solde)} · {l.nb_paris} paris ({formatPts(l.points_mises)} misés) · {l.nb_gagnes} gagnés · plan {l.plan}
                       {l.created_at && <> · inscrit le {formatDateTime(l.created_at)}</>}
                       {l.last_login_at && <> · vu le {formatDateTime(l.last_login_at)}</>}
                     </div>

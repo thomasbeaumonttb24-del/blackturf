@@ -427,3 +427,15 @@ async def test_classement_invalide_des_qu_un_pari_est_engage(db):
     assert await defi.classement_en_cache(db, defi.mois_courant()) == []
     await defi.engager_pari(db, u, "C1", "Simple Gagnant", [3], 10)
     assert len(await defi.classement_en_cache(db, defi.mois_courant())) == 1
+
+
+async def test_admin_liste_les_joueurs_du_defi(client, db, admin_headers):
+    u = await _user(db, email="joueur-admin@x.fr", pseudo="Joueur_A")
+    await _paris_regles(db, u, 10, gagnant=True, prefixe="AD")
+    resp = await client.get("/admin/api/users?limit=200", headers=admin_headers)
+    assert resp.status_code == 200
+    ligne = next(l for l in resp.json() if l["email"] == "joueur-admin@x.fr")
+    assert ligne["defi_rang"] == 1 and ligne["nb_paris"] == 10 and ligne["nb_gagnes"] == 10
+    assert ligne["defi_points_mises"] == 100 and ligne["defi_solde"] == 1200
+    assert ligne["defi_dernier_pari_at"] is not None
+    assert "bankroll_initiale" not in ligne and "solde_actuel" not in ligne
