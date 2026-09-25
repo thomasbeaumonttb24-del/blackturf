@@ -1695,7 +1695,7 @@ async def _montants_connus(db: AsyncSession) -> dict[str, int]:
 @router.get("/revenus")
 async def revenus(
     mois: int = Query(12, ge=1, le=36),
-    horizon_jours: int = Query(90, ge=7, le=400),
+    mois_prevision: int = Query(3, ge=1, le=12),
     db: AsyncSession = Depends(get_db),
     _=Depends(require_admin),
 ):
@@ -1796,7 +1796,10 @@ async def revenus(
 
     # ── Échéancier : prochain prélèvement de chaque abonnement vivant ──
     montants = await _montants_connus(db)
-    horizon = now + timedelta(days=horizon_jours)
+    # La prévision couvre des MOIS ENTIERS : le mois en cours puis `mois_prevision`
+    # mois pleins. Une borne en jours (90 j) coupait le dernier mois en deux et le
+    # graphique montrait une chute qui n'était qu'un artefact de fenêtre.
+    horizon = _ajoute_mois(debut_mois_courant, mois_prevision + 1).astimezone(timezone.utc)
     lignes = (await db.execute(
         select(Subscription, User)
         .join(User, User.user_id == Subscription.user_id)
@@ -1842,7 +1845,7 @@ async def revenus(
             continue
         pas = 12 if sub.periodicite == "annual" else 1
         d, i = prochaine, 0
-        while d <= horizon and i < 40:
+        while d < horizon and i < 40:
             if d >= now:
                 cle = _mois_de(d, tz)
                 prevu_par_mois[cle] = prevu_par_mois.get(cle, 0) + montant

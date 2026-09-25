@@ -173,8 +173,8 @@ function CourbeRevenus({
           <Line
             type="monotone" dataKey={clePrevu} name="Prévu"
             stroke={PALETTE.ardoiseMoyen} strokeWidth={1.75} strokeDasharray="5 4"
-            dot={{ r: 3, fill: "#fff", stroke: PALETTE.ardoiseMoyen, strokeWidth: 1.5 }}
-            activeDot={{ r: 4.5 }} connectNulls isAnimationActive={false}
+            dot={{ r: 3, fill: "#fff", stroke: PALETTE.ardoiseMoyen, strokeWidth: 1.5, strokeDasharray: "0" }}
+            activeDot={{ r: 4.5, strokeDasharray: "0" }} connectNulls isAnimationActive={false}
           />
           {choisi && yChoisi != null && (
             <ReferenceDot x={choisi.label} y={yChoisi} r={5.5} fill={PALETTE.or} stroke="#fff" strokeWidth={2} />
