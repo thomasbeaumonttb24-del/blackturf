@@ -472,7 +472,11 @@ async def dashboard_summary(
             "numero": part.numero,
             "hippodrome": course.hippodrome_nom,
             "discipline": course.discipline,
+            # `heure` est en UTC (heure du serveur) : le front lit `date_heure` et
+            # l'affiche à l'heure de Paris ; `heure` reste pour les anciens clients.
             "heure": course.date_heure.strftime("%H:%M") if course.date_heure else None,
+            "date_heure": course.date_heure.isoformat() if course.date_heure else None,
+            "code": (f"R{course.numero_reunion}C{course.numero}" if course.numero_reunion and course.numero else None),
             "ev": round(vb.ev_max, 2),
             "niveau": vb.niveau,
             "cote": round(part.cote_pmu, 1) if part.cote_pmu else None,

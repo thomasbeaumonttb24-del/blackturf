@@ -955,8 +955,10 @@ async def get_pari_du_jour(
     cid = course.course_id
     # Code public R{réunion}C{course} : réunion = numExterne (numero_reunion) pour
     # matcher pmu.fr ; fallback sur le suffixe du course_id (numOfficiel) si absent.
-    if course.numero_reunion:
-        code = f"R{course.numero_reunion}C{part.numero}"
+    # Le « C » est le numéro de la COURSE : `part.numero` (le dossard) donnait « R1C7 »
+    # pour le cheval n°7, un code qui renvoie à une autre course sur pmu.fr.
+    if course.numero_reunion and course.numero:
+        code = f"R{course.numero_reunion}C{course.numero}"
     else:
         code = cid[8:] if len(cid) > 8 and "R" in cid[8:] else cid
     proba = float(pred.proba_top1 or 0)

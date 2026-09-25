@@ -9,8 +9,7 @@
  * si l'utilisateur a demandé à réduire les animations.
  */
 
-import { useEffect, useId, useRef, useState, type ReactNode } from "react";
-import type { LucideIcon } from "lucide-react";
+import { useEffect, useId, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { Reveal } from "@/components/track-record/effets";
 import { cn } from "@/lib/utils";
 
@@ -130,8 +129,8 @@ export function CourbeCapital({ points, hauteur = 140 }: { points: number[]; hau
   const pas = L / (points.length - 1);
   const xy = points.map((v, i) => [i * pas, H - 10 - ((v - min) / etendue) * (H - 24)] as const);
   const d = xy.map(([x, y], i) => `${i ? "L" : "M"}${x.toFixed(1)} ${y.toFixed(1)}`).join(" ");
-  const monte = points[points.length - 1] >= points[0];
-  const trait = monte ? "#059669" : "#DC2626";
+  const trait = "#1C1917";
+  const aire = "#D97706";
   const [xf, yf] = xy[xy.length - 1];
 
   return (
@@ -139,42 +138,67 @@ export function CourbeCapital({ points, hauteur = 140 }: { points: number[]; hau
     <svg width={L} height={H} viewBox={`0 0 ${L} ${H}`} className="block overflow-visible" aria-hidden="true">
       <defs>
         <linearGradient id={`a${id}`} x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor={trait} stopOpacity=".28" />
-          <stop offset="100%" stopColor={trait} stopOpacity="0" />
+          <stop offset="0%" stopColor={aire} stopOpacity=".16" />
+          <stop offset="100%" stopColor={aire} stopOpacity="0" />
         </linearGradient>
       </defs>
       {[0.25, 0.5, 0.75].map((f) => (
-        <line key={f} x1="0" x2={L} y1={H * f} y2={H * f} stroke="rgba(120,113,108,.14)" strokeDasharray="4 6" />
+        <line key={f} x1="0" x2={L} y1={H * f} y2={H * f} stroke="rgba(120,113,108,.12)" />
       ))}
       <path d={`${d} L${L} ${H} L0 ${H} Z`} fill={`url(#a${id})`} className="esp-aire" />
       <path
-        d={d} fill="none" stroke={trait} strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round"
+        d={d} fill="none" stroke={trait} strokeWidth="1.75" strokeLinejoin="round" strokeLinecap="round"
         pathLength={1} className="esp-trace"
       />
-      <circle cx={xf} cy={yf} r="5" fill={trait} className="esp-aire" />
-      <circle cx={xf} cy={yf} r="11" fill={trait} opacity=".18" className="esp-aire" />
+      <circle cx={xf} cy={yf} r="9" fill={aire} opacity=".15" className="esp-aire" />
+      <circle cx={xf} cy={yf} r="4" fill="#fff" stroke={aire} strokeWidth="2" className="esp-aire" />
     </svg>
     </div>
   );
 }
 
-/** Titre de section : pastille dorée, titre en display, lien éventuel à droite. */
-export function SectionTitre({ sur, titre, icone: Icone, aside, className }: {
+/** Titre de section : sur-titre discret à filet doré, titre en display. */
+export function SectionTitre({ sur, titre, aside, className }: {
   sur: string;
   titre: string;
-  icone: LucideIcon;
   aside?: ReactNode;
   className?: string;
 }) {
   return (
-    <Reveal className={cn("mb-4 flex items-end justify-between gap-3", className)}>
+    <Reveal className={cn("mb-5 flex items-end justify-between gap-3", className)}>
       <div className="min-w-0">
-        <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-100/70 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-[0.16em] text-amber-900 ring-1 ring-amber-200">
-          <Icone className="h-3 w-3" aria-hidden="true" /> {sur}
+        <span className="flex items-center gap-2 text-[11px] font-medium uppercase tracking-[0.2em] text-stone-500">
+          <span className="h-px w-5 bg-amber-600/70" aria-hidden="true" /> {sur}
         </span>
-        <h2 className="mt-2 font-display text-xl font-extrabold tracking-tight text-slate-900 sm:text-2xl">{titre}</h2>
+        <h2 className="mt-2 font-display text-xl font-medium tracking-tight text-stone-900 sm:text-[1.65rem]">{titre}</h2>
       </div>
       {aside && <div className="shrink-0">{aside}</div>}
     </Reveal>
+  );
+}
+
+/**
+ * Plan en relief, repris de l'accueil (`.scene3d`) : légèrement incliné au repos,
+ * il suit le pointeur de quelques degrés. Ombre au sol pour l'asseoir.
+ */
+export function Plan3D({ children, sens = 1, className }: { children: ReactNode; sens?: 1 | -1; className?: string }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const onMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.pointerType !== "mouse" || mouvementReduit()) return;
+    const el = ref.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    el.style.setProperty("--px", (((e.clientX - r.left) / r.width - 0.5) * 2).toFixed(3));
+    el.style.setProperty("--py", (((e.clientY - r.top) / r.height - 0.5) * 2).toFixed(3));
+  };
+  const onLeave = () => {
+    ref.current?.style.setProperty("--px", "0");
+    ref.current?.style.setProperty("--py", "0");
+  };
+  return (
+    <div ref={ref} onPointerMove={onMove} onPointerLeave={onLeave} className={cn("scene3d relative", className)} style={{ "--sens": sens } as CSSProperties}>
+      <div className="scene3d-plan">{children}</div>
+      <div className="pointer-events-none absolute inset-x-[14%] -bottom-7 -z-10 h-9 rounded-[100%] bg-stone-900/20 blur-2xl" aria-hidden="true" />
+    </div>
   );
 }

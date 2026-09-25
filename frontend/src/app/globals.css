@@ -820,68 +820,32 @@
 .colonne3d { transition: height 1.6s cubic-bezier(0.16,1,0.3,1); }
 @media (prefers-reduced-motion: reduce) { .colonne3d { transition: none !important; } }
 
-/* ════════ MON ESPACE (/dashboard) — cockpit en relief ════════
-   Même règle que le palmarès : tout est décoratif. Sans script ou avec
-   « réduire les animations », la page s'affiche à plat et complète. */
+/* ════════ MON ESPACE (/dashboard) — relief sobre ════════
+   Le relief passe par les plans `.scene3d` de l'accueil (inclinaison légère qui
+   suit le pointeur) et par des ombres étagées ; ici, seulement le tracé de la
+   courbe et l'entrée des lignes. Tout se coupe avec « réduire les animations ». */
 
-/* Orbites en perspective derrière la carte du pari du jour : le parent
-   couche l'anneau (rotateX), l'enfant tourne sur lui-même. */
-.esp-orbite { transform: perspective(900px) rotateX(72deg); transform-style: preserve-3d; }
-.esp-orbite > span {
-  position: absolute; inset: 0; border-radius: 999px;
-  border: 1px dashed rgba(252,211,77,.35);
-  animation: loopSpin 30s linear infinite;
+/* Ombre étagée d'un panneau posé sur la page (contact + portée longue). */
+.esp-panneau {
+  background: #fff;
+  box-shadow:
+    0 1px 0 rgba(255,255,255,.9) inset,
+    0 0 0 1px rgba(28,25,23,.06),
+    0 1px 2px rgba(28,25,23,.04),
+    0 12px 24px -16px rgba(28,25,23,.18),
+    0 40px 80px -48px rgba(28,25,23,.30);
 }
-.esp-orbite > span + span {
-  inset: 12%; border-style: solid; border-color: rgba(245,158,11,.22);
-  animation-duration: 18s; animation-direction: reverse;
-}
-.esp-orbite > span::after {
-  content: ""; position: absolute; top: -4px; left: 50%; width: 8px; height: 8px;
-  border-radius: 999px; background: #FCD34D; box-shadow: 0 0 14px 4px rgba(252,211,77,.7);
-}
-
-/* Liseré lumineux qui fait le tour d'une carte. */
-@property --esp-a { syntax: "<angle>"; inherits: false; initial-value: 0deg; }
-@keyframes espTour { to { --esp-a: 360deg; } }
-.esp-lisere { position: relative; }
-.esp-lisere::before {
-  content: ""; position: absolute; inset: 0; border-radius: inherit; padding: 1.5px;
-  background: conic-gradient(from var(--esp-a), transparent 0 55%, rgba(252,211,77,.95) 72%, rgba(245,158,11,.4) 80%, transparent 92%);
-  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor; mask-composite: exclude;
-  animation: espTour 5s linear infinite; pointer-events: none; z-index: 2;
-}
-
-/* Carte qui flotte doucement (lévitation). */
-@keyframes espFlotte {
-  0%, 100% { transform: translateY(0); }
-  50%      { transform: translateY(-10px); }
-}
-.esp-flotte { animation: espFlotte 7s ease-in-out infinite; }
 
 /* Courbe du capital : le tracé se dessine, l'aire apparaît ensuite. */
 @keyframes espTrace { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
-.esp-trace { stroke-dasharray: 1; stroke-dashoffset: 0; animation: espTrace 1.8s cubic-bezier(0.16,1,0.3,1) .2s backwards; }
+.esp-trace { stroke-dasharray: 1; stroke-dashoffset: 0; animation: espTrace 1.6s cubic-bezier(0.16,1,0.3,1) .2s backwards; }
 @keyframes espAire { from { opacity: 0; } to { opacity: 1; } }
-.esp-aire { animation: espAire 1.2s ease 1s backwards; }
+.esp-aire { animation: espAire 1s ease .9s backwards; }
 
-/* Tuile d'accès rapide : l'icône sort du plan au survol. */
-.esp-tuile { transform-style: preserve-3d; }
-.esp-tuile .esp-icone { transition: transform .45s cubic-bezier(0.16,1,0.3,1), box-shadow .45s ease; }
-.esp-tuile:hover .esp-icone {
-  transform: translateZ(30px) rotate(-8deg) scale(1.08);
-  box-shadow: 0 18px 30px -12px rgba(180,83,9,.55);
-}
-
-/* Entrée en cascade des lignes d'une liste. */
-@keyframes espLigne {
-  from { opacity: 0; transform: perspective(700px) translateY(14px) rotateX(-14deg); }
-  to   { opacity: 1; transform: none; }
-}
-.esp-ligne { animation: espLigne .7s cubic-bezier(0.16,1,0.3,1) backwards; }
+/* Entrée des lignes d'une liste, en léger décalé. */
+@keyframes espLigne { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+.esp-ligne { animation: espLigne .6s cubic-bezier(0.16,1,0.3,1) backwards; }
 
 @media (prefers-reduced-motion: reduce) {
-  .esp-orbite > span, .esp-lisere::before, .esp-flotte, .esp-trace, .esp-aire, .esp-ligne { animation: none !important; }
-  .esp-tuile:hover .esp-icone { transform: none !important; }
+  .esp-trace, .esp-aire, .esp-ligne { animation: none !important; }
 }
