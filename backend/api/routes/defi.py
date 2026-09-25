@@ -104,7 +104,8 @@ async def regles():
 
 
 def _ligne_publique(l: dict, moi: Optional[str]) -> dict:
-    return {k: v for k, v in l.items() if k not in ("user_id", "premier_pari_at")} \
+    return {k: v for k, v in l.items()
+            if k not in ("user_id", "premier_pari_at", "dernier_pari_at", "points_mises")} \
         | {"moi": l["user_id"] == moi}
 
 

@@ -10,8 +10,10 @@
  *
  * Le remède est celui de n'importe quelle console : une navigation permanente,
  * au même endroit sur toutes les pages. Barre latérale au-delà de 1024 px,
- * barre du bas sur téléphone — cinq destinations, jamais plus, chacune avec son
- * icône ET son libellé (une barre d'icônes seules ne s'apprend pas).
+ * barre du bas sur téléphone — six destinations depuis l'ajout de « Revenus »
+ * (2026-09-25), chacune avec son icône ET son libellé (une barre d'icônes
+ * seules ne s'apprend pas). À 360 px, six cases font 60 px : la cible tactile
+ * reste au-dessus des 44 px.
  *
  * Les pastilles de la navigation ne sont pas décoratives : elles comptent des
  * incidents réels (erreurs ouvertes, scrapers muets, paiements échoués) et
@@ -23,7 +25,7 @@ import * as React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
-  AlertTriangle, ArrowLeft, Brain, CreditCard, Gauge, Loader2, Server, Users,
+  AlertTriangle, ArrowLeft, Brain, CreditCard, Euro, Gauge, Loader2, Server, Users,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useRequireAuth } from "@/hooks/useAuth";
@@ -37,11 +39,33 @@ function EnLigneMini() {
   return (
     <Link
       href="/admin"
-      className="flex items-center gap-2 rounded-lg bg-white/5 px-3 py-2 text-xs text-white/70 transition-colors hover:bg-white/10"
+      className="flex items-center gap-2 rounded-lg border border-border bg-muted/50 px-3 py-2 text-xs text-muted-foreground transition-colors hover:bg-muted"
     >
       <PointLive />
-      <span><b className="font-semibold tabular-nums text-white">{data.total}</b> en ligne</span>
+      <span><b className="font-semibold tabular-nums text-foreground">{data.total}</b> en ligne sur le site</span>
     </Link>
+  );
+}
+
+/** Horloge du poste de pilotage — l'heure de Paris, à la seconde. */
+function Horloge() {
+  const [maintenant, setMaintenant] = React.useState<Date | null>(null);
+  React.useEffect(() => {
+    setMaintenant(new Date());
+    const i = window.setInterval(() => setMaintenant(new Date()), 1000);
+    return () => window.clearInterval(i);
+  }, []);
+  if (!maintenant) return null;
+  return (
+    <div className="px-1 text-xs text-muted-foreground">
+      <span className="capitalize">
+        {maintenant.toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long", timeZone: "Europe/Paris" })}
+      </span>
+      {" · "}
+      <span className="tabular-nums text-foreground/80">
+        {maintenant.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Paris" })}
+      </span>
+    </div>
   );
 }
 
@@ -57,6 +81,7 @@ interface Destination {
 
 const DESTINATIONS: Destination[] = [
   { href: "/admin", label: "Pilotage", court: "Pilotage", icone: Gauge },
+  { href: "/admin/revenus", label: "Revenus", court: "Revenus", icone: Euro },
   { href: "/admin/abonnements", label: "Abonnements", court: "Abonnés", icone: CreditCard },
   { href: "/admin/comptes", label: "Comptes", court: "Comptes", icone: Users, prefixe: ["/admin/defi"] },
   { href: "/admin/algorithme", label: "Algorithme", court: "Algo", icone: Brain },
@@ -83,15 +108,12 @@ function badgeDe(href: string, a: ReturnType<typeof useAlertes>): number {
   return a.nouveaux[href] ?? 0;
 }
 
-function Pastille({ n, actif }: { n: number; actif: boolean }) {
+function Pastille({ n }: { n: number }) {
   if (n <= 0) return null;
   return (
     <span
       aria-label={`${n} point${n > 1 ? "s" : ""} d'attention`}
-      className={cn(
-        "inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[10px] font-bold tabular-nums",
-        actif ? "bg-brand-gold text-brand-dark" : "bg-destructive text-destructive-foreground",
-      )}
+      className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-red-600 px-1.5 text-[10px] font-semibold tabular-nums text-white"
     >
       {n > 99 ? "99+" : n}
     </span>
@@ -148,11 +170,11 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
   }
 
   return (
-    <div className="min-h-dvh bg-[#F6F5F1]">
+    <div className="bt-admin min-h-dvh">
       {/* ── Barre du haut, téléphone et tablette ───────────────────────────
           Elle porte le nom de l'écran courant : sur mobile la navigation est
           en bas, et sans ce rappel une page défilée ne dit plus où l'on est. */}
-      <header className="sticky top-0 z-30 flex h-14 items-center gap-3 border-b border-border/70 bg-background/90 px-4 backdrop-blur lg:hidden">
+      <header className="sticky top-0 z-30 flex h-14 items-center gap-3 border-b border-border bg-white/95 px-4 backdrop-blur lg:hidden">
         <Link
           href="/"
           aria-label="Retour au site"
@@ -161,7 +183,7 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
           <ArrowLeft className="h-4 w-4" />
         </Link>
         <div className="min-w-0 flex-1">
-          <div className="text-[11px] font-semibold uppercase leading-none tracking-[0.08em] text-brand-gold-dark">
+          <div className="text-[11px] font-medium leading-none text-muted-foreground">
             Administration
           </div>
           <div className="truncate text-sm font-semibold leading-tight">
@@ -181,17 +203,15 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
 
       <div className="mx-auto flex w-full max-w-[1500px]">
         {/* ── Barre latérale, à partir de 1024 px ─────────────────────────── */}
-        <aside className="sticky top-0 hidden h-dvh w-60 shrink-0 flex-col bg-brand-dark text-white lg:flex">
+        <aside className="sticky top-0 hidden h-dvh w-60 shrink-0 flex-col border-r border-border bg-white lg:flex">
           <div className="px-5 py-5">
             <Link href="/" className="group flex items-center gap-2.5">
-              <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/10 text-sm font-bold text-brand-gold ring-1 ring-inset ring-brand-gold/40">
+              <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-[#1b2230] font-display text-sm font-bold tracking-tight text-[#e2c285]">
                 BT
               </span>
               <span className="min-w-0">
-                <span className="block text-sm font-semibold leading-tight">BlackTurf</span>
-                <span className="block text-[11px] leading-tight text-white/50">
-                  Console d&apos;administration
-                </span>
+                <span className="block text-sm font-semibold leading-tight text-foreground">BlackTurf</span>
+                <span className="block text-xs leading-tight text-muted-foreground">Administration</span>
               </span>
             </Link>
           </div>
@@ -206,25 +226,26 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
                   href={d.href}
                   aria-current={actif ? "page" : undefined}
                   className={cn(
-                    "flex min-h-[2.75rem] items-center gap-3 rounded-xl px-3 text-[13px] font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-gold",
+                    "relative flex min-h-[2.5rem] items-center gap-3 rounded-md px-3 text-[13px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                     actif
-                      ? "bg-white/10 text-white shadow-[inset_3px_0_0_0_#F59E0B]"
-                      : "text-white/60 hover:bg-white/5 hover:text-white",
+                      ? "bg-muted text-foreground before:absolute before:inset-y-2 before:left-0 before:w-[3px] before:rounded-full before:bg-[#a8741a]"
+                      : "text-muted-foreground hover:bg-muted/60 hover:text-foreground",
                   )}
                 >
                   <Icone className="h-4 w-4 shrink-0" aria-hidden />
                   <span className="flex-1 truncate">{d.label}</span>
-                  <Pastille n={badgeDe(d.href, alertes)} actif={actif} />
+                  <Pastille n={badgeDe(d.href, alertes)} />
                 </Link>
               );
             })}
           </nav>
 
-          <div className="space-y-3 border-t border-white/10 px-4 py-4">
+          <div className="space-y-3 border-t border-border px-4 py-4">
+            <Horloge />
             <EnLigneMini />
             <Link
               href="/"
-              className="flex items-center gap-2 px-1 text-xs font-medium text-white/50 transition-colors hover:text-white"
+              className="flex items-center gap-2 px-1 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
             >
               <ArrowLeft className="h-3.5 w-3.5" /> Retour au site public
             </Link>
@@ -242,7 +263,7 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
       {/* ── Barre du bas, téléphone ─────────────────────────────────────── */}
       <nav
         aria-label="Sections de l'administration"
-        className="fixed inset-x-0 bottom-0 z-30 border-t border-border/70 bg-background/95 pb-[env(safe-area-inset-bottom)] backdrop-blur lg:hidden"
+        className="fixed inset-x-0 bottom-0 z-30 border-t border-border bg-white/95 pb-[env(safe-area-inset-bottom)] backdrop-blur lg:hidden"
       >
         <div className="mx-auto flex max-w-lg">
           {DESTINATIONS.map((d) => {
@@ -256,7 +277,7 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
                 aria-current={actif ? "page" : undefined}
                 className={cn(
                   "relative flex min-h-[3.5rem] flex-1 flex-col items-center justify-center gap-0.5 px-1 text-[10px] font-semibold transition-colors",
-                  actif ? "text-brand-gold-dark" : "text-muted-foreground",
+                  actif ? "text-foreground" : "text-muted-foreground",
                 )}
               >
                 <span className="relative">
@@ -274,7 +295,7 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
                 {actif && (
                   <span
                     aria-hidden
-                    className="absolute inset-x-4 top-0 h-0.5 rounded-full bg-brand-gold"
+                    className="absolute inset-x-4 top-0 h-0.5 rounded-full bg-[#a8741a]"
                   />
                 )}
               </Link>

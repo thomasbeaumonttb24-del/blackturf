@@ -478,7 +478,7 @@ export default function SystemePage() {
         icone={<Server className="h-4 w-4" />}
         desc="Modèles entraînés, sources de données, exceptions et services extérieurs."
         actions={
-          <Button variant="brand" onClick={lancerRetrain} disabled={retraining} className="min-h-[2.75rem]">
+          <Button onClick={lancerRetrain} disabled={retraining} className="h-9 rounded-lg bg-[#1b2230] px-3.5 text-[13px] font-medium text-white hover:bg-[#2c3547]">
             {retraining ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
             Ré-entraîner
           </Button>

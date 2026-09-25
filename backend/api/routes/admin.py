@@ -192,6 +192,9 @@ async def list_users(
             "nb_paris": d["nb_paris"] if d else 0,
             "nb_gagnes": d["nb_gagnes"] if d else 0,
             "defi_points_nets": d["points_nets"] if d else 0.0,
+            "defi_points_mises": d["points_mises"] if d else 0,
+            "defi_nb_en_attente": d["nb_en_attente"] if d else 0,
+            "defi_dernier_pari_at": d["dernier_pari_at"] if d else None,
             "roi": d["roi"] if d else None,
         })
     return result
@@ -1502,6 +1505,378 @@ async def abonnements(
             }
             for m in mouvements
         ],
+        "computed_at": now.isoformat(),
+    }
+
+
+# ─────────────────────────────────────────────
+# Revenus — l'argent RÉELLEMENT encaissé, mois par mois, et ce qui arrive
+# ─────────────────────────────────────────────
+# Demande de l'exploitant (2026-09-25) : le MRR dit ce que les abonnements
+# DEVRAIENT rapporter ; il ne dit pas ce qui est entré en caisse ce mois-ci, ni
+# quand tombe le prochain prélèvement de chaque abonné.
+#
+# Source unique : `subscription_events` de type `paiement_recu`, écrit à CHAQUE
+# `invoice.payment_succeeded` avec `amount_paid` (cf. `stripe_routes`). C'est
+# de l'argent constaté, pas une estimation. Les factures à 0 € (ouverture d'un
+# essai) n'y sont jamais écrites.
+#
+# L'échéancier, lui, est une PRÉVISION : il se lit sur `subscriptions.periode_fin`
+# (ou `essai_fin` pour un essai avec carte) et il est étiqueté comme tel.
+FUSEAU_REVENUS = "Europe/Paris"
+
+
+def _mois_de(d: datetime, tz) -> str:
+    if d.tzinfo is None:
+        d = d.replace(tzinfo=timezone.utc)
+    return d.astimezone(tz).strftime("%Y-%m")
+
+
+def _ajoute_mois(d: datetime, n: int) -> datetime:
+    """Même jour n mois plus tard, borné à la fin du mois (31 janv. → 28 févr.)."""
+    import calendar
+    m = d.month - 1 + n
+    annee, mois = d.year + m // 12, m % 12 + 1
+    jour = min(d.day, calendar.monthrange(annee, mois)[1])
+    return d.replace(year=annee, month=mois, day=jour)
+
+
+async def _montants_connus(db: AsyncSession) -> dict[str, int]:
+    """Dernier montant connu par abonnement Stripe (le prix RÉEL du price)."""
+    montants: dict[str, int] = {}
+    for sid, montant in (await db.execute(
+        select(SubscriptionEvent.stripe_subscription_id,
+               func.max(SubscriptionEvent.montant_cents))
+        .where(SubscriptionEvent.montant_cents.isnot(None))
+        .group_by(SubscriptionEvent.stripe_subscription_id)
+    )).all():
+        if sid:
+            montants[sid] = montant
+    return montants
+
+
+def _ligne_paiement(date, email, plan, montant, nature, *, frais=None, net=None, rembourse=0,
+                    charge_id=None, recu_url=None, facture_id=None, motif=None, source="stripe"):
+    return {
+        "date": date, "email": email, "plan": plan, "montant_cents": int(montant),
+        "rembourse_cents": int(rembourse or 0),
+        "frais_cents": None if frais is None else int(frais),
+        "net_cents": None if net is None else int(net),
+        "nature": nature, "motif": motif, "charge_id": charge_id,
+        "recu_url": recu_url, "facture_id": facture_id, "source": source,
+    }
+
+
+@router.get("/revenus")
+async def revenus(
+    mois: int = Query(12, ge=1, le=36),
+    mois_prevision: int = Query(3, ge=1, le=12),
+    actualiser: bool = Query(False, description="Ignore le cache et relit Stripe"),
+    db: AsyncSession = Depends(get_db),
+    _=Depends(require_admin),
+):
+    """Encaissements réels par mois, lus CHEZ STRIPE (débits réussis, frais,
+    remboursements, virements), rapprochés du journal interne ; plus l'échéancier
+    des prochains prélèvements de chaque abonné.
+
+    Sans clé Stripe (tests, poste local) ou si Stripe ne répond pas, le calcul
+    retombe sur le journal `paiement_recu` — et la réponse le DIT (`source`),
+    pour que l'écran ne présente jamais un repli comme la vérité comptable.
+    """
+    import asyncio
+    from zoneinfo import ZoneInfo
+    from api.config import get_settings
+    from services import revenus_stripe
+
+    tz = ZoneInfo(FUSEAU_REVENUS)
+    now = datetime.now(timezone.utc)
+    local = now.astimezone(tz)
+    debut_mois_courant = local.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    debut_fenetre = _ajoute_mois(debut_mois_courant, -(mois - 1))
+    debut_fenetre_utc = debut_fenetre.astimezone(timezone.utc)
+    cles_mois = [_ajoute_mois(debut_fenetre, i).strftime("%Y-%m") for i in range(mois)]
+
+    def _formule(plan: Optional[str]) -> str:
+        return {"starter": "standard", "pro": "expert"}.get(plan or "", plan or "standard")
+
+    # ── Qui est qui : client Stripe / e-mail → compte et formule ──
+    comptes = (await db.execute(
+        select(User.user_id, User.email, User.stripe_customer_id, User.plan)
+    )).all()
+    plan_abo: dict[str, str] = {}
+    for uid, plan in (await db.execute(
+        select(Subscription.user_id, Subscription.plan).order_by(Subscription.created_at)
+    )).all():
+        plan_abo[uid] = plan  # le plus récent l'emporte
+    par_client = {c: (uid, em) for uid, em, c, _p in comptes if c}
+    plan_par_email = {
+        (em or "").lower(): _formule(plan_abo.get(uid) or p) for uid, em, _c, p in comptes
+    }
+    PLAN_PAR_MONTANT = {v: _formule(k) for k, v in PRIX_MENSUEL_CENTS.items()}
+
+    # ── Journal interne (sert au rapprochement, et de repli) ──
+    journal = (await db.execute(
+        select(SubscriptionEvent)
+        .where(SubscriptionEvent.type.in_(("paiement_recu", "paiement_echoue")))
+        .order_by(SubscriptionEvent.created_at)
+    )).scalars().all()
+
+    # ── Source : Stripe d'abord ──
+    source = {"type": "journal", "lu_le": None, "erreur": None}
+    livre = None
+    cle = get_settings().stripe_secret_key
+    if cle:
+        try:
+            livre = await asyncio.to_thread(
+                revenus_stripe.lire, cle, int(debut_fenetre_utc.timestamp()), actualiser,
+            )
+            source = {
+                "type": "stripe",
+                "lu_le": datetime.fromtimestamp(livre.lu_le, tz=timezone.utc).isoformat(),
+                "erreur": None,
+            }
+        except Exception as e:  # noqa: BLE001 — Stripe injoignable : repli signalé
+            log.error("admin.revenus.stripe_indisponible", error=str(e)[:300])
+            source["erreur"] = "Stripe n'a pas répondu : chiffres issus du journal interne."
+    else:
+        source["erreur"] = "Clé Stripe absente : chiffres issus du journal interne."
+
+    lignes_paiement: list[dict] = []
+    remboursements: list[dict] = []
+    virements: list[dict] = []
+    ecarts = {"absents_du_journal": [], "absents_de_stripe": []}
+
+    if livre is not None:
+        premiers: set[str] = set()
+        for e in livre.encaissements:  # ordre chronologique
+            qui = e.client_id or (e.email or "").lower()
+            premier = bool(qui) and qui not in premiers
+            if qui:
+                premiers.add(qui)
+            uid_email = par_client.get(e.client_id or "")
+            email = e.email or (uid_email[1] if uid_email else None)
+            plan = plan_par_email.get((email or "").lower()) or PLAN_PAR_MONTANT.get(e.montant_cents) or "standard"
+            lignes_paiement.append(_ligne_paiement(
+                e.cree_le, email, plan, e.montant_cents, "nouveau" if premier else "renouvellement",
+                frais=e.frais_cents, net=e.net_cents, rembourse=e.rembourse_cents,
+                charge_id=e.charge_id, recu_url=e.recu_url, facture_id=e.facture_id,
+                motif=e.description,
+            ))
+        remboursements = [
+            {"date": r.cree_le, "montant_cents": r.montant_cents, "net_cents": r.net_cents,
+             "charge_id": r.charge_id, "email": r.email}
+            for r in livre.remboursements
+        ]
+        virements = [
+            {"date": v.arrivee_le, "montant_cents": v.montant_cents, "statut": v.statut}
+            for v in livre.virements
+        ]
+
+        # Rapprochement : chaque débit Stripe doit avoir son `paiement_recu`
+        # (même e-mail, même montant, à 3 jours près), et réciproquement.
+        restants = [ev for ev in journal if ev.type == "paiement_recu"]
+        for lp in lignes_paiement:
+            trouve = None
+            for ev in restants:
+                d = ev.created_at if ev.created_at.tzinfo else ev.created_at.replace(tzinfo=timezone.utc)
+                if (int(ev.montant_cents or 0) == lp["montant_cents"]
+                        and (ev.email or "").lower() == (lp["email"] or "").lower()
+                        and abs((d - lp["date"]).total_seconds()) <= 3 * 86400):
+                    trouve = ev
+                    break
+            if trouve is not None:
+                restants.remove(trouve)
+            elif lp["date"] >= debut_fenetre_utc:
+                ecarts["absents_du_journal"].append(
+                    {"date": lp["date"], "email": lp["email"], "montant_cents": lp["montant_cents"],
+                     "charge_id": lp["charge_id"]})
+        for ev in restants:
+            d = ev.created_at if ev.created_at.tzinfo else ev.created_at.replace(tzinfo=timezone.utc)
+            if d >= debut_fenetre_utc:
+                ecarts["absents_de_stripe"].append(
+                    {"date": d, "email": ev.email, "montant_cents": int(ev.montant_cents or 0)})
+    else:
+        vus: set[str] = set()
+        for ev in journal:
+            if ev.type != "paiement_recu":
+                continue
+            detail = ev.detail if isinstance(ev.detail, dict) else {}
+            sid = ev.stripe_subscription_id
+            premier = (detail.get("motif") == "subscription_create"
+                       or bool(detail.get("premier_paiement_apres_essai"))
+                       or (sid is not None and sid not in vus))
+            if sid:
+                vus.add(sid)
+            d = ev.created_at if ev.created_at.tzinfo else ev.created_at.replace(tzinfo=timezone.utc)
+            lignes_paiement.append(_ligne_paiement(
+                d, ev.email, _formule(ev.plan), int(ev.montant_cents or 0),
+                "nouveau" if premier else "renouvellement",
+                motif=detail.get("motif"), facture_id=detail.get("facture"), source="journal",
+            ))
+
+    # ── Agrégation mensuelle (mois de Paris) ──
+    buckets = {
+        k: {
+            "mois": k, "encaisse_cents": 0, "rembourse_cents": 0, "frais_cents": 0,
+            "net_cents": 0, "verse_cents": 0, "nb_paiements": 0, "nb_remboursements": 0,
+            "nouveaux_cents": 0, "renouvellements_cents": 0,
+            "par_formule": {"standard": 0, "expert": 0},
+            "echecs_cents": 0, "nb_echecs": 0, "frais_connus": livre is not None,
+            "clients": set(), "paiements": [],
+        }
+        for k in cles_mois
+    }
+    for lp in lignes_paiement:
+        b = buckets.get(_mois_de(lp["date"], tz))
+        if b is None:
+            continue
+        m = lp["montant_cents"]
+        b["encaisse_cents"] += m
+        b["nb_paiements"] += 1
+        b["frais_cents"] += lp["frais_cents"] or 0
+        b["net_cents"] += lp["net_cents"] if lp["net_cents"] is not None else m
+        f = lp["plan"] if lp["plan"] in b["par_formule"] else "standard"
+        b["par_formule"][f] += m
+        b["nouveaux_cents" if lp["nature"] == "nouveau" else "renouvellements_cents"] += m
+        if lp["email"]:
+            b["clients"].add(lp["email"].lower())
+        b["paiements"].append(lp)
+    for r in remboursements:
+        b = buckets.get(_mois_de(r["date"], tz))
+        if b is not None:
+            b["rembourse_cents"] += r["montant_cents"]
+            b["net_cents"] += r["net_cents"]
+            b["nb_remboursements"] += 1
+    for v in virements:
+        b = buckets.get(_mois_de(v["date"], tz))
+        if b is not None:
+            b["verse_cents"] += v["montant_cents"]
+    for ev in journal:
+        if ev.type == "paiement_echoue":
+            b = buckets.get(_mois_de(ev.created_at, tz))
+            if b is not None:
+                b["nb_echecs"] += 1
+                b["echecs_cents"] += int(ev.montant_cents or 0)
+
+    serie = []
+    cumul = 0
+    for k in cles_mois:
+        b = buckets[k]
+        ca = b["encaisse_cents"] - b["rembourse_cents"]
+        cumul += ca
+        b["paiements"].sort(key=lambda p: p["date"], reverse=True)
+        serie.append({
+            **{kk: vv for kk, vv in b.items() if kk != "clients"},
+            # Chiffre d'affaires encaissé du mois = débits réussis − remboursements.
+            "ca_cents": ca,
+            "nb_clients": len(b["clients"]),
+            "panier_moyen_cents": round(b["encaisse_cents"] / b["nb_paiements"]) if b["nb_paiements"] else None,
+            "cumul_cents": cumul,
+        })
+
+    # ── Échéancier : prochain prélèvement de chaque abonnement vivant ──
+    montants = await _montants_connus(db)
+    # La prévision couvre des MOIS ENTIERS : le mois en cours puis `mois_prevision`
+    # mois pleins. Une borne en jours (90 j) coupait le dernier mois en deux et le
+    # graphique montrait une chute qui n'était qu'un artefact de fenêtre.
+    horizon = _ajoute_mois(debut_mois_courant, mois_prevision + 1).astimezone(timezone.utc)
+    lignes = (await db.execute(
+        select(Subscription, User)
+        .join(User, User.user_id == Subscription.user_id)
+        .where(Subscription.statut.in_(("active", "trialing", "cancel_at_period_end", "past_due")))
+    )).all()
+
+    echeances = []
+    prevu_par_mois: dict[str, int] = {}
+    for sub, user in lignes:
+        montant = montants.get(sub.stripe_subscription_id) or PRIX_MENSUEL_CENTS.get(sub.plan, 0)
+        essai_fin = sub.essai_fin
+        if essai_fin is not None and essai_fin.tzinfo is None:
+            essai_fin = essai_fin.replace(tzinfo=timezone.utc)
+        periode_fin = sub.periode_fin
+        if periode_fin is not None and periode_fin.tzinfo is None:
+            periode_fin = periode_fin.replace(tzinfo=timezone.utc)
+
+        en_essai = essai_fin is not None and essai_fin > now
+        prochaine = essai_fin if en_essai else periode_fin
+        if sub.statut == "cancel_at_period_end":
+            nature = "fin_acces"
+        elif sub.statut == "past_due":
+            nature = "impaye"
+        elif en_essai:
+            nature = "premier_prelevement"
+        else:
+            nature = "renouvellement"
+        echeances.append({
+            "user_id": user.user_id,
+            "email": user.email,
+            "plan": _formule(sub.plan),
+            "periodicite": sub.periodicite,
+            "statut": sub.statut,
+            "nature": nature,
+            "date": prochaine,
+            "jours_restants": round((prochaine - now).total_seconds() / 86400, 1) if prochaine else None,
+            "montant_cents": 0 if nature in ("fin_acces", "impaye") else montant,
+            "stripe_subscription_id": sub.stripe_subscription_id,
+        })
+
+        # Projection : seules les échéances qui DÉBITERONT comptent.
+        if nature in ("fin_acces", "impaye") or prochaine is None:
+            continue
+        pas = 12 if sub.periodicite == "annual" else 1
+        d, i = prochaine, 0
+        while d < horizon and i < 40:
+            if d >= now:
+                cle = _mois_de(d, tz)
+                prevu_par_mois[cle] = prevu_par_mois.get(cle, 0) + montant
+            i += 1
+            d = _ajoute_mois(prochaine, pas * i)
+
+    echeances.sort(key=lambda e: (e["date"] is None, e["date"] or now))
+    mois_courant = cles_mois[-1]
+    courant = serie[-1]
+    precedent = serie[-2] if len(serie) > 1 else None
+    prevision = [
+        {"mois": k, "prevu_cents": v}
+        for k, v in sorted(prevu_par_mois.items())
+    ]
+    reste_mois = prevu_par_mois.get(mois_courant, 0)
+    total = sum(s_["ca_cents"] for s_ in serie)
+    somme = lambda cle_: sum(s_[cle_] for s_ in serie)  # noqa: E731
+
+    return {
+        "fuseau": FUSEAU_REVENUS,
+        "source": source,
+        "mois": serie,
+        "totaux": {
+            # Toutes les sommes « encaissées » sont nettes des remboursements :
+            # c'est le chiffre d'affaires réellement acquis.
+            "periode_cents": total,
+            "brut_cents": somme("encaisse_cents"),
+            "rembourse_cents": somme("rembourse_cents"),
+            "frais_cents": somme("frais_cents"),
+            "net_cents": somme("net_cents"),
+            "verse_cents": somme("verse_cents"),
+            "mois_courant_cents": courant["ca_cents"],
+            "mois_precedent_cents": precedent["ca_cents"] if precedent else None,
+            "variation_pct": (
+                round((courant["ca_cents"] - precedent["ca_cents"])
+                      / precedent["ca_cents"] * 100, 1)
+                if precedent and precedent["ca_cents"] else None
+            ),
+            "reste_a_encaisser_mois_cents": reste_mois,
+            "atterrissage_mois_cents": courant["ca_cents"] + reste_mois,
+            "moyenne_mensuelle_cents": round(total / len(serie)) if serie else 0,
+            "nb_paiements": somme("nb_paiements"),
+            "echecs_cents": somme("echecs_cents"),
+        },
+        "rapprochement": {
+            "verifie": livre is not None,
+            "absents_du_journal": ecarts["absents_du_journal"],
+            "absents_de_stripe": ecarts["absents_de_stripe"],
+        },
+        "prevision": prevision,
+        "echeancier": echeances,
         "computed_at": now.isoformat(),
     }
 

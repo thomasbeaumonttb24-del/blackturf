@@ -205,6 +205,102 @@ export interface AbonnementsData {
   mouvements: MouvementAbo[];
 }
 
+export interface PaiementRecu {
+  date: string;
+  email: string | null;
+  plan: Formule;
+  montant_cents: number;
+  rembourse_cents: number;
+  /** Frais Stripe et net crédité — `null` quand la source est le journal interne. */
+  frais_cents: number | null;
+  net_cents: number | null;
+  /** Premier encaissement du client, ou échéance suivante. */
+  nature: "nouveau" | "renouvellement";
+  motif: string | null;
+  charge_id: string | null;
+  /** Reçu Stripe officiel du paiement. */
+  recu_url: string | null;
+  facture_id: string | null;
+  source: "stripe" | "journal";
+}
+
+export interface MoisRevenu {
+  mois: string; // AAAA-MM, fuseau Europe/Paris
+  /** Débits réussis, bruts. */
+  encaisse_cents: number;
+  rembourse_cents: number;
+  /** Chiffre d'affaires encaissé = brut − remboursements. */
+  ca_cents: number;
+  frais_cents: number;
+  net_cents: number;
+  /** Virements arrivés sur le compte bancaire ce mois-là. */
+  verse_cents: number;
+  nb_remboursements: number;
+  frais_connus: boolean;
+  nb_paiements: number;
+  nouveaux_cents: number;
+  renouvellements_cents: number;
+  par_formule: Record<Formule, number>;
+  echecs_cents: number;
+  nb_echecs: number;
+  nb_clients: number;
+  panier_moyen_cents: number | null;
+  cumul_cents: number;
+  paiements: PaiementRecu[];
+}
+
+export type NatureEcheance = "renouvellement" | "premier_prelevement" | "fin_acces" | "impaye";
+
+export interface Echeance {
+  user_id: string;
+  email: string;
+  plan: Formule;
+  periodicite: string;
+  statut: string;
+  nature: NatureEcheance;
+  date: string | null;
+  jours_restants: number | null;
+  montant_cents: number;
+  stripe_subscription_id: string | null;
+}
+
+export interface EcartRapprochement {
+  date: string;
+  email: string | null;
+  montant_cents: number;
+  charge_id?: string | null;
+}
+
+export interface RevenusData {
+  fuseau: string;
+  source: { type: "stripe" | "journal"; lu_le: string | null; erreur: string | null };
+  rapprochement: {
+    verifie: boolean;
+    absents_du_journal: EcartRapprochement[];
+    absents_de_stripe: EcartRapprochement[];
+  };
+  mois: MoisRevenu[];
+  totaux: {
+    periode_cents: number;
+    brut_cents: number;
+    rembourse_cents: number;
+    frais_cents: number;
+    net_cents: number;
+    verse_cents: number;
+    mois_courant_cents: number;
+    mois_precedent_cents: number | null;
+    variation_pct: number | null;
+    reste_a_encaisser_mois_cents: number;
+    atterrissage_mois_cents: number;
+    moyenne_mensuelle_cents: number;
+    nb_paiements: number;
+    echecs_cents: number;
+  };
+  prevision: Array<{ mois: string; prevu_cents: number }>;
+  echeancier: Echeance[];
+  computed_at: string;
+}
+
 export interface CompteLigne {
   user_id: string;
   email: string;
@@ -225,6 +321,9 @@ export interface CompteLigne {
   defi_solde: number;
   defi_rang: number | null;
   defi_points_nets: number;
+  defi_points_mises: number;
+  defi_nb_en_attente: number;
+  defi_dernier_pari_at: string | null;
   roi: number | null;
   nb_paris: number;
   nb_gagnes: number;

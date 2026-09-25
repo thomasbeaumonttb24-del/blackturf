@@ -21,14 +21,14 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
 import {
-  Ban, Download, Medal, RotateCcw, Search, Trash2, Users,
+  Activity, Ban, CreditCard, Download, Medal, RotateCcw, Search, Trash2, Users,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { adminApi } from "@/lib/api";
 import { cn, formatDateTime } from "@/lib/utils";
 import {
-  Carte, CartesOuTableau, Champ, DefilementX, EnTetePage, GrilleTuiles, Panneau, Puce,
-  Segments, Squelette, TD, TH, Tuile, Vide, num, signedPct, tone,
+  Carte, CartesOuTableau, Champ, DefilementX, EnTetePage, Panneau, Puce,
+  Kpi, Segments, Squelette, TD, TH, Vide, num, signedPct, tone,
 } from "@/components/admin/ui";
 import { useComptes } from "@/components/admin/data";
 import FicheCompte from "@/components/admin/vues/FicheCompte";
@@ -121,7 +121,12 @@ export default function ComptesPage() {
   const liste = useMemo(() => {
     const tous = comptes ?? [];
     if (filtre === "abonnes") return tous.filter((u) => ["active", "trialing", "cancel_at_period_end"].includes(u.abonnement_statut ?? ""));
-    if (filtre === "actifs") return tous.filter((u) => u.nb_paris > 0);
+    if (filtre === "actifs") {
+      // Les joueurs du défi, dans l'ordre du classement : classés par rang, puis
+      // les autres par solde.
+      return tous.filter((u) => u.nb_paris > 0).sort((a, b) =>
+        (a.defi_rang ?? 1e9) - (b.defi_rang ?? 1e9) || b.defi_solde - a.defi_solde);
+    }
     if (filtre === "suspendus") return tous.filter((u) => !u.is_active);
     return tous;
   }, [comptes, filtre]);
@@ -134,6 +139,8 @@ export default function ComptesPage() {
       parieurs: tous.filter((u) => u.nb_paris > 0).length,
       suspendus: tous.filter((u) => !u.is_active).length,
       classes: tous.filter((u) => u.defi_rang != null).length,
+      pointsMises: tous.reduce((s, u) => s + (u.defi_points_mises ?? 0), 0),
+      parisJoues: tous.reduce((s, u) => s + u.nb_paris, 0),
     };
   }, [comptes]);
 
@@ -211,18 +218,15 @@ export default function ComptesPage() {
         }
       />
 
-      <GrilleTuiles colonnes={5}>
-        <Tuile label="Comptes" valeur={num(resume.total)} icone={<Users className="h-3.5 w-3.5" />} />
-        <Tuile label="Abonnés" valeur={num(resume.abonnes)} ton={resume.abonnes > 0 ? "ok" : "neutre"} />
-        <Tuile label="Joueurs du défi" valeur={num(resume.parieurs)} sub="au moins un pari ce mois-ci" />
-        <Tuile label="Suspendus" valeur={num(resume.suspendus)} ton={resume.suspendus > 0 ? "attention" : "neutre"} />
-        <Tuile
-          label="Classés au défi"
-          valeur={num(resume.classes)}
-          icone={<Medal className="h-3.5 w-3.5" />}
-          aide="Joueurs ayant atteint le minimum de paris du mois pour entrer au classement."
-        />
-      </GrilleTuiles>
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-5 lg:gap-4">
+        <Kpi label="Comptes" nombre={resume.total} format={(v) => num(Math.round(v))} icone={<Users className="h-4 w-4" />} accent="violet" />
+        <Kpi label="Abonnés" nombre={resume.abonnes} format={(v) => num(Math.round(v))} icone={<CreditCard className="h-4 w-4" />} accent="ok" />
+        <Kpi label="Joueurs du défi" nombre={resume.parieurs} format={(v) => num(Math.round(v))} icone={<Medal className="h-4 w-4" />} accent="or"
+          sub={`${num(resume.classes)} classé${resume.classes > 1 ? "s" : ""} · mois en cours`} />
+        <Kpi label="Points misés" nombre={resume.pointsMises} format={(v) => `${num(Math.round(v))} pts`} icone={<Activity className="h-4 w-4" />} accent="bleu"
+          sub={`${num(resume.parisJoues)} paris engagés ce mois-ci`} />
+        <Kpi label="Suspendus" nombre={resume.suspendus} format={(v) => num(Math.round(v))} icone={<Ban className="h-4 w-4" />} accent={resume.suspendus > 0 ? "rouge" : "neutre"} />
+      </div>
 
       <Panneau
         titre="Liste des comptes"
@@ -303,7 +307,10 @@ export default function ComptesPage() {
                       <span className={tone(u.defi_points_nets)}>{pts(u.defi_points_nets, true)}</span>
                       <span className="ml-1.5">{roiCellule(u)}</span>
                     </Champ>
-                    <Champ label="Paris">{u.nb_paris === 0 ? "—" : `${u.nb_gagnes} / ${u.nb_paris}`}</Champ>
+                    <Champ label="Misé">
+                      {u.nb_paris === 0 ? "—" : <>{pts(u.defi_points_mises)} <span className="text-xs font-normal text-muted-foreground">· {u.nb_gagnes}/{u.nb_paris} gagnés</span></>}
+                    </Champ>
+                    {u.defi_dernier_pari_at && <Champ label="Dernier pari">{formatDateTime(u.defi_dernier_pari_at)}</Champ>}
                     <Champ label="Profil">{PROFIL_NET_LABELS[u.profil_risque] ?? u.profil_risque}</Champ>
                     <Champ label="Vue">{u.last_login ? formatDateTime(u.last_login) : "jamais"}</Champ>
                   </div>
@@ -346,7 +353,7 @@ export default function ComptesPage() {
                       <th className={cn(TH, "text-center")}>Abonnement</th>
                       <th className={cn(TH, "text-right")}>Défi du mois</th>
                       <th className={cn(TH, "text-right")}>Résultat</th>
-                      <th className={cn(TH, "text-center")}>Paris</th>
+                      <th className={cn(TH, "text-right")}>Misé</th>
                       <th className={cn(TH, "text-right")}>Activité</th>
                       <th className={cn(TH, "text-center")}>Actions</th>
                     </tr>
@@ -397,8 +404,15 @@ export default function ComptesPage() {
                             <div className={cn("font-semibold tabular-nums", tone(u.defi_points_nets))}>{pts(u.defi_points_nets, true)}</div>
                             <div className="text-[11px]">{roiCellule(u)}</div>
                           </td>
-                          <td className={cn(TD, "text-center tabular-nums")}>
-                            {u.nb_paris === 0 ? <span className="text-muted-foreground">—</span> : `${u.nb_gagnes}/${u.nb_paris}`}
+                          <td className={cn(TD, "text-right tabular-nums")}>
+                            {u.nb_paris === 0 ? <span className="text-muted-foreground">—</span> : (
+                              <>
+                                <div>{pts(u.defi_points_mises)}</div>
+                                <div className="text-[11px] text-muted-foreground">
+                                  {u.nb_gagnes}/{u.nb_paris} gagnés{u.defi_nb_en_attente > 0 ? ` · ${u.defi_nb_en_attente} en attente` : ""}
+                                </div>
+                              </>
+                            )}
                           </td>
                           <td className={cn(TD, "whitespace-nowrap text-right text-xs text-muted-foreground")}>
                             <div title="Dernière connexion">{u.last_login ? formatDateTime(u.last_login) : "jamais"}</div>

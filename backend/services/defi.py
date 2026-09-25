@@ -336,6 +336,8 @@ async def classement(session, mois: str) -> list[dict]:
         lignes.append({
             "user_id": uid,
             "nom": nom_public(u),
+            "points_mises": sum(p.points for p in ps),
+            "dernier_pari_at": ps[-1].engage_at,
             "solde": round(CAPITAL_MENSUEL + sum(points_nets(p) for p in ps), 1),
             "hors_concours": hors_concours(u),
             "classe": len(ps) >= MIN_PARIS_CLASSEMENT and not hors_concours(u),
@@ -523,6 +525,7 @@ async def resume_admin(session, user_ids: list[str], mois: str) -> dict[str, dic
     voulus = set(user_ids)
     return {
         l["user_id"]: {k: l[k] for k in ("solde", "rang", "nb_paris", "nb_gagnes",
-                                          "nb_en_attente", "points_nets", "roi", "classe")}
+                                          "nb_en_attente", "points_nets", "roi", "classe",
+                                          "points_mises", "dernier_pari_at")}
         for l in await classement(session, mois) if l["user_id"] in voulus
     }
