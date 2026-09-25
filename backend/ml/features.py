@@ -71,6 +71,29 @@ def momentum_carriere(delta_elos) -> float:
     return float(np.clip((recent_6 - ancien_6) / 10, -1, 1))
 
 
+def traits_historique_elo(delta_elos) -> dict:
+    """Les cinq traits tirés des deltas ELO ANTÉRIEURS du cheval (plus récent en
+    tête) : un seul calcul pour le direct et pour `scripts/patch_features_elo.py`."""
+    delta_elos = list(delta_elos or [])
+    moy_5 = float(np.mean(delta_elos[:5])) if delta_elos else 0.0
+    bounce_score = 0.0
+    if delta_elos:
+        last_delta = delta_elos[0]
+        avg_delta = float(np.mean(delta_elos))
+        if last_delta > avg_delta * 2.0 and last_delta > 20:  # Saut ELO exceptionnel
+            bounce_score = float(np.clip((last_delta - avg_delta) / max(abs(avg_delta) + 10, 10), 0, 1)) * 0.5
+        elif last_delta < avg_delta * 2.0 and last_delta < -15:  # Grosse chute → rebond possible
+            bounce_score = -float(np.clip(abs(last_delta) / 50, 0, 0.5))
+    return {
+        "delta_elo_5courses": moy_5,
+        "velocity_elo": moy_5,
+        "elo_trend_30j": (float(np.polyfit(np.arange(len(delta_elos)), delta_elos, 1)[0] * 5)
+                          if len(delta_elos) >= 3 else 0.0),
+        "bounce_score": float(bounce_score),
+        "career_momentum": float(momentum_carriere(delta_elos)),
+    }
+
+
 def _cle_discipline(discipline) -> str:
     """Discipline PMU (« Attelé », « Steeple-chase »…) → clé ELO (plat/trot/obstacle)."""
     d = (discipline or "plat").lower()
@@ -2145,6 +2168,16 @@ async def _load_course_batch_data(session: AsyncSession, course_id: str) -> dict
     #
     # `ROW_NUMBER()` numérote les courses de CHAQUE cheval : le plafond s'applique
     # par cheval, et le coût reste borné (12 × nb de partants).
+    #
+    # `date_course` est une DATE : la comparer à l'heure de départ (`date_course <
+    # date_heure`) laissait passer TOUTES les lignes du jour, dont celle de la
+    # course calculée elle-même (minuit < 13 h 50). En direct c'est sans effet
+    # (l'ELO n'est mis à jour qu'après l'arrivée), mais tout recalcul a posteriori
+    # lisait le delta ELO du résultat : le 24/09, un recalcul complet a donné au
+    # cheval au plus fort `velocity_elo` 44 % de victoires (favori : 35 %) et le
+    # modèle v545 promu dans la nuit a appris l'arrivée. Même borne que
+    # l'historique des courses ci-dessus : les jours STRICTEMENT antérieurs, et
+    # jamais la course elle-même.
     elo_r = await session.execute(text("""
         SELECT cheval_id, delta_elo, date_course, discipline FROM (
             SELECT cheval_id, delta_elo, date_course, discipline,
@@ -2152,11 +2185,13 @@ async def _load_course_batch_data(session: AsyncSession, course_id: str) -> dict
                                       ORDER BY date_course DESC) AS rang
             FROM elo_historique
             WHERE cheval_id = ANY(:cids)
-              AND date_course < (SELECT date_heure FROM courses WHERE course_id = :cid)
+              AND date_course < :today
+              AND course_id IS DISTINCT FROM :cid
         ) h
         WHERE h.rang <= :n
         ORDER BY cheval_id, date_course DESC
-    """), {"cids": cheval_ids, "cid": course_id, "n": ELO_DELTAS_PAR_CHEVAL})
+    """), {"cids": cheval_ids, "cid": course_id, "n": ELO_DELTAS_PAR_CHEVAL,
+           "today": date_heure.date() if hasattr(date_heure, "date") else str(date_heure)[:10]})
     elo_by_cheval: dict = {}
     # (cheval, colonne ELO) déjà notés avant cette course : un cheval absent est un
     # INÉDIT dans la discipline, dont le 1500 n'est qu'une valeur par défaut.
@@ -2799,9 +2834,10 @@ async def _compute_features_from_batch(session: AsyncSession, row, batch: dict) 
         elo_score = float(_amorce)
 
     delta_elos = batch["elo_by_cheval"].get(cheval_id, [])
-    delta_elo_5 = float(np.mean(delta_elos[:5])) if delta_elos else 0.0
-    velocity_elo = float(np.mean(delta_elos[:5])) if delta_elos else 0.0
-    elo_trend_30j = float(np.polyfit(np.arange(len(delta_elos)), delta_elos, 1)[0] * 5) if len(delta_elos) >= 3 else 0.0
+    _traits_elo = traits_historique_elo(delta_elos)
+    delta_elo_5 = _traits_elo["delta_elo_5courses"]
+    velocity_elo = _traits_elo["velocity_elo"]
+    elo_trend_30j = _traits_elo["elo_trend_30j"]
 
     elo_avg_disc = (batch.get("elo_avg_disc_map") or {}).get(
         _cle_discipline(discipline), elo_avg)
@@ -3431,14 +3467,7 @@ async def _compute_features_from_batch(session: AsyncSession, row, batch: dict) 
     # ── Z. Bounce factor — rebond après course exceptionnelle ─────────────────
     # Un cheval qui vient de faire sa meilleure course peut "rebondir" (fatigue/pic)
     # Signal fort quand ELO a fait un grand bond la dernière course
-    bounce_score = 0.0
-    if delta_elos:
-        last_delta = delta_elos[0]
-        avg_delta = float(np.mean(delta_elos))
-        if last_delta > avg_delta * 2.0 and last_delta > 20:  # Saut ELO exceptionnel
-            bounce_score = float(np.clip((last_delta - avg_delta) / max(abs(avg_delta) + 10, 10), 0, 1)) * 0.5
-        elif last_delta < avg_delta * 2.0 and last_delta < -15:  # Grosse chute → rebond possible
-            bounce_score = -float(np.clip(abs(last_delta) / 50, 0, 0.5))
+    bounce_score = _traits_elo["bounce_score"]
 
     # Best performance score — score de la meilleure course de carrière
     best_score = max(scores) if scores else 0.5
@@ -3482,7 +3511,7 @@ async def _compute_features_from_batch(session: AsyncSession, row, batch: dict) 
     feat_trainer = {"trainer_return_bonus": float(trainer_return_bonus)}
 
     # ── CC. Career trajectory ─────────────────────────────────────────────────
-    career_momentum = momentum_carriere(delta_elos)
+    career_momentum = _traits_elo["career_momentum"]
 
     # Ratio victoires jeune vs carrière total — cheval en montée de forme?
     recent_wins = sum(1 for p in musique_positions[:5] if p == 1)

@@ -94,3 +94,19 @@ def test_une_carriere_plate_donne_zero_comme_une_carriere_inconnue():
 
 def test_une_valeur_illisible_ne_fait_pas_lever_le_calcul():
     assert momentum_carriere([None, "?", 5.0]) == 0.0
+
+
+# ── Point dans le temps : ni le jour de la course, ni la course elle-même ─────
+
+def test_la_requete_elo_exclut_le_jour_et_la_course_calculee():
+    """`date_course` est une DATE. `date_course < date_heure` laissait passer la
+    ligne ELO de la course calculée (minuit < heure de départ) : tout recalcul a
+    posteriori lisait le delta du résultat. Le recalcul complet du 24/09 a ainsi
+    fait apprendre l'arrivée au modèle v545 (le plus fort `velocity_elo` gagnait
+    44 % des courses, le favori 35 %)."""
+    sql = _sql_du_chargeur()
+    requete = sql[sql.index("FROM elo_historique"):]
+    requete = requete[:requete.index(") h")]
+    assert "date_course < :today" in requete
+    assert "course_id IS DISTINCT FROM :cid" in requete
+    assert "date_heure" not in requete, "DATE comparée à l'heure de départ : fuite du jour"

@@ -55,6 +55,24 @@ MIN_DEPLOYABLE_AUC = 0.52
 # un rejet qui n'en est pas un.
 H2H_TOLERANCE = 0.002
 
+# Garde-fou de FUITE : avance maximale plausible du classement du challenger sur
+# celui de la cote, sur le hold-out. Record historique : +0,020 (31 versions
+# mesurées jusqu'à v544). Nuit du 24→25/09/2026 : v545 à +0,215 (0,9632 contre
+# 0,7486) après un recalcul des features qui y avait glissé l'ELO du résultat —
+# promue, elle servait l'arrivée apprise. Au-delà de ce seuil, le modèle a appris
+# quelque chose que personne ne sait avant le départ : jamais promu, même en
+# remplacement structurel.
+FUITE_AVANCE_MARCHE_MAX = 0.08
+
+
+def _fuite_suspectee(h2h: Optional[dict]) -> bool:
+    """Le challenger bat-il la cote d'une marge qu'aucun modèle honnête n'atteint ?"""
+    ch = (h2h or {}).get("rank_challenger")
+    mk = (h2h or {}).get("rank_marche")
+    if ch is None or mk is None:
+        return False
+    return float(ch) - float(mk) > FUITE_AVANCE_MARCHE_MAX
+
 
 # ─────────────────────────────
 # Empreinte mémoire du retrain
@@ -151,8 +169,13 @@ def _should_deploy(
     market_gate_enabled: bool = False,
     marche_servi_bloque: bool = False,
     victoire_bloque: bool = False,
+    fuite_suspectee: bool = False,
 ) -> bool:
     """Décide si un nouveau modèle doit être promu en production (logique pure, testable).
+
+    FUITE (`fuite_suspectee`, cf. `FUITE_AVANCE_MARCHE_MAX`) : bloque TOUT, comme
+    `min_auc`, remplacement structurel compris — un modèle qui a appris l'arrivée
+    est pire que le plus vieux des champions.
 
     GARDE-FOU ABSOLU d'abord : sous `min_auc` (walk-forward), on ne déploie JAMAIS, quelle
     que soit la situation de l'actif. C'est ce plancher qui manquait et qui a laissé un
@@ -212,7 +235,7 @@ def _should_deploy(
     ici chaque delta est mesuré la nuit même sur un hold-out commun aux deux
     modèles, et une seule nuit meilleure rembourse la dette (cf. `_nouvelle_dette`).
     """
-    if new_wf < min_auc:
+    if new_wf < min_auc or fuite_suspectee:
         return False
 
     # Remplacement STRUCTUREL de l'actif : actif synthetique / absent / non fiable
@@ -2076,6 +2099,12 @@ async def _do_retraining(mois: int, label: str) -> dict:
         del X_hold, y_hold, yw_hold
         _victoire = (_h2h or {}).get("victoire")
         _victoire_bloquee = _victoire_bloque(_victoire)
+        _fuite = _fuite_suspectee(_h2h)
+        if _fuite:
+            log.error("pipeline.retrain.fuite_suspectee",
+                      rank_challenger=round(float(_h2h["rank_challenger"]), 4),
+                      rank_marche=round(float(_h2h["rank_marche"]), 4),
+                      seuil=FUITE_AVANCE_MARCHE_MAX)
         _release_memory(f"{label}.holdout_freed")
         _h2h_delta = _h2h["delta"] if _h2h else None
 
@@ -2129,6 +2158,7 @@ async def _do_retraining(mois: int, label: str) -> dict:
             market_gate_enabled=_AF.market_gate,
             marche_servi_bloque=_marche_servi_bloque(_h2h),
             victoire_bloque=_victoire_bloquee,
+            fuite_suspectee=_fuite,
         ):
             version_num = await _get_next_version_num(session)
             # Drapeau refit_full : la décision est prise, on sert le refit sur tout
@@ -2301,6 +2331,7 @@ async def _do_retraining(mois: int, label: str) -> dict:
             # divergeront un jour.
             _raison_rejet = (
                 "below_min_auc" if new_wf < MIN_DEPLOYABLE_AUC
+                else "fuite_suspectee" if _fuite
                 else "victoire" if _victoire_bloquee
                 else "marche_servi" if (_AF.market_gate and _marche_servi_bloque(_h2h))
                 else "roi_gate" if (_AF.roi_deploy_gate and not _betting_edge_ok
