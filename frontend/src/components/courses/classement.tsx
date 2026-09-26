@@ -133,13 +133,16 @@ function Identite({ numero, nom, taille = "normal", terne }: {
   return (
     <span className="flex min-w-0 items-center gap-1.5">
       <span className={cn(
-        "font-display font-bold tabular-nums",
+        "shrink-0 font-display font-bold tabular-nums",
         taille === "grand" ? "text-[16px]" : "text-[15px]",
         terne ? "text-stone-600" : "text-slate-900",
       )}>
         <CasaqueNumero numero={numero} />
       </span>
-      <span className={cn("truncate", taille === "grand" ? "text-[13px]" : "text-[12.5px]", terne ? "text-stone-600" : "text-stone-700")}>
+      {/* Nom entier, sur deux lignes au besoin : coupé (« JOYEUSE DE LA B… ») il ne
+          servait plus à reconnaître le cheval, et le badge du numéro, non figé,
+          se laissait écraser contre lui. */}
+      <span className={cn("min-w-0 break-words leading-tight", taille === "grand" ? "text-[13px]" : "text-[12.5px]", terne ? "text-stone-600" : "text-stone-700")}>
         {nom}
       </span>
     </span>

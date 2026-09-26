@@ -401,8 +401,10 @@ function CarteArrivee({
               {l.position === 1 ? "1er" : `${l.position}e`}
             </span>
             <CasaqueNumero numero={l.numero} courseId={c.course_id} vertical />
+            {/* Sur téléphone, un cinquième de carte ne loge que le numéro : le nom
+                y était coupé en plein mot (« Capitain e… »). */}
             <span
-              className="line-clamp-2 w-full break-words px-0.5 text-[10.5px] font-medium leading-tight text-stone-700 sm:text-[11.5px]"
+              className="hidden w-full px-0.5 text-[11.5px] font-medium leading-tight text-stone-700 sm:line-clamp-2"
               title={titleCase(l.nom)}
             >
               {titleCase(l.nom)}
