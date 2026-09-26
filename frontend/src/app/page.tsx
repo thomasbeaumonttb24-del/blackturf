@@ -293,11 +293,11 @@ export default async function HomePage() {
 
           <div className="mx-auto mt-5 grid w-full max-w-md grid-cols-2 gap-2 sm:mt-8 sm:flex sm:max-w-none sm:justify-center sm:gap-3">
             <Button size="xl" asChild
-              className="press btn-shimmer h-12 rounded-xl bg-brand-gold px-3 text-sm font-bold text-brand-dark shadow-lg shadow-amber-500/30 hover:bg-brand-gold-deep sm:h-14 sm:px-10 sm:text-base">
-              <Link href="/inscription">Essai gratuit 7 jours <ArrowRight className="ml-1 hidden h-5 w-5 sm:inline" /></Link>
+              className="press btn-shimmer h-auto min-h-12 whitespace-normal rounded-xl bg-brand-gold px-2 py-2 text-center text-sm font-bold leading-tight text-brand-dark shadow-lg shadow-amber-500/30 hover:bg-brand-gold-deep sm:h-14 sm:px-10 sm:text-base">
+              <Link href="/inscription">Essai gratuit 7&nbsp;jours <ArrowRight className="ml-1 hidden h-5 w-5 sm:inline" /></Link>
             </Button>
             <Button variant="outline" size="xl" asChild
-              className="press h-12 rounded-xl border-white/25 bg-white/10 px-3 text-sm text-white backdrop-blur-sm hover:bg-white/20 hover:text-white sm:h-14 sm:px-10 sm:text-base">
+              className="press h-auto min-h-12 whitespace-normal rounded-xl border-white/25 bg-white/10 px-2 py-2 text-center text-sm leading-tight text-white backdrop-blur-sm hover:bg-white/20 hover:text-white sm:h-14 sm:px-10 sm:text-base">
               <Link href="/programme"><span className="sm:hidden">Courses du jour</span><span className="hidden sm:inline">Voir les courses du jour</span></Link>
             </Button>
           </div>
@@ -508,7 +508,7 @@ export default async function HomePage() {
                   {EXAMPLE_PICKS.map((h) => (
                     <div key={h.rank} className={`flex items-center gap-2.5 rounded-xl px-3 py-2 ${h.rank === 1 ? "bg-amber-50 ring-1 ring-amber-200" : "bg-gray-50"}`}>
                       <span className={`num-display text-xs font-black w-7 ${h.rank === 1 ? "text-brand-gold-dark" : "text-gray-600"}`}>N°{h.num}</span>
-                      <span className="text-sm font-medium text-gray-900 flex-1 truncate">{h.nom}</span>
+                      <span className="text-sm font-medium text-gray-900 flex-1 break-words">{h.nom}</span>
                       <span className="num-display text-xs font-bold text-gray-700 w-9 text-right">{h.p}%</span>
                       <span className="text-[11px] font-mono text-gray-600 w-8 text-right">{h.cote}</span>
                     </div>
@@ -783,7 +783,7 @@ export default async function HomePage() {
                   {CAPITAL_DEMO.map((b, i) => (
                     <div key={i} className="flex items-center gap-2 rounded-lg bg-gray-50 px-3 py-2 text-xs">
                       <span className={`h-1.5 w-1.5 rounded-full flex-shrink-0 ${b.won ? "bg-emerald-500" : "bg-gray-300"}`} />
-                      <span className="font-semibold text-gray-800 flex-1 truncate">{b.type} <span className="font-mono font-normal text-gray-600">{b.chevaux}</span></span>
+                      <span className="font-semibold text-gray-800 flex-1 break-words">{b.type} <span className="font-mono font-normal text-gray-600">{b.chevaux}</span></span>
                       <span className="text-gray-600 font-mono mr-2 hidden sm:inline">{b.mise}€</span>
                       <span className={`num-display font-bold tabular-nums ${b.won ? "text-emerald-700" : "text-gray-600"}`}>{b.net >= 0 ? "+" : ""}{b.net}€</span>
                     </div>

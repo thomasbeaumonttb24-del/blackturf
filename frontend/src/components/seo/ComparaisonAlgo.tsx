@@ -112,7 +112,7 @@ export function VerdictAlgoLigne({ v, courseId }: { v: SeoVerdict; courseId: str
           {/* Numéro seul sur téléphone : le nom, coupé à dix lettres, poussait
               la cote et la place d'arrivée sur deux lignes étroites. */}
           <CasaqueNumero numero={v.favori_numero} courseId={courseId} />
-          <span className="hidden min-w-0 truncate sm:inline">{nomTitre(v.favori_nom)}</span>
+          <span className="hidden min-w-0 sm:inline">{nomTitre(v.favori_nom)}</span>
           {v.favori_cote != null && (
             <span className="whitespace-nowrap text-stone-600">à {v.favori_cote.toLocaleString("fr-FR", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}</span>
           )}

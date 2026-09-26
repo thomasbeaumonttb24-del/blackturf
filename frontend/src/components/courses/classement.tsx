@@ -391,13 +391,13 @@ function Synthese({
             <p className="flex min-w-0 items-center justify-between gap-2">
               <span className="shrink-0 text-stone-500">Marché</span>
               {favMarche
-                ? <span className="min-w-0 truncate font-semibold text-stone-900">N°{favMarche.p.numero} <span className="font-normal text-stone-500">à</span> <span className="tabular-nums">{cote(favMarche.c)}</span></span>
+                ? <span className="min-w-0 text-right font-semibold text-stone-900">N°{favMarche.p.numero} <span className="font-normal text-stone-500">à</span> <span className="tabular-nums">{cote(favMarche.c)}</span></span>
                 : <span className="text-stone-400">cotes indisponibles</span>}
             </p>
             <p className="flex min-w-0 items-center justify-between gap-2">
               <span className="shrink-0 text-stone-500">Modèle</span>
               {favModele
-                ? <span className="min-w-0 truncate font-semibold text-stone-900">N°{favModele.numero} <span className="font-normal text-stone-500">·</span> <span className="tabular-nums text-amber-700">{pct(favModele.proba_top1)}</span></span>
+                ? <span className="min-w-0 text-right font-semibold text-stone-900">N°{favModele.numero} <span className="font-normal text-stone-500">·</span> <span className="tabular-nums text-amber-700">{pct(favModele.proba_top1)}</span></span>
                 : <span className="text-stone-400">—</span>}
             </p>
           </div>
@@ -416,7 +416,7 @@ function Synthese({
           {gagnant ? (
             <>
               <p className={TITRE}>Vainqueur</p>
-              <p className="mt-1.5 flex min-w-0 items-center gap-1.5 truncate">
+              <p className="mt-1.5 flex min-w-0 items-center gap-1.5">
                 <Identite numero={gagnant.numero} nom={gagnant.nom_cheval} taille="grand" />
               </p>
               <p className={cn("mt-1 text-[12px] font-semibold", gagnant.rang_predit === 1 ? "text-emerald-700" : gagnant.rang_predit <= 3 ? "text-slate-600" : "text-stone-600")}>
@@ -1005,13 +1005,13 @@ export function ClassementApercu({
               <p className="flex min-w-0 items-center justify-between gap-2">
                 <span className="shrink-0 text-stone-500">Marché</span>
                 {marche
-                  ? <span className="min-w-0 truncate font-semibold text-stone-900">N°{marche.numero} <span className="font-normal text-stone-500">à</span> <span className="tabular-nums">{cote(marche.cote)}</span></span>
+                  ? <span className="min-w-0 text-right font-semibold text-stone-900">N°{marche.numero} <span className="font-normal text-stone-500">à</span> <span className="tabular-nums">{cote(marche.cote)}</span></span>
                   : <span className="text-stone-400">cotes indisponibles</span>}
               </p>
               <p className="flex min-w-0 items-center justify-between gap-2">
                 <span className="shrink-0 text-stone-500">Modèle</span>
                 {revele && nommees[0]?.numero != null
-                  ? <span className="min-w-0 truncate font-semibold text-stone-900">N°{nommees[0].numero} <span className="font-normal text-stone-500">·</span> <span className="tabular-nums text-amber-700">{pct(nommees[0].proba_top1)}</span></span>
+                  ? <span className="min-w-0 text-right font-semibold text-stone-900">N°{nommees[0].numero} <span className="font-normal text-stone-500">·</span> <span className="tabular-nums text-amber-700">{pct(nommees[0].proba_top1)}</span></span>
                   : <span className="inline-flex min-w-0 items-center gap-1.5 font-semibold text-stone-900">
                       <span className="inline-flex items-center gap-1 rounded-md bg-slate-800 px-1.5 py-px text-[10.5px] font-bold text-white/85"><Lock className="h-2.5 w-2.5" aria-hidden="true" />N°?</span>
                       <span className="tabular-nums text-amber-700">{pct(apercu.proba_top1)}</span>
