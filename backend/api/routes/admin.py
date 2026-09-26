@@ -575,6 +575,14 @@ async def deploy_model(
     )
     all_mv = (await db.execute(select(ModelVersion))).scalars().all()
     for m in all_mv:
+        # Un retour arrière RETIRE le modèle abandonné : marqué `est_rollback`, il
+        # cesse de servir de prédécesseur et de record au rapport du matin. Faute
+        # de cette marque, v545 (fuite ELO, retirée le 25/09) a été présentée le
+        # 26/09 comme le record que v546 n'atteignait pas.
+        if m.est_actif and m.version_num > version_num:
+            m.est_rollback = True
+        if m.version_num == version_num:
+            m.est_rollback = False
         m.est_actif = m.version_num == version_num
     await db.commit()
     log.info("admin.deploy_model", version=version_num)

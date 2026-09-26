@@ -414,7 +414,7 @@ function CarteArrivee({
             {/* Sur téléphone, un cinquième de carte ne loge que le numéro : le nom
                 y était coupé en plein mot (« Capitain e… »). */}
             <span
-              className="hidden w-full px-0.5 text-[11.5px] font-medium leading-tight text-stone-700 sm:line-clamp-2"
+              className="hidden w-full break-words px-0.5 text-[11.5px] font-medium leading-tight text-stone-700 sm:block"
               title={titleCase(l.nom)}
             >
               {titleCase(l.nom)}
@@ -432,7 +432,7 @@ function CarteArrivee({
           <dl className="mt-2 grid grid-cols-2 gap-1.5 sm:grid-cols-3">
             {rapports.map(([code, val]) => (
               <div key={code} className="min-w-0 rounded-lg border border-stone-100 bg-stone-50 px-2.5 py-1.5">
-                <dt className="truncate text-[10.5px] text-stone-500">{libellePari(code)}</dt>
+                <dt className="break-words text-[10.5px] leading-tight text-stone-500">{libellePari(code)}</dt>
                 <dd className="font-display text-[14px] font-bold tabular-nums text-brand-dark">
                   {formatRapport(val)} €
                 </dd>

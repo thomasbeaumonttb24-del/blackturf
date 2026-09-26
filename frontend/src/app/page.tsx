@@ -187,13 +187,14 @@ function buildFaq(tr: TrackRecord | null): Array<{ q: string; r: string }> {
 async function fetchTrackRecord(): Promise<TrackRecord | null> {
   const base = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
   try {
-    // 900 s, comme /track-record (`revalidate` de son layout). À 3 600 s, l'accueil
+    // 60 s, comme /track-record (`revalidate` de son layout). À 3 600 s, l'accueil
     // gardait pendant une heure les chiffres figés au build alors que le palmarès
     // affichait déjà les nouveaux : constaté en prod le 2026-09-09, juste après le
     // correctif des disqualifiés — 31,8 % ici contre 28,6 % là-bas, pour la même
     // phrase. L'API sert ce calcul depuis son propre cache Redis, le raccourcir ne
-    // coûte donc rien à la base.
-    const res = await fetch(`${base}/api/v1/stats/track-record`, { next: { revalidate: 900 } });
+    // coûte donc rien à la base. L'API recalcule dans la minute qui suit chaque
+    // course intégrée : garder la page plus longtemps annulerait ce gain.
+    const res = await fetch(`${base}/api/v1/stats/track-record`, { next: { revalidate: 60 } });
     if (!res.ok) return null;
     const d = await res.json();
     const g = d?.global ?? {};
@@ -285,11 +286,11 @@ export default async function HomePage() {
 
           <div className="mx-auto mt-5 grid w-full max-w-md grid-cols-2 gap-2 sm:mt-8 sm:flex sm:max-w-none sm:justify-center sm:gap-3">
             <Button size="xl" asChild
-              className="press btn-shimmer h-12 rounded-xl bg-brand-gold px-3 text-sm font-bold text-brand-dark shadow-lg shadow-amber-500/30 hover:bg-brand-gold-deep sm:h-14 sm:px-10 sm:text-base">
-              <Link href="/inscription">Essai gratuit 7 jours <ArrowRight className="ml-1 hidden h-5 w-5 sm:inline" /></Link>
+              className="press btn-shimmer h-auto min-h-12 whitespace-normal rounded-xl bg-brand-gold px-2 py-2 text-center text-sm font-bold leading-tight text-brand-dark shadow-lg shadow-amber-500/30 hover:bg-brand-gold-deep sm:h-14 sm:px-10 sm:text-base">
+              <Link href="/inscription">Essai gratuit 7&nbsp;jours <ArrowRight className="ml-1 hidden h-5 w-5 sm:inline" /></Link>
             </Button>
             <Button variant="outline" size="xl" asChild
-              className="press h-12 rounded-xl border-white/25 bg-white/10 px-3 text-sm text-white backdrop-blur-sm hover:bg-white/20 hover:text-white sm:h-14 sm:px-10 sm:text-base">
+              className="press h-auto min-h-12 whitespace-normal rounded-xl border-white/25 bg-white/10 px-2 py-2 text-center text-sm leading-tight text-white backdrop-blur-sm hover:bg-white/20 hover:text-white sm:h-14 sm:px-10 sm:text-base">
               <Link href="/programme"><span className="sm:hidden">Courses du jour</span><span className="hidden sm:inline">Voir les courses du jour</span></Link>
             </Button>
           </div>
@@ -526,7 +527,7 @@ export default async function HomePage() {
                   {EXAMPLE_PICKS.map((h) => (
                     <div key={h.rank} className={`flex items-center gap-2.5 rounded-xl px-3 py-2 ${h.rank === 1 ? "bg-amber-50 ring-1 ring-amber-200" : "bg-gray-50"}`}>
                       <span className={`num-display text-xs font-black w-7 ${h.rank === 1 ? "text-brand-gold-dark" : "text-gray-600"}`}>N°{h.num}</span>
-                      <span className="text-sm font-medium text-gray-900 flex-1 truncate">{h.nom}</span>
+                      <span className="text-sm font-medium text-gray-900 flex-1 break-words">{h.nom}</span>
                       <span className="num-display text-xs font-bold text-gray-700 w-9 text-right">{h.p}%</span>
                       <span className="text-[11px] font-mono text-gray-600 w-8 text-right">{h.cote}</span>
                     </div>

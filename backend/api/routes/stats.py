@@ -539,6 +539,12 @@ async def dashboard_summary(
 # ─────────────────────────────────────────────────────────────
 TRACK_RECORD_CACHE_KEY = "stats:track-record"
 TRACK_RECORD_FRESH_TTL = 3600   # 1 h de fraîcheur
+# Posé par le pipeline post-course dès qu'une course est journalisée : le job
+# `job_track_record_a_jour` (chaque minute) recalcule alors sans attendre l'heure.
+# Distinct du drapeau `:fresh` : un recalcul déjà lancé AVANT l'arrivée réécrirait
+# `:fresh` en finissant et masquerait la nouvelle course ; `:dirty`, lui, n'est
+# effacé qu'au DÉBUT d'un calcul, donc une course arrivée pendant reste en attente.
+TRACK_RECORD_DIRTY_KEY = f"{TRACK_RECORD_CACHE_KEY}:dirty"
 
 # Références fortes sur les tâches de fond : sans ça, asyncio peut collecter une
 # tâche non référencée avant sa fin (le recalcul serait tué en cours de route).
@@ -598,6 +604,10 @@ async def refresh_track_record_cache() -> bool:
     if not verrou:
         return False            # un recalcul est déjà en cours ailleurs
     try:
+        try:
+            await redis.delete(TRACK_RECORD_DIRTY_KEY)
+        except Exception:
+            pass
         async with AsyncSessionLocal() as session:
             result = await _compute_track_record(session)
         await _cache_set_swr(redis, TRACK_RECORD_CACHE_KEY, result,
@@ -612,6 +622,34 @@ async def refresh_track_record_cache() -> bool:
             await redis.delete(lock_key)
         except Exception:
             pass
+
+
+async def marquer_track_record_perime() -> None:
+    """Signale qu'une course vient d'être journalisée (race_learning_log).
+
+    Appelé depuis le worker RQ, qui meurt avec son job : on n'y lance donc pas le
+    calcul (~29 s), on pose seulement les drapeaux. La version en cache reste servie
+    (SWR) jusqu'au recalcul par `job_track_record_a_jour`, dans la minute."""
+    from db.redis_client import get_redis as _get_redis
+    try:
+        redis = await _get_redis()
+        await redis.set(TRACK_RECORD_DIRTY_KEY, "1", ex=_SWR_STALE_TTL)
+        await redis.delete(f"{TRACK_RECORD_CACHE_KEY}:fresh")
+    except Exception as e:
+        log.warning("stats.track_record.mark_stale_failed", error=str(e)[:200])
+
+
+async def track_record_a_recalculer() -> bool:
+    """Vrai si une course a été intégrée depuis le dernier calcul, ou si le cache
+    n'est plus frais."""
+    from db.redis_client import get_redis as _get_redis
+    try:
+        redis = await _get_redis()
+        if await redis.exists(TRACK_RECORD_DIRTY_KEY):
+            return True
+        return not await redis.exists(f"{TRACK_RECORD_CACHE_KEY}:fresh")
+    except Exception:
+        return False
 
 
 async def _compute_track_record(db: AsyncSession) -> dict:

@@ -112,7 +112,7 @@ export function VerdictAlgoLigne({ v, courseId }: { v: SeoVerdict; courseId: str
           {/* Numéro seul sur téléphone : le nom, coupé à dix lettres, poussait
               la cote et la place d'arrivée sur deux lignes étroites. */}
           <CasaqueNumero numero={v.favori_numero} courseId={courseId} />
-          <span className="hidden min-w-0 truncate sm:inline">{nomTitre(v.favori_nom)}</span>
+          <span className="hidden min-w-0 sm:inline">{nomTitre(v.favori_nom)}</span>
           {v.favori_cote != null && (
             <span className="whitespace-nowrap text-stone-600">à {v.favori_cote.toLocaleString("fr-FR", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}</span>
           )}
@@ -145,13 +145,14 @@ const MEDAILLE_AUTRE = "from-slate-500 via-slate-600 to-slate-800 text-white rin
 /** Ce qu'est devenu le cheval à l'arrivée, en pastille. */
 function issue(position: number | null) {
   if (position === 1)
-    return { label: "Gagnant", cls: "bg-gradient-to-b from-emerald-400 to-emerald-600 text-white shadow-[0_2px_0_#047857]" };
+    return { label: "Gagnant", court: "1er", cls: "bg-gradient-to-b from-emerald-400 to-emerald-600 text-white shadow-[0_2px_0_#047857]" };
   if (position === 2 || position === 3)
-    return { label: `Arrivé ${ordinal(position)}`, cls: "bg-gradient-to-b from-amber-300 to-amber-500 text-amber-950 shadow-[0_2px_0_#b45309]" };
+    return { label: `Arrivé ${ordinal(position)}`, court: ordinal(position), cls: "bg-gradient-to-b from-amber-300 to-amber-500 text-amber-950 shadow-[0_2px_0_#b45309]" };
   if (position === 4 || position === 5)
-    return { label: `Arrivé ${ordinal(position)}`, cls: "bg-gradient-to-b from-sky-100 to-sky-200 text-sky-900 shadow-[0_2px_0_#7dd3fc]" };
+    return { label: `Arrivé ${ordinal(position)}`, court: ordinal(position), cls: "bg-gradient-to-b from-sky-100 to-sky-200 text-sky-900 shadow-[0_2px_0_#7dd3fc]" };
   return {
     label: position != null ? `${ordinal(position)}` : "Non placé",
+    court: position != null ? `${ordinal(position)}` : "NP",
     cls: "bg-stone-100 text-stone-500 shadow-[0_2px_0_#d6d3d1]",
   };
 }
@@ -228,7 +229,7 @@ function LignePronostic({ h, courseId, probaMax }: { h: SeoPronoCheval; courseId
 
   return (
     <li
-      className={`flex items-center gap-2.5 rounded-xl bg-gradient-to-b from-white to-stone-100 px-2 py-2 text-slate-900 transition-transform duration-200 hover:-translate-y-0.5 sm:gap-3 sm:px-2.5 ${
+      className={`flex items-center gap-2 rounded-xl bg-gradient-to-b from-white to-stone-100 px-2 py-2 text-slate-900 transition-transform duration-200 hover:-translate-y-0.5 sm:gap-3 sm:px-2.5 ${
         gagnant
           ? "shadow-[0_3px_0_#059669,0_0_22px_-2px_rgba(52,211,153,.55)] ring-2 ring-emerald-400"
           : "shadow-[0_3px_0_#cbd5e1,0_10px_18px_-10px_rgba(0,0,0,.7)]"
@@ -247,10 +248,12 @@ function LignePronostic({ h, courseId, probaMax }: { h: SeoPronoCheval; courseId
       <CasaqueNumero numero={h.numero} courseId={courseId} />
 
       <div className="min-w-0 flex-1">
-        <p className="truncate text-[13px] font-bold leading-tight" title={nomTitre(h.nom)}>
+        {/* Nom entier, sur deux lignes au besoin : tronqué, il tombait à six
+            lettres sur téléphone (« Joyeus… »). */}
+        <p className="break-words text-[13px] font-bold leading-tight">
           {nomTitre(h.nom) || `N°${h.numero}`}
         </p>
-        <div className="mt-1 flex items-center gap-2">
+        <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5">
           {h.proba != null && (
             <span
               className="h-1.5 w-14 shrink-0 overflow-hidden rounded-full bg-stone-200 shadow-[inset_0_1px_1px_rgba(0,0,0,.15)] sm:w-20"
@@ -262,7 +265,7 @@ function LignePronostic({ h, courseId, probaMax }: { h: SeoPronoCheval; courseId
               />
             </span>
           )}
-          <span className="truncate text-[10.5px] tabular-nums text-stone-500">
+          <span className="whitespace-nowrap text-[10.5px] tabular-nums text-stone-500">
             {h.proba != null && <>{pct(h.proba)}<span className="hidden sm:inline"> de victoire</span></>}
             {h.proba != null && cote && " · "}
             {cote && <>cote {cote}</>}
@@ -274,7 +277,9 @@ function LignePronostic({ h, courseId, probaMax }: { h: SeoPronoCheval; courseId
         className={`inline-flex shrink-0 items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-bold tabular-nums ${res.cls}`}
       >
         {gagnant && <Trophy className="h-3 w-3" aria-hidden="true" />}
-        {res.label}
+        {/* « Arrivé 3e » prenait sur téléphone toute la place du nom. */}
+        <span className="sm:hidden" title={res.label}>{res.court}</span>
+        <span className="hidden sm:inline">{res.label}</span>
       </span>
     </li>
   );

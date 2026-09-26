@@ -105,8 +105,8 @@ function SearchPalette({ onClose }: { onClose: () => void }) {
                 >
                   <span className="text-base flex-shrink-0">{TYPE_ICONS[r.type] ?? "🔍"}</span>
                   <div className="min-w-0">
-                    <div className="text-sm font-medium text-gray-900 truncate">{r.label}</div>
-                    <div className="text-xs text-gray-600 truncate">{r.sub}</div>
+                    <div className="text-sm font-medium text-gray-900 break-words">{r.label}</div>
+                    <div className="text-xs text-gray-600 break-words">{r.sub}</div>
                   </div>
                 </button>
               </li>
@@ -332,7 +332,7 @@ export function Navbar() {
                     <div className="h-6 w-6 rounded-full bg-brand-gold-tint flex items-center justify-center ring-1 ring-brand-gold/30">
                       <User className="h-3 w-3 text-brand-gold-dark" />
                     </div>
-                    <span className="hidden sm:block max-w-[100px] truncate text-gray-700 font-medium">
+                    <span className="hidden whitespace-nowrap sm:block text-gray-700 font-medium">
                       {user.prenom || user.email.split("@")[0]}
                     </span>
                     <Badge

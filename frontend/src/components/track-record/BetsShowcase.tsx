@@ -158,7 +158,7 @@ export function BetTicket({ b, rank, dark = false }: { b: WinningBet; rank?: num
                 {b.code ?? "Course"}
                 <ArrowUpRight className="h-3.5 w-3.5 transition-transform group-hover/l:-translate-y-0.5 group-hover/l:translate-x-0.5" aria-hidden="true" />
               </Link>
-              <p className={cn("truncate text-xs", dark ? "text-white/60" : "text-stone-500")}>{b.hippodrome}</p>
+              <p className={cn("break-words text-xs", dark ? "text-white/60" : "text-stone-500")}>{b.hippodrome}</p>
             </div>
             <span className={cn("inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1", dark ? pm.dark : pm.cls)}>
               {pm.label}
@@ -273,7 +273,7 @@ function CartePodium({ b, place }: { b: WinningBet; place: 0 | 1 | 2 }) {
             >
               {b.code ?? "Course"} <ArrowUpRight className="h-3.5 w-3.5" aria-hidden="true" />
             </Link>
-            <p className="truncate text-xs text-white/55">{b.hippodrome}</p>
+            <p className="break-words text-xs text-white/55">{b.hippodrome}</p>
           </div>
           <div className="shrink-0 text-right">
             <p className="font-display text-lg font-black leading-none tabular-nums text-white">{q ? q.heure : "—"}</p>

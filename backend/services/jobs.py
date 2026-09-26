@@ -503,6 +503,20 @@ async def job_defi_rappels() -> None:
         log.error("jobs.defi_rappels.error", error=str(e))
 
 
+async def job_track_record_a_jour() -> None:
+    """Recalcule le palmarès dès qu'une course a été intégrée (drapeau posé par le
+    pipeline post-course), sans attendre l'heure de fraîcheur ni `warm_caches`.
+    Ne fait rien le reste du temps : le calcul (~29 s) ne tourne qu'au besoin."""
+    from api.routes.stats import refresh_track_record_cache, track_record_a_recalculer
+
+    try:
+        if await track_record_a_recalculer():
+            reecrit = await refresh_track_record_cache()
+            log.info("jobs.track_record_a_jour", reecrit=reecrit)
+    except Exception as e:  # noqa: BLE001
+        log.warning("jobs.track_record_a_jour.failed", err=str(e)[:120])
+
+
 def start_scheduler() -> None:
     scheduler = get_scheduler()
 
@@ -635,6 +649,18 @@ def start_scheduler() -> None:
         id="relances_paiement",
         replace_existing=True,
         misfire_grace_time=1800,
+    )
+
+    # Palmarès à jour dans la minute qui suit chaque course intégrée.
+    # max_instances=1 : un calcul (~29 s) ne se chevauche jamais avec le suivant.
+    scheduler.add_job(
+        job_track_record_a_jour,
+        CronTrigger(minute="*"),
+        id="track_record_a_jour",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=30,
     )
 
     # Pre-chauffe caches pages publiques lentes — toutes les 30 min

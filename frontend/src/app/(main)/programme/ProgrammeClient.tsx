@@ -561,7 +561,7 @@ function TimelineRow({ course, reunionNum, vbCount, apercu, delay, onOuvrir }: {
           <span className={cn("inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-bold tabular-nums ring-1", codeCls)} style={{ fontFamily: "var(--font-space-grotesk), sans-serif" }}>
             R{reunionNum}C{course.numero}
           </span>
-          <span className={cn("max-w-full truncate text-sm font-semibold sm:max-w-[230px]", isDone ? "text-gray-600" : "text-gray-800")}>
+          <span className={cn("min-w-0 break-words text-sm font-semibold", isDone ? "text-gray-600" : "text-gray-800")}>
             <span className="text-gray-600">{course.hippodrome_nom}</span>
             <span className="text-gray-300"> · </span>
             {course.nom || `Course ${course.numero}`}
