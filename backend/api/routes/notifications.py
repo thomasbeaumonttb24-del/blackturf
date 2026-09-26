@@ -79,6 +79,8 @@ CATEGORIES: dict[str, str] = {
     "resultat_pari": "resultat",
     "resultat_defi": "resultat",
     "defi_recompense": "systeme",
+    "defi_rang": "resultat",
+    "defi_rappel": "systeme",
     "resultat_value_bet": "resultat",
     "free_plan_announcement": "systeme",
     "systeme": "systeme",
@@ -279,6 +281,9 @@ def _alerte_dict(a: AlerteLog) -> dict[str, Any]:
         "cheval": payload.get("nom_cheval") or payload.get("cheval"),
         "niveau": payload.get("niveau"),
         "nb": payload.get("nb_value_bets"),
+        # Lien interne propre à l'alerte (Défi du mois…), jamais une URL externe.
+        "lien": lien if isinstance(lien := payload.get("lien"), str) and lien.startswith("/")
+        and not lien.startswith("//") else None,
     }
 
 

@@ -34,6 +34,8 @@ interface NotifItem {
   cheval: string | null;
   niveau: number | null;
   nb: number | null;
+  /** Lien interne de l'alerte (ex. « /defi »), quand elle ne vise pas une course. */
+  lien?: string | null;
 }
 
 interface NotifsResponse {
@@ -360,6 +362,15 @@ export default function NotificationsPage() {
                     Voir la course <ChevronRight className="w-3 h-3" />
                   </Link>
                 )}
+                {!n.course_id && n.lien && (
+                  <Link
+                    href={n.lien}
+                    onClick={(e) => e.stopPropagation()}
+                    className="inline-flex items-center gap-1 text-xs text-amber-700 hover:text-amber-700 mt-1.5 transition-colors"
+                  >
+                    {n.lien.startsWith("/defi") ? "Voir le Défi du mois" : "Ouvrir"} <ChevronRight className="w-3 h-3" />
+                  </Link>
+                )}
               </div>
             </div>
           ))}
@@ -463,14 +474,14 @@ export default function NotificationsPage() {
               <ToggleSwitch
                 checked={prefs?.resultats_suivis ?? true}
                 onChange={(v) => updatePref({ resultats_suivis: v })}
-                label="Résultats des courses suivies"
-                description="Notification dès qu'une course que vous suivez est terminée"
+                label="Résultats et classement du Défi"
+                description="Vos paris du Défi réglés, la 1re place ou le podium pris ou perdu, les courses suivies terminées"
               />
               <ToggleSwitch
                 checked={prefs?.alertes_systeme ?? true}
                 onChange={(v) => updatePref({ alertes_systeme: v })}
-                label="Alertes système"
-                description="Maintenance, mises à jour du modèle IA, informations importantes"
+                label="Rappels et annonces"
+                description="Rappels du Défi du mois (nouvelle cagnotte, paris manquants pour être classé, fin de mois), maintenance, informations importantes"
               />
             </div>
           </CardContent>

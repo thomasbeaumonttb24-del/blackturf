@@ -249,6 +249,18 @@ export type DefiCourse = {
   solde: number | null;
   tendance: { nb_joueurs: number; nb_paris: number; cheval_plus_joue: number | null };
   mes_paris: DefiPari[];
+  /** Paris du dernier plan de mise que CE joueur a consulté sur la course. */
+  plan?: DefiPlanPari[];
+};
+
+export type DefiPlanPari = {
+  type: DefiTypePari;
+  /** Libellé du plan (« Tiercé Ordre », « Multi en 5 »…). */
+  libelle: string;
+  chevaux: number[];
+  niveau: string | null;
+  niveau_label: string | null;
+  deja_joue: boolean;
 };
 
 export type DefiPalmares = { mois: string; rang: number; nom: string; solde: number; plan_offert: string }[];

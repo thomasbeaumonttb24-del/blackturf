@@ -3568,6 +3568,7 @@ export default function CoursePage({
               partants={course.partants}
               connecte={!!user}
               prefill={defiPrefill}
+              voirPlan={() => allerA("plan")}
             />
             <DefiClassementLive top={5} />
           </>

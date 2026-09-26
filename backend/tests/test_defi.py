@@ -578,3 +578,35 @@ async def test_api_course_expose_les_types_disponibles(client, db, auth_headers)
     multi = types[2]
     assert (multi["min"], multi["max"], multi["libelle"]) == (4, 7, "Multi")
     assert types[1]["ordre"] is True and "drapeau" not in types[1]
+
+
+async def test_plan_consulte_propose_a_cote_de_la_carte(db):
+    from api.config import get_settings
+    from services.bet_plan_snapshots import subject_hash
+
+    u = await _user(db)
+    autre = await _user(db, email="autre@blackturf.fr")
+    course = await _course(db, nb=16, paris_disponibles=["E_SIMPLE_PLACE", "E_TIERCE", "E_COUPLE_GAGNANT"])
+    plan = {"niveaux": [
+        {"niveau": "securite", "label": "Sécurité", "paris": [
+            {"type": "Simple Placé", "chevaux": [{"numero": 7}]},
+            {"type": "Couplé Gagnant", "chevaux": [{"numero": 7}, {"numero": 3}]}]},
+        {"niveau": "coup", "label": "Coup à tenter", "paris": [
+            {"type": "Tiercé Ordre", "chevaux": [{"numero": 3}, {"numero": 7}, {"numero": 1}]},
+            {"type": "Tiercé Désordre", "chevaux": [{"numero": 3}, {"numero": 7}, {"numero": 1}]},
+            {"type": "Quinté+", "chevaux": [{"numero": n} for n in (1, 2, 3, 4, 5)]}]},
+    ]}
+    db.add(BetPlanSnapshot(course_id="C1", subject_hash=subject_hash(u.user_id, get_settings().secret_key),
+                           profil="equilibre", montant_demande=10, plan=plan, plan_hash="h",
+                           cotes_utilisees={}, algo_config={}, algo_version="t", nb_paris=5,
+                           montant_joue=5, emitted_at=MAINTENANT, is_pre_course=True))
+    await db.commit()
+    joue = await defi.engager_pari(db, u, "C1", "Couplé Gagnant", [3, 7], 10)
+
+    proposes = await defi.paris_du_plan(db, u.user_id, course, [joue])
+    # Quinté+ non ouvert sur la course, Tiercé Désordre = même ticket que l'Ordre.
+    assert [(p["type"], p["chevaux"], p["deja_joue"]) for p in proposes] == [
+        ("Simple Placé", [7], False), ("Couplé Gagnant", [7, 3], True), ("Tiercé", [3, 7, 1], False)]
+    assert proposes[0]["niveau_label"] == "Sécurité"
+    # Un joueur qui n'a pas consulté le plan ne le voit pas ici.
+    assert await defi.paris_du_plan(db, autre.user_id, course, []) == []

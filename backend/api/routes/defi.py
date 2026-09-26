@@ -187,6 +187,8 @@ async def get_course(
         "solde": solde,
         "tendance": await defi.tendance_course(db, course_id, defi.depot_ouvert(course)),
         "mes_paris": await _pari_out(db, mes_paris),
+        # Le plan que CE joueur a déjà consulté sur la course (vide sinon).
+        "plan": await defi.paris_du_plan(db, user.user_id, course, mes_paris) if user else [],
     }
 
 

@@ -14,8 +14,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import useSWR from "swr";
 import { toast } from "sonner";
-import { ArrowRight, Check, Info, Loader2, Lock, Ticket, Users } from "lucide-react";
-import { defiApi, type DefiCourse, type DefiRegles, type DefiTypeInfo, type DefiTypePari } from "@/lib/api";
+import { ArrowRight, Calculator, Check, Info, Loader2, Lock, ShieldCheck, Sparkles, Ticket, TrendingUp, Users, Zap } from "lucide-react";
+import { defiApi, type DefiCourse, type DefiPlanPari, type DefiRegles, type DefiTypeInfo, type DefiTypePari } from "@/lib/api";
 import { CompteGratuitCta } from "@/components/billing/CompteGratuitCta";
 import { CasaqueNumero } from "@/components/courses/identite-cheval";
 import {
@@ -50,11 +50,93 @@ function Etape({ n, titre, droite, children }: { n: number; titre: string; droit
   );
 }
 
-export function DefiCourseCard({ courseId, partants, connecte, prefill }: {
+const NIVEAUX: Record<string, { icone: typeof ShieldCheck; classe: string }> = {
+  securite: { icone: ShieldCheck, classe: "bg-emerald-50 text-emerald-800 ring-emerald-200" },
+  rendement: { icone: TrendingUp, classe: "bg-amber-50 text-amber-800 ring-amber-200" },
+  coup: { icone: Zap, classe: "bg-rose-50 text-rose-800 ring-rose-200" },
+};
+
+/** Même ticket ? (l'ordre ne compte que pour les paris à l'ordre) */
+function memeTicket(a: { type: string; chevaux: number[] }, type: string, chevaux: number[], ordre: boolean) {
+  if (a.type !== type || a.chevaux.length !== chevaux.length) return false;
+  const x = ordre ? a.chevaux : [...a.chevaux].sort((m, n) => m - n);
+  const y = ordre ? chevaux : [...chevaux].sort((m, n) => m - n);
+  return x.every((v, i) => v === y[i]);
+}
+
+/**
+ * Les paris du plan de mise que le joueur a DÉJÀ consulté sur cette course, à
+ * jouer d'un clic. Rien n'est révélé ici : sans plan consulté, la liste est vide.
+ */
+function PlanConsulte({ paris, types, onJouer, actif }: {
+  paris: DefiPlanPari[];
+  types: DefiTypeInfo[];
+  onJouer: (p: DefiPlanPari) => void;
+  actif: (p: DefiPlanPari) => boolean;
+}) {
+  return (
+    <section className="border-b border-stone-100 bg-gradient-to-b from-amber-50/60 to-transparent px-5 py-4">
+      <div className="mb-2.5 flex items-center justify-between gap-2">
+        <h4 className="flex items-center gap-2 text-[13px] font-bold text-slate-900">
+          <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-white text-amber-700 ring-1 ring-inset ring-amber-200">
+            <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
+          </span>
+          Votre plan BlackTurf sur cette course
+        </h4>
+        <span className="text-[11px] text-slate-500">Un clic pour le reprendre</span>
+      </div>
+      <ul className="flex flex-col gap-1.5">
+        {paris.map((p) => {
+          const niv = NIVEAUX[p.niveau ?? ""];
+          const Icone = niv?.icone ?? Calculator;
+          const ordre = types.find((t) => t.type === p.type)?.ordre ?? false;
+          const choisi = actif(p);
+          return (
+            <li key={`${p.libelle}-${p.chevaux.join("-")}`}
+              className={cn("flex flex-wrap items-center gap-2 rounded-xl bg-white px-3 py-2 ring-1 ring-inset transition-all",
+                choisi ? "ring-2 ring-amber-500" : "ring-stone-200")}>
+              {p.niveau_label && (
+                <span className={cn("inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10.5px] font-bold ring-1 ring-inset", niv?.classe ?? "bg-stone-50 text-slate-600 ring-stone-200")}>
+                  <Icone className="h-3 w-3" aria-hidden="true" /> {p.niveau_label}
+                </span>
+              )}
+              <span className="text-[12.5px] font-bold text-slate-900">{p.libelle}</span>
+              <span className="flex flex-wrap items-center gap-1">
+                {p.chevaux.map((n, i) => (
+                  <span key={n} className="inline-flex items-center gap-1">
+                    {i > 0 && <span className="text-[11px] text-slate-400">{ordre ? "–" : "+"}</span>}
+                    <CasaqueNumero numero={n} />
+                  </span>
+                ))}
+              </span>
+              <span className="ml-auto">
+                {p.deja_joue ? (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-bold text-emerald-700 ring-1 ring-inset ring-emerald-200">
+                    <Check className="h-3 w-3" aria-hidden="true" /> Joué
+                  </span>
+                ) : (
+                  <button type="button" onClick={() => onJouer(p)} aria-pressed={choisi}
+                    className={cn("inline-flex min-h-[34px] items-center gap-1 rounded-lg px-3 text-[12px] font-bold ring-1 ring-inset transition-colors",
+                      choisi ? "bg-amber-600 text-white ring-amber-700" : "bg-amber-50 text-amber-900 ring-amber-300 hover:bg-amber-100")}>
+                    {choisi ? <><Check className="h-3.5 w-3.5" aria-hidden="true" /> Sélectionné</> : "Jouer ce pari"}
+                  </button>
+                )}
+              </span>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+  );
+}
+
+export function DefiCourseCard({ courseId, partants, connecte, prefill, voirPlan }: {
   courseId: string;
   partants: PartantDefi[];
   connecte: boolean;
   prefill?: DefiPrefill | null;
+  /** Ouvre l'onglet Plan de mise (lien affiché tant qu'aucun plan n'est consulté). */
+  voirPlan?: () => void;
 }) {
   const { data: regles = DEFI_REGLES_DEFAUT as unknown as DefiRegles } = useSWR(
     "/defi/regles", () => defiApi.regles().then((r) => r.data), { revalidateOnFocus: false });
@@ -105,6 +187,14 @@ export function DefiCourseCard({ courseId, partants, connecte, prefill }: {
   const pret = chevaux.length >= min && chevaux.length <= max && pointsJoues >= regles.points_min;
   const prix = regles.recompenses?.[0];
   const mois = data ? moisLabel(data.mois) : null;
+
+  const planConsulte = data?.plan ?? [];
+  const correspondPlan = planConsulte.some((p) => memeTicket(p, type, chevaux, aOrdre));
+
+  function jouerDuPlan(p: DefiPlanPari) {
+    setType(p.type);
+    setChevaux(p.chevaux);
+  }
 
   function choisirType(t: DefiTypeInfo) {
     setType(t.type);
@@ -176,6 +266,20 @@ export function DefiCourseCard({ courseId, partants, connecte, prefill }: {
         <>
           {data.ouvert && restants > 0 && pointsMax >= regles.points_min ? (
             <>
+              {planConsulte.length > 0 ? (
+                <PlanConsulte paris={planConsulte} types={types} onJouer={jouerDuPlan}
+                  actif={(p) => memeTicket(p, type, chevaux, types.find((t) => t.type === p.type)?.ordre ?? false)} />
+              ) : voirPlan && (
+                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-stone-100 px-5 py-3 text-[12px] text-slate-600">
+                  <span className="inline-flex items-center gap-1.5">
+                    <Calculator className="h-3.5 w-3.5 text-amber-700" aria-hidden="true" />
+                    Besoin d&apos;une idée ? Le plan de mise propose des paris pour cette course.
+                  </span>
+                  <button type="button" onClick={voirPlan} className="inline-flex items-center gap-0.5 font-semibold text-amber-800 hover:underline">
+                    Voir le plan <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
+                  </button>
+                </div>
+              )}
               <Etape n={1} titre="Type de pari"
                 droite={<span className="text-[11px] text-slate-500">{types.length} pari{types.length > 1 ? "s" : ""} ouvert{types.length > 1 ? "s" : ""} sur cette course</span>}>
                 {prefillRefuse && (
@@ -285,8 +389,13 @@ export function DefiCourseCard({ courseId, partants, connecte, prefill }: {
               {/* Le ticket : ce qui part, en un coup d'œil, avant de valider. */}
               <div className="px-5 pb-5">
                 <div className="relative rounded-2xl border-2 border-dashed border-amber-300 bg-gradient-to-b from-amber-50/80 to-white p-4">
-                  <div className="flex items-center gap-2 text-[10.5px] font-bold uppercase tracking-[0.14em] text-amber-800">
-                    <Ticket className="h-3.5 w-3.5" aria-hidden="true" /> Mon ticket
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="flex items-center gap-2 text-[10.5px] font-bold uppercase tracking-[0.14em] text-amber-800">
+                      <Ticket className="h-3.5 w-3.5" aria-hidden="true" /> Mon ticket
+                    </span>
+                    {chevaux.length >= min && (
+                      <OriginePari origine={correspondPlan ? "plan" : "perso"} />
+                    )}
                   </div>
                   <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
                     <div className="flex flex-wrap items-center gap-1.5 text-[14px] font-bold text-slate-900">

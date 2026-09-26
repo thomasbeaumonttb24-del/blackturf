@@ -202,6 +202,13 @@ def nom_public(user: User) -> str:
     return "Joueur " + hashlib.sha256(user.user_id.encode()).hexdigest()[:4].upper()
 
 
+def formater_points(v: float) -> str:
+    """« 1 234,5 pts » : format des messages envoyés aux joueurs."""
+    v = round(float(v), 1)
+    txt = f"{v:,.1f}".replace(",", "\u00a0").replace(".", ",").removesuffix(",0")
+    return f"{txt} pts"
+
+
 def points_nets(p: DefiPari) -> float:
     """Contribution d'un pari au solde : mise engagée retirée, retour ajouté."""
     return (p.points_retour or 0.0) - p.points
@@ -230,6 +237,49 @@ async def _plans_emis(session, user_id: str, course_id: str) -> list[dict]:
         )
     )).scalars().all()
     return [r for r in rows if isinstance(r, dict)]
+
+
+async def paris_du_plan(session, user_id: str, course: Course,
+                        deja_joues: list[DefiPari]) -> list[dict]:
+    """Paris du DERNIER plan de mise montré à ce joueur sur cette course, traduits en
+    paris du défi (pour les jouer d'un clic à côté de la carte).
+
+    Jamais un plan qu'il n'a pas vu : un compte sans quota ne découvre ici rien de
+    plus que ce que l'onglet Plan de mise lui a déjà affiché."""
+    from api.config import get_settings
+    from services.bet_plan_snapshots import subject_hash
+
+    plan = (await session.execute(
+        select(BetPlanSnapshot.plan).where(
+            BetPlanSnapshot.course_id == course.course_id,
+            BetPlanSnapshot.subject_hash == subject_hash(user_id, get_settings().secret_key),
+            BetPlanSnapshot.is_pre_course == True,  # noqa: E712
+        ).order_by(BetPlanSnapshot.emitted_at.desc()).limit(1)
+    )).scalars().first()
+    if not isinstance(plan, dict):
+        return []
+    dispo = {t["type"] for t in types_disponibles(course)}
+    out: list[dict] = []
+    vus: set[tuple] = set()
+    for niveau in plan.get("niveaux") or []:
+        for pari in niveau.get("paris") or []:
+            libelle = str(pari.get("type") or "")
+            t = famille_type(libelle)
+            nums = [int(c["numero"]) for c in (pari.get("chevaux") or []) if c.get("numero") is not None]
+            spec = TYPES_DEFI.get(t)
+            if t not in dispo or spec is None or not spec["min"] <= len(nums) <= spec["max"]:
+                continue
+            cle = (t, tuple(nums) if spec["ordre"] else tuple(sorted(nums)))
+            if cle in vus:
+                continue
+            vus.add(cle)
+            out.append({
+                "type": t, "libelle": libelle, "chevaux": nums,
+                "niveau": niveau.get("niveau"), "niveau_label": niveau.get("label"),
+                "deja_joue": any(_meme_pari(libelle, nums, p.type_pari, list(p.chevaux))
+                                 for p in deja_joues),
+            })
+    return out
 
 
 def _meme_pari(type_plan: str, nums_plan: list[int], type_defi: str, nums: list[int]) -> bool:
@@ -323,6 +373,12 @@ async def engager_pari(session, user: User, course_id: str, type_pari: str,
     if await solde(session, user.user_id, mois) < points:
         raise DefiErreur("Solde de points insuffisant pour ce mois.")
 
+    # 10e pari du mois : le joueur entre au classement et peut en déloger d'autres.
+    entre_au_classement = (await session.execute(text("""
+        SELECT COUNT(*) FROM defi_paris WHERE user_id = :u AND mois = :m
+    """), {"u": user.user_id, "m": mois})).scalar() == MIN_PARIS_CLASSEMENT - 1
+    avant = await classement(session, mois) if entre_au_classement else None
+
     type_pari = type_stocke(type_pari, len(nums), course)
     pari = DefiPari(
         user_id=user.user_id, mois=mois, course_id=course_id, type_pari=type_pari,
@@ -334,6 +390,9 @@ async def engager_pari(session, user: User, course_id: str, type_pari: str,
     await session.commit()
     invalider_classement()
     await session.refresh(pari)
+    if avant is not None:
+        from services.defi_rappels import notifier_rangs
+        await notifier_rangs(session, mois, avant)
     return pari
 
 
@@ -350,11 +409,17 @@ async def regler_course(session, course_id: str) -> int:
         return 0
     now = datetime.now(timezone.utc)
 
+    async def classements_avant() -> dict[str, list[dict]]:
+        # Classement avant règlement, pour prévenir ceux qui franchissent un seuil.
+        return {m: await classement(session, m) for m in {p.mois for p in paris}}
+
     if course.statut in STATUTS_COURSE_SANS_ARRIVEE:
+        avant = await classements_avant()
         for p in paris:
             p.statut, p.rapport, p.points_retour, p.regle_at = "rembourse", 1.0, float(p.points), now
         await session.commit()
         invalider_classement()
+        await _notifier_rangs(session, avant)
         return len(paris)
 
     if course.statut != "termine":
@@ -362,6 +427,7 @@ async def regler_course(session, course_id: str) -> int:
     res = await session.get(Resultat, course_id)
     if res is None or not res.classement:
         return 0
+    avant = await classements_avant()
     non_partants = set((await session.execute(
         select(Participation.numero).where(
             Participation.course_id == course_id,
@@ -393,7 +459,15 @@ async def regler_course(session, course_id: str) -> int:
     if n:
         await session.commit()
         invalider_classement()
+        await _notifier_rangs(session, avant)
     return n
+
+
+async def _notifier_rangs(session, avant: dict[str, list[dict]]) -> None:
+    from services.defi_rappels import notifier_rangs
+
+    for mois, lignes in avant.items():
+        await notifier_rangs(session, mois, lignes)
 
 
 def regler_ticket(type_pari: str, nums: list[int], classement: list[dict],

@@ -490,6 +490,19 @@ async def job_defi_entretien() -> None:
         log.error("jobs.defi_entretien.error", error=str(e))
 
 
+async def job_defi_rappels() -> None:
+    """Chaque jour — Défi du mois : nouvelle cagnotte, paris manquants pour être
+    classé, relance des inactifs, dernière ligne droite (une fois par palier)."""
+    try:
+        from db.database import AsyncSessionLocal
+        from services.defi_rappels import envoyer_rappels
+
+        async with AsyncSessionLocal() as session:
+            await envoyer_rappels(session)
+    except Exception as e:
+        log.error("jobs.defi_rappels.error", error=str(e))
+
+
 def start_scheduler() -> None:
     scheduler = get_scheduler()
 
@@ -501,6 +514,14 @@ def start_scheduler() -> None:
         id="defi_entretien",
         replace_existing=True,
         misfire_grace_time=1800,
+    )
+    # En fin de matinée : les courses de l'après-midi sont encore toutes ouvertes.
+    scheduler.add_job(
+        job_defi_rappels,
+        CronTrigger(hour=11, minute=13, timezone="Europe/Paris"),
+        id="defi_rappels",
+        replace_existing=True,
+        misfire_grace_time=3600,
     )
 
     scheduler.add_job(
