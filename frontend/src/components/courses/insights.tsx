@@ -240,24 +240,28 @@ export function ConfrontationsCard({ courseId }: { courseId: string }) {
           const bMene = p.b_victoires > p.a_victoires;
           return (
             <li key={i} className="rounded-xl border border-stone-100 bg-stone-50/60 px-3 py-2.5">
+              {/* Chaque côté : numéro fixe, puis le nom complet dès que l'écran
+                  le permet. Sur téléphone il n'y a la place que pour le numéro :
+                  avant, `truncate` y rétrécissait le badge, qui recouvrait un
+                  nom de toute façon coupé à quatre lettres. */}
               <div className="flex items-center gap-2 text-[13px]">
-                <span className="flex min-w-0 flex-1 items-baseline gap-1.5 truncate">
-                  <span className={cn("font-display text-[15px] font-bold tabular-nums", aMene ? "text-slate-900" : "text-stone-700")}>
+                <span className="flex min-w-0 flex-1 items-center gap-1.5">
+                  <span className={cn("shrink-0 font-display text-[15px] font-bold tabular-nums", aMene ? "text-slate-900" : "text-stone-700")}>
                     <CasaqueNumero numero={p.a_numero} />
                   </span>
-                  <span className={cn("truncate text-[12.5px]", aMene ? "font-semibold text-slate-800" : "text-stone-600")}>
+                  <span className={cn("hidden min-w-0 text-[12.5px] leading-tight sm:inline", aMene ? "font-semibold text-slate-800" : "text-stone-600")}>
                     {p.a_nom}
                   </span>
                 </span>
-                <span className="shrink-0 rounded-md bg-white px-2 py-0.5 font-display text-xs font-bold tabular-nums text-slate-900 ring-1 ring-stone-200">
+                <span className="shrink-0 whitespace-nowrap rounded-md bg-white px-2 py-0.5 font-display text-xs font-bold tabular-nums text-slate-900 ring-1 ring-stone-200">
                   {p.a_victoires} – {p.b_victoires}
                 </span>
-                <span className="flex min-w-0 flex-1 items-baseline justify-end gap-1.5 truncate">
-                  <span className={cn("font-display text-[15px] font-bold tabular-nums", bMene ? "text-slate-900" : "text-stone-700")}>
-                    <CasaqueNumero numero={p.b_numero} />
-                  </span>
-                  <span className={cn("truncate text-[12.5px]", bMene ? "font-semibold text-slate-800" : "text-stone-600")}>
+                <span className="flex min-w-0 flex-1 items-center justify-end gap-1.5 text-right">
+                  <span className={cn("hidden min-w-0 text-[12.5px] leading-tight sm:inline", bMene ? "font-semibold text-slate-800" : "text-stone-600")}>
                     {p.b_nom}
+                  </span>
+                  <span className={cn("shrink-0 font-display text-[15px] font-bold tabular-nums", bMene ? "text-slate-900" : "text-stone-700")}>
+                    <CasaqueNumero numero={p.b_numero} />
                   </span>
                 </span>
               </div>
@@ -1462,8 +1466,8 @@ export function PreuvesRecentesCard() {
                 {/* Le NUMÉRO d'abord, en gros : c'est ce qu'on coche sur un ticket
                     et ce qu'annonce le commentaire de course. Le nom sert à
                     reconnaître le cheval, pas à jouer. */}
-                <span className="mt-1.5 flex items-baseline gap-1.5 truncate">
-                  <span className="font-display text-[16px] font-bold leading-none text-slate-900">
+                <span className="mt-1.5 flex min-w-0 items-center gap-1.5">
+                  <span className="shrink-0 font-display text-[16px] font-bold leading-none text-slate-900">
                     <CasaqueNumero numero={c.gagnant_numero} />
                   </span>
                   <span className="truncate text-[12.5px] text-stone-600">
