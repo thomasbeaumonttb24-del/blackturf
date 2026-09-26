@@ -203,3 +203,18 @@ async def test_un_examen_sans_conclusion_laisse_quand_meme_une_trace(db):
     assert servi is None
     assert sc.exposant_en_cache() == sc.EXPOSANT_NEUTRE
     sc._cache = None
+
+
+def test_la_date_de_mise_en_service_est_liee_en_datetime():
+    """asyncpg refuse une chaîne pour une colonne horodatée ; SQLite l'accepte.
+
+    Une fois un exposant retenu (24/09), `applique_depuis` — une chaîne ISO du
+    JSON — partait telle quelle dans la requête, et l'étape échouait chaque nuit.
+    """
+    from datetime import datetime, timezone
+    dt = sc._depuis_en_datetime("2026-09-24T02:16:07.123456+00:00")
+    assert isinstance(dt, datetime)
+    assert dt == datetime(2026, 9, 24, 2, 16, 7, 123456, tzinfo=timezone.utc)
+    assert sc._depuis_en_datetime("2026-09-24T02:16:07").tzinfo is not None
+    assert sc._depuis_en_datetime(None) is None
+    assert sc._depuis_en_datetime("pas une date") is None
