@@ -7,100 +7,34 @@ on:
       - "**.md"
       - ".github/workflows/ci.yml"
 
-# Un seul déploiement à la fois sur le VPS. Le 2026-09-25, deux fusions à six
-# minutes d'écart (PR #16 et #17) ont lancé deux `docker compose up` en parallèle :
-# le nettoyage des conteneurs renommés de l'un a supprimé ceux que l'autre
-# recréait, les deux ont échoué avant le redémarrage et le site est resté en 502.
-# Les runs suivants attendent leur tour ; aucun n'est annulé en cours de route
-# (un `compose up` interrompu laisse justement ces conteneurs orphelins).
-concurrency:
-  group: deploy-production
-  cancel-in-progress: false
-
-env:
-  REGISTRY: ghcr.io
-  IMAGE_API: ghcr.io/${{ github.repository_owner }}/blackturf-api
-  IMAGE_FRONTEND: ghcr.io/${{ github.repository_owner }}/blackturf-frontend
+# Un seul déploiement à la fois sur le VPS — garanti par un VERROU SUR LE VPS
+# (flock), plus par la concurrence GitHub.
+#
+# Historique :
+# - 2026-09-25, PR #16/#17 : deux `docker compose up` en parallèle, le nettoyage
+#   de l'un a supprimé les conteneurs que l'autre recréait → site en 502.
+# - La parade `concurrency: deploy-production` sérialisait bien, mais GitHub ne
+#   garde qu'UN run en attente par groupe : à la troisième fusion rapprochée, le
+#   run en attente était annulé (#395 le 2026-09-26). Chaque déploiement repart de
+#   `origin/main`, donc rien n'était perdu, mais un run « annulé » ne prouve pas
+#   que la prod est à jour.
+# Désormais tous les runs démarrent ; sur le VPS, chacun attend son tour sur le
+# verrou puis déploie `origin/main`. Aucun n'est annulé, aucun ne se chevauche.
+#
+# Plus d'images GHCR : la prod est buildée sur le VPS (compose en `build:`), ces
+# images n'étaient lues par personne. Leur build prenait ~7 min par déploiement —
+# assez pour que les fusions s'empilent — et son échec bloquait le vrai
+# déploiement (#371, 2026-09-24). La CI (ci.yml) valide déjà les deux Dockerfile.
 
 jobs:
-  # ─── Build & Push Docker images ───────────────────────────────────────────
-  build-push:
-    name: Build & Push Images
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-
-    outputs:
-      api_tag: ${{ steps.meta-api.outputs.version }}
-      frontend_tag: ${{ steps.meta-frontend.outputs.version }}
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Log in to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      # ── API ──
-      - name: Docker meta (api)
-        id: meta-api
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.IMAGE_API }}
-          tags: |
-            type=sha,prefix=,suffix=,format=short
-            type=raw,value=latest
-
-      - name: Build & push API
-        uses: docker/build-push-action@v5
-        with:
-          context: ./backend
-          push: true
-          tags: ${{ steps.meta-api.outputs.tags }}
-          labels: ${{ steps.meta-api.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      # ── Frontend ──
-      - name: Docker meta (frontend)
-        id: meta-frontend
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.IMAGE_FRONTEND }}
-          tags: |
-            type=sha,prefix=,suffix=,format=short
-            type=raw,value=latest
-
-      - name: Build & push Frontend
-        uses: docker/build-push-action@v5
-        with:
-          context: ./frontend
-          push: true
-          tags: ${{ steps.meta-frontend.outputs.tags }}
-          labels: ${{ steps.meta-frontend.outputs.labels }}
-          build-args: |
-            NEXT_PUBLIC_API_URL=https://api.blackturf.fr
-            NEXT_PUBLIC_WS_URL=wss://api.blackturf.fr/ws
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
   # ─── Deploy to VPS ────────────────────────────────────────────────────────
   deploy:
     name: Deploy to VPS
     runs-on: ubuntu-latest
-    needs: build-push
     environment: production
+    timeout-minutes: 60
 
     steps:
-      - uses: actions/checkout@v4
-
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1.0.0
         with:
@@ -108,34 +42,71 @@ jobs:
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_PORT || 22 }}
+          # Défaut de l'action : 10 min. Un build sans cache sur le VPS, plus
+          # l'attente du verrou derrière un autre déploiement, peut dépasser.
+          command_timeout: 50m
           script: |
             set -e
+
+            # ── Verrou : un seul déploiement à la fois sur le VPS ──
+            # Libéré automatiquement à la fin du script (ou si la session SSH tombe).
+            exec 9>/tmp/blackturf-deploy.lock
+            echo "⏳ Attente du verrou de déploiement…"
+            flock -w 2400 9 || { echo "::error::Verrou de déploiement non obtenu en 40 min."; exit 1; }
+            echo "🔒 Verrou obtenu $(date)"
+
             cd /opt/blackturf
+            DC="docker compose -f docker-compose.yml -f docker-compose.prod.yml"
 
             # La prod est buildée LOCALEMENT sur le VPS (compose en `build:`, pas d'image
             # GHCR). On synchronise le code puis on rebuild sur place. Cf. HANDOFF SUITE §3.
+            # Toujours la DERNIÈRE version de main : un run arrivé après d'autres fusions
+            # déploie aussi leur code.
             git fetch origin main
             git reset --hard origin/main
+            echo "📦 Déploiement de $(git rev-parse --short HEAD) (run pour ${{ github.sha }})"
 
-            # Build + (re)start des images locales
-            docker compose -f docker-compose.yml -f docker-compose.prod.yml build
+            $DC build
 
             # Pour recréer un conteneur, compose renomme l'ancien en `<id>_<nom>` avant
             # de créer le nouveau. Un déploiement interrompu laisse ce conteneur
             # renommé derrière lui, et le suivant échoue alors sur « Conflict. The
             # container name … is already in use » (vu le 2026-09-24, frontend arrêté).
             # Ces restes ne servent jamais : on les retire avant de redémarrer.
-            docker ps -a --format '{{.Names}}' | grep -E '^[0-9a-f]{12}_blackturf_' | xargs -r docker rm -f
+            nettoyer() {
+              docker ps -a --format '{{.Names}}' | grep -E '^[0-9a-f]{12}_blackturf_' | xargs -r docker rm -f || true
+            }
+            nettoyer
+            # Une seconde tentative si compose échoue en route (« No such container »,
+            # conteneur renommé resté derrière) : sans elle, la prod restait à moitié
+            # redémarrée jusqu'à la fusion suivante.
+            if ! $DC up -d; then
+              echo "⚠️ compose up a échoué, nettoyage puis nouvelle tentative"
+              sleep 5
+              nettoyer
+              $DC up -d
+            fi
 
-            docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+            # L'API doit répondre avant les migrations (exec sur un conteneur qui
+            # démarre échoue) ; jusqu'à 2 min, au lieu d'un unique essai à 12 s.
+            attendre_api() {
+              for i in $(seq 1 40); do
+                if curl -fsS http://localhost:8000/api/v1/health >/dev/null 2>&1; then return 0; fi
+                sleep 3
+              done
+              return 1
+            }
+            if ! attendre_api; then
+              echo "::error::L'API ne répond pas après redémarrage."
+              $DC ps
+              $DC logs --tail 80 api
+              exit 1
+            fi
 
             # Migrations en attente (idempotentes)
-            docker compose -f docker-compose.yml -f docker-compose.prod.yml exec -T api \
-              alembic -c db/migrations/alembic.ini upgrade head
+            $DC exec -T api alembic -c db/migrations/alembic.ini upgrade head
 
-            # Health check
-            sleep 12
-            curl -f http://localhost:8000/api/v1/health || exit 1
+            attendre_api || { echo "::error::L'API ne répond plus après les migrations."; $DC logs --tail 80 api; exit 1; }
 
             # Nettoyage images orphelines
             docker image prune -f
@@ -151,11 +122,18 @@ jobs:
     steps:
       - name: Health check
         run: |
-          sleep 15
-          curl -f https://api.blackturf.fr/api/v1/health
-          echo "API health: OK"
-          curl -f https://blackturf.fr
-          echo "Frontend: OK"
+          # Le frontend Next met quelques secondes à servir après son redémarrage :
+          # plusieurs essais plutôt qu'un seul à 15 s.
+          essayer() {
+            for i in $(seq 1 12); do
+              if curl -fsS -o /dev/null "$1"; then echo "$1 : OK"; return 0; fi
+              sleep 10
+            done
+            echo "::error::$1 ne répond pas"
+            return 1
+          }
+          essayer https://api.blackturf.fr/api/v1/health
+          essayer https://blackturf.fr
 
       # Un site entièrement désindexé répond 200 : le health check ci-dessus le
       # déclarerait sain. Ces trois contrôles couvrent les pannes silencieuses qui
