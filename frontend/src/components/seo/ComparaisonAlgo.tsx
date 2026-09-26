@@ -1,7 +1,7 @@
 import Link from "next/link";
-import { Trophy, Target, ShieldCheck } from "lucide-react";
-import { IdentiteCheval } from "@/components/courses/identite-cheval";
-import type { SeoVerdict } from "@/lib/seo";
+import { Trophy, Target, ShieldCheck, Sparkles } from "lucide-react";
+import { IdentiteCheval, CasaqueNumero } from "@/components/courses/identite-cheval";
+import type { SeoVerdict, SeoPronoCheval } from "@/lib/seo";
 
 /**
  * Comparaison « algo vs arrivée » sur la page /resultats.
@@ -122,5 +122,157 @@ export function VerdictAlgoLigne({ v, courseId }: { v: SeoVerdict; courseId: str
         Voir le détail →
       </Link>
     </div>
+  );
+}
+
+/* ───────────── Top 5 de l'algorithme sous une arrivée ─────────────
+ * Les cinq chevaux que le modèle classait en tête AVANT le départ, dans son ordre,
+ * chacun avec sa place réelle. Le lecteur lit d'un coup d'œil ce qui était annoncé
+ * et ce qui est arrivé, sans aller sur la fiche course. */
+
+/** Médaille de rang : or, argent, bronze, puis ardoise. Dégradé + reflet + ombre
+ *  portée pour le relief. */
+const MEDAILLE: Record<number, string> = {
+  1: "from-amber-200 via-amber-400 to-amber-600 text-amber-950 ring-amber-300/70",
+  2: "from-slate-100 via-slate-300 to-slate-500 text-slate-900 ring-slate-200/70",
+  3: "from-orange-200 via-orange-400 to-orange-700 text-orange-950 ring-orange-300/70",
+};
+const MEDAILLE_AUTRE = "from-slate-500 via-slate-600 to-slate-800 text-white ring-slate-400/40";
+
+/** Ce qu'est devenu le cheval à l'arrivée, en pastille. */
+function issue(position: number | null) {
+  if (position === 1)
+    return { label: "Gagnant", cls: "bg-gradient-to-b from-emerald-400 to-emerald-600 text-white shadow-[0_2px_0_#047857]" };
+  if (position === 2 || position === 3)
+    return { label: `Arrivé ${ordinal(position)}`, cls: "bg-gradient-to-b from-amber-300 to-amber-500 text-amber-950 shadow-[0_2px_0_#b45309]" };
+  if (position === 4 || position === 5)
+    return { label: `Arrivé ${ordinal(position)}`, cls: "bg-gradient-to-b from-sky-100 to-sky-200 text-sky-900 shadow-[0_2px_0_#7dd3fc]" };
+  return {
+    label: position != null ? `${ordinal(position)}` : "Non placé",
+    cls: "bg-stone-100 text-stone-500 shadow-[0_2px_0_#d6d3d1]",
+  };
+}
+
+const pct = (p: number) =>
+  `${(p * 100).toLocaleString("fr-FR", { maximumFractionDigits: p < 0.1 ? 1 : 0 })} %`;
+
+export function PronosticAlgoTop5({ v, courseId }: { v: SeoVerdict; courseId: string }) {
+  const top = (v.top5 ?? []).slice(0, 5);
+  if (top.length === 0) return <VerdictAlgoLigne v={v} courseId={courseId} />;
+
+  const dansLes5 = top.filter((h) => h.position != null && h.position <= 5).length;
+  const probaMax = Math.max(...top.map((h) => h.proba ?? 0), 0.0001);
+  const rang = v.rang_predit_gagnant;
+  const verdict = v.gagnant_top1
+    ? { label: "Gagnant trouvé", cls: "bg-emerald-400/15 text-emerald-300 ring-emerald-400/40" }
+    : rang != null && rang <= 5
+      ? { label: `Vainqueur annoncé ${ordinal(rang)}`, cls: "bg-amber-400/15 text-amber-300 ring-amber-400/40" }
+      : { label: rang ? `Vainqueur classé ${ordinal(rang)} par l'algo` : "Vainqueur hors pronostic", cls: "bg-white/10 text-slate-300 ring-white/20" };
+
+  return (
+    <section
+      aria-label="Pronostic de l'algorithme — top 5"
+      className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-slate-800 via-slate-900 to-[#0b1120] p-3 text-white shadow-[0_18px_30px_-18px_rgba(15,23,42,.8),inset_0_1px_0_rgba(255,255,255,.08)] ring-1 ring-slate-900/60 sm:p-4"
+    >
+      {/* halo doré discret en haut à droite */}
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute -right-16 -top-20 h-44 w-44 rounded-full bg-amber-400/20 blur-3xl"
+      />
+
+      <header className="relative flex flex-wrap items-center justify-between gap-2">
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-gradient-to-b from-amber-300 to-amber-500 text-amber-950 shadow-[0_3px_0_#92400e,0_6px_12px_-4px_rgba(245,158,11,.6)]">
+            <Sparkles className="h-4 w-4" aria-hidden="true" />
+          </span>
+          <div className="min-w-0">
+            <h3 className="font-display text-[14px] font-bold leading-tight">Pronostic de l&apos;algorithme</h3>
+            <p className="text-[10.5px] leading-tight text-slate-400">Top 5 figé avant le départ</p>
+          </div>
+        </div>
+        <span className="inline-flex items-baseline gap-1 rounded-full bg-white/10 px-2.5 py-1 text-[11px] text-slate-300 ring-1 ring-white/15">
+          <strong className="font-display text-[14px] font-bold tabular-nums text-white">{dansLes5}/5</strong>
+          dans les 5 premiers
+        </span>
+      </header>
+
+      <ol className="relative mt-3 space-y-2">
+        {top.map((h) => (
+          <LignePronostic key={h.numero} h={h} courseId={courseId} probaMax={probaMax} />
+        ))}
+      </ol>
+
+      <footer className="relative mt-3 flex flex-wrap items-center justify-between gap-2">
+        <span className={`inline-flex items-center rounded-md px-2 py-0.5 text-[11px] font-bold ring-1 ${verdict.cls}`}>
+          {verdict.label}
+        </span>
+        <Link
+          href={`/courses/${courseId}`}
+          className="text-[11.5px] font-semibold text-amber-300 hover:text-amber-200 hover:underline"
+        >
+          Analyse complète →
+        </Link>
+      </footer>
+    </section>
+  );
+}
+
+function LignePronostic({ h, courseId, probaMax }: { h: SeoPronoCheval; courseId: string; probaMax: number }) {
+  const res = issue(h.position);
+  const gagnant = h.position === 1;
+  const cote =
+    h.cote != null ? h.cote.toLocaleString("fr-FR", { minimumFractionDigits: 1, maximumFractionDigits: 1 }) : null;
+
+  return (
+    <li
+      className={`flex items-center gap-2.5 rounded-xl bg-gradient-to-b from-white to-stone-100 px-2 py-2 text-slate-900 transition-transform duration-200 hover:-translate-y-0.5 sm:gap-3 sm:px-2.5 ${
+        gagnant
+          ? "shadow-[0_3px_0_#059669,0_0_22px_-2px_rgba(52,211,153,.55)] ring-2 ring-emerald-400"
+          : "shadow-[0_3px_0_#cbd5e1,0_10px_18px_-10px_rgba(0,0,0,.7)]"
+      }`}
+    >
+      {/* médaille de rang */}
+      <span
+        aria-label={`Rang ${h.rang} du pronostic`}
+        className={`relative inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-br font-display text-[14px] font-extrabold ring-2 shadow-[inset_0_2px_2px_rgba(255,255,255,.55),inset_0_-2px_3px_rgba(0,0,0,.25),0_3px_6px_-1px_rgba(0,0,0,.35)] ${
+          MEDAILLE[h.rang] ?? MEDAILLE_AUTRE
+        }`}
+      >
+        {h.rang}
+      </span>
+
+      <CasaqueNumero numero={h.numero} courseId={courseId} />
+
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-[13px] font-bold leading-tight" title={nomTitre(h.nom)}>
+          {nomTitre(h.nom) || `N°${h.numero}`}
+        </p>
+        <div className="mt-1 flex items-center gap-2">
+          {h.proba != null && (
+            <span
+              className="h-1.5 w-14 shrink-0 overflow-hidden rounded-full bg-stone-200 shadow-[inset_0_1px_1px_rgba(0,0,0,.15)] sm:w-20"
+              aria-hidden="true"
+            >
+              <span
+                className="block h-full rounded-full bg-gradient-to-r from-amber-400 to-amber-600"
+                style={{ width: `${Math.max(6, (h.proba / probaMax) * 100)}%` }}
+              />
+            </span>
+          )}
+          <span className="truncate text-[10.5px] tabular-nums text-stone-500">
+            {h.proba != null && <>{pct(h.proba)}<span className="hidden sm:inline"> de victoire</span></>}
+            {h.proba != null && cote && " · "}
+            {cote && <>cote {cote}</>}
+          </span>
+        </div>
+      </div>
+
+      <span
+        className={`inline-flex shrink-0 items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-bold tabular-nums ${res.cls}`}
+      >
+        {gagnant && <Trophy className="h-3 w-3" aria-hidden="true" />}
+        {res.label}
+      </span>
+    </li>
   );
 }
