@@ -119,7 +119,7 @@ function BetTable({ bets, title, color }: { bets: BetRow[]; title: string; color
             className="flex items-center justify-between p-3 rounded-lg border border-border/40 bg-card/50 text-sm"
           >
             <div className="flex-1 min-w-0">
-              <div className="font-medium text-foreground truncate">
+              <div className="font-medium text-foreground break-words">
                 {b.chevaux || b.type_pari}
               </div>
               <div className="flex items-center gap-2 mt-0.5">

@@ -141,9 +141,9 @@ function Mouvement({ m, compact }: { m?: number | null; compact?: boolean }) {
 
 function EnTeteCourse({ vb }: { vb: VB }) {
   return (
-    <div className="flex min-w-0 items-center gap-1.5 text-[11px] text-stone-500">
+    <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[11px] text-stone-500">
       {vb.code && <span className="shrink-0 font-semibold text-stone-700">{vb.code}</span>}
-      <span className="truncate">{titleCase(vb.hippodrome_nom)}</span>
+      <span className="min-w-0 break-words">{titleCase(vb.hippodrome_nom)}</span>
       <span aria-hidden="true">·</span>
       <span className="inline-flex shrink-0 items-center gap-0.5"><Clock className="h-3 w-3" aria-hidden="true" />{heureParis(vb.date_heure)}</span>
       {vb.est_quinte && <span className="shrink-0 rounded border border-amber-300 px-1 text-[9px] font-semibold uppercase tracking-wide text-amber-800">Quinté+</span>}
@@ -157,16 +157,16 @@ function DetailCourse({ vb }: { vb: VB }) {
     vb.distance ? `${nf(vb.distance)} m` : null,
     vb.nb_partants ? `${vb.nb_partants} partants` : null,
   ].filter(Boolean);
-  return bits.length ? <div className="truncate text-[11px] text-stone-500">{bits.join(" · ")}</div> : null;
+  return bits.length ? <div className="break-words text-[11px] text-stone-500">{bits.join(" · ")}</div> : null;
 }
 
 function Equipe({ vb }: { vb: VB }) {
   if (!vb.jockey && !vb.entraineur && !vb.musique) return null;
   return (
     <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-[11px]">
-      {vb.jockey && (<><dt className="text-stone-500">Jockey</dt><dd className="truncate text-stone-800">{titleCase(vb.jockey)}</dd></>)}
-      {vb.entraineur && (<><dt className="text-stone-500">Entraîneur</dt><dd className="truncate text-stone-800">{titleCase(vb.entraineur)}</dd></>)}
-      {vb.musique && (<><dt className="text-stone-500">Musique</dt><dd className="truncate font-mono text-stone-800">{vb.musique}</dd></>)}
+      {vb.jockey && (<><dt className="text-stone-500">Jockey</dt><dd className="min-w-0 break-words text-stone-800">{titleCase(vb.jockey)}</dd></>)}
+      {vb.entraineur && (<><dt className="text-stone-500">Entraîneur</dt><dd className="min-w-0 break-words text-stone-800">{titleCase(vb.entraineur)}</dd></>)}
+      {vb.musique && (<><dt className="text-stone-500">Musique</dt><dd className="min-w-0 break-all font-mono text-stone-800">{vb.musique}</dd></>)}
     </dl>
   );
 }
@@ -265,9 +265,9 @@ function LigneVB({ vb, isExpert }: { vb: VB; isExpert: boolean }) {
           <IdentiteCheval numero={vb.numero} nom={titleCase(vb.nom_cheval)} courseId={vb.course_id} imgUrl={vb.casaque_image_url} />
           {isExpert && vb.spi_detected && <Zap className="h-3.5 w-3.5 shrink-0 text-amber-700" aria-label="Afflux d'argent" />}
         </div>
-        <div className="mt-0.5 flex items-center gap-2 text-[11px] text-stone-500">
+        <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[11px] text-stone-500">
           <Niveau n={vb.niveau} />
-          {vb.jockey && <span className="truncate">{titleCase(vb.jockey)}</span>}
+          {vb.jockey && <span className="min-w-0 break-words">{titleCase(vb.jockey)}</span>}
         </div>
       </div>
       <div className="hidden text-right sm:block">
@@ -483,7 +483,7 @@ export default function ValueBetsPage() {
                 <div key={k.l} className="px-4 py-4 sm:px-6 sm:py-5">
                   <div className="text-[11px] font-medium uppercase tracking-[0.14em] text-stone-500">{k.l}</div>
                   <div className="mt-2 whitespace-nowrap font-display text-2xl font-medium tracking-tight text-stone-900 sm:text-[1.9rem]">{k.v}</div>
-                  <div className="mt-1 min-h-[1rem] truncate text-xs text-stone-500">{k.n}</div>
+                  <div className="mt-1 min-h-[1rem] break-words text-xs text-stone-500">{k.n}</div>
                 </div>
               ))}
             </div>
