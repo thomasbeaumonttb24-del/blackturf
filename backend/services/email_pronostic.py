@@ -22,34 +22,22 @@ les ignore affiche la couleur unie, jamais un bloc vide.
 from __future__ import annotations
 
 import re
-
 from datetime import datetime
-from html import escape
 from typing import Optional
 from zoneinfo import ZoneInfo
 
-SITE = "https://blackturf.fr"
-IMG = f"{SITE}/img/email"
-INSTAGRAM = "https://www.instagram.com/blackturf.fr/"
+from services.email_design import (
+    C, IMG, POLICE,
+    barre as _barre, casaque as _casaque, e,
+    pastille as _pastille, url_casaque as _url_casaque,
+)
+from services import email_design as D
+
 PARIS = ZoneInfo("Europe/Paris")
 
 # Mêmes seuils que classement.tsx.
 COTE_JUSTE_MAX = 999.0
 ECART_MEILLEUR_PRIX = 0.08
-
-POLICE = "'Space Grotesk',-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif"
-TEXTE = "-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif"
-
-# Palette de la fiche course (CX dans plan-mise.tsx + classes Tailwind utilisées).
-C = {
-    "page": "#FFFDF6", "carte": "#FFFFFF", "creme": "#FCFAF5", "bord": "#ECE7DC", "bord2": "#EFE8D8",
-    "encre": "#0F172A", "encre2": "#1F2937", "slate7": "#334155", "slate6": "#475569",
-    "stone5": "#78716C", "stone6": "#57534E", "stone3": "#D6D3D1", "stone2": "#E7E5E4", "stone1": "#F5F5F4",
-    "or": "#B45309", "orFonce": "#92400E", "orClair": "#FEF6E7", "orBord": "#F5DCA8", "ambre": "#F59E0B",
-    "vert": "#047857", "vertFond": "#ECFDF5", "vertBord": "#A7F3D0", "vertPlein": "#059669",
-    "rouge": "#BE123C", "rougeFond": "#FFF1F2", "rougeBord": "#FECDD3",
-    "numero": "#172033", "nuit": "#14110C",
-}
 
 DISCIPLINES = {
     "plat": ("plat", "#B45309"), "attelé": ("attele", "#0E7C66"), "attele": ("attele", "#0E7C66"),
@@ -68,10 +56,6 @@ SENS = {
 # Dégradés des trois premiers segments de la barre de physionomie et des
 # liserés de podium (from-amber-300 to-amber-600, slate, orange).
 PODIUM = {1: ("#FCD34D", "#D97706"), 2: ("#CBD5E1", "#64748B"), 3: ("#FDBA74", "#EA580C")}
-
-
-def e(v) -> str:
-    return escape(str(v if v is not None else ""), quote=True)
 
 
 # ─── Formats (identiques à classement.tsx) ──────────────────────────────────
@@ -123,65 +107,6 @@ def _date_longue(d: Optional[datetime]) -> str:
 
 
 # ─── Briques ────────────────────────────────────────────────────────────────
-
-def _pastille(texte: str, fg: str, bg: str, bd: str, taille: int = 11, gras: int = 700, maj: bool = False) -> str:
-    style_maj = "text-transform:uppercase;letter-spacing:.06em;" if maj else ""
-    return (
-        f'<span style="display:inline-block;padding:3px 9px;border-radius:999px;background:{bg};'
-        f'border:1px solid {bd};color:{fg};font-size:{taille}px;line-height:16px;font-weight:{gras};'
-        f'{style_maj}white-space:nowrap;font-family:{TEXTE}">{texte}</span>'
-    )
-
-
-def _barre(fraction: float, debut: str, fin: str, hauteur: int = 6) -> str:
-    """Barre de progression en relief : une cellule pleine (couleur de repli +
-    dégradé) et une gouttière gris clair."""
-    w = max(2, min(100, round(fraction * 100)))
-    plein = (
-        f'<td width="{w}%" bgcolor="{fin}" style="width:{w}%;height:{hauteur}px;line-height:{hauteur}px;'
-        f'font-size:0;background:{fin};background-image:linear-gradient(90deg,{debut},{fin});'
-        f'border-radius:{hauteur}px">&nbsp;</td>'
-    )
-    vide = (
-        f'<td bgcolor="{C["stone1"]}" style="height:{hauteur}px;line-height:{hauteur}px;font-size:0">&nbsp;</td>'
-        if w < 100 else ""
-    )
-    return (
-        f'<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
-        f'style="width:100%;border-collapse:separate;background:{C["stone1"]};border-radius:{hauteur}px;'
-        f'box-shadow:inset 0 1px 1px rgba(0,0,0,.08)"><tr>{plein}{vide}</tr></table>'
-    )
-
-
-def _numero(n) -> str:
-    """Pastille du numéro de partant, comme CasaqueNumero côté site."""
-    return (
-        f'<span style="display:inline-block;min-width:24px;padding:4px 5px;border-radius:6px;'
-        f'background:{C["numero"]};color:#ffffff;font-size:13px;line-height:16px;font-weight:800;'
-        f'text-align:center;font-family:{POLICE}">{e(n)}</span>'
-    )
-
-
-def _url_casaque(url: Optional[str]) -> str:
-    """Image PMU de la casaque du partant ; repli sur une casaque neutre pour
-    que chaque ligne garde la même silhouette (et jamais d'image cassée)."""
-    if url and str(url).startswith(("https://", "http://")):
-        return "https://" + str(url).split("://", 1)[1]
-    return f"{IMG}/casaque-neutre.png"
-
-
-def _casaque(url: Optional[str], numero, taille: int = 40) -> str:
-    """Casaque dans un écrin blanc en relief, numéro du partant en médaillon
-    dessous — la paire qu'on lit sur la fiche et sur le ticket."""
-    return (
-        f'<table role="presentation" cellpadding="0" cellspacing="0" style="border-collapse:separate;margin:0 auto">'
-        f'<tr><td align="center" bgcolor="#ffffff" style="background:#ffffff;border:1px solid {C["bord"]};border-bottom:2px solid #DDD5C2;'
-        f'border-radius:12px;padding:4px;box-shadow:0 6px 12px -8px rgba(17,24,39,.35)">'
-        f'<img src="{e(_url_casaque(url))}" width="{taille}" height="{taille}" alt="Casaque du n°{e(numero)}" '
-        f'style="display:block;width:{taille}px;height:{taille}px;border:0;object-fit:contain"></td></tr>'
-        f'<tr><td align="center" style="padding-top:4px">{_numero(numero)}</td></tr></table>'
-    )
-
 
 def _musique(musique: Optional[str]) -> str:
     """Musique en pastilles colorées, comme MusiqueDisplay (badges.tsx) :
@@ -329,7 +254,7 @@ def _lecture_de_la_course(chevaux: list[dict], calcule_a: Optional[datetime]) ->
     ligne_marche = (
         f'<b style="color:{C["encre"]}">N°{e(fav_marche[0]["numero"])}</b> <span style="color:{C["stone5"]}">à</span> '
         f'<b style="color:{C["encre"]}">{cote(fav_marche[1])}</b>'
-        if fav_marche else f'<span style="color:#a8a29e">cotes indisponibles</span>'
+        if fav_marche else '<span style="color:#a8a29e">cotes indisponibles</span>'
     )
     t2 = (
         _titre_tuile("Favori : marché et modèle")
@@ -422,11 +347,12 @@ def _ligne_cheval(c: dict, meilleur: Optional[int]) -> str:
         badges.append(
             f'<span style="display:inline-block;margin:0 4px 4px 0;padding:3px 7px;border-radius:7px;background:{C["vertPlein"]};'
             f'background-image:linear-gradient(180deg,#10B981,#047857);border-bottom:2px solid #065F46;'
-            f'color:#ffffff;font-size:10.5px;line-height:14px;font-weight:800;white-space:nowrap;letter-spacing:.02em">'
+            f'color:#ffffff;font-size:10.5px;line-height:14px;font-weight:800;letter-spacing:.02em">'
             f'VALEUR {"+" if ev > 0 else ""}{ev} % <span style="color:#FDE68A">{"★" * niveau}</span></span>'
         )
     if meilleur == c["numero"]:
-        badges.append(_pastille("meilleur écart", C["vert"], C["vertFond"], C["vertBord"], 10, 700, maj=True))
+        badges.append(_pastille("meilleur écart", C["vert"], C["vertFond"], C["vertBord"], 10, 700, maj=True)
+                      .replace("white-space:nowrap;", ""))
     badges_html = f'<div style="margin-top:6px;font-size:0;line-height:0">{"".join(badges)}</div>' if badges else ""
 
     jockey = c.get("jockey")
@@ -575,37 +501,13 @@ def _onglets(lien_course: str) -> str:
             f"box-shadow:0 1px 2px rgba(17,24,39,.06)" if actif else f"color:{C['stone6']};border:1px solid transparent"
         )
         cellules += (
-            f'<td style="padding:0 3px"><a class="tab" href="{e(lien_course)}#{cle}" style="display:inline-block;padding:7px 12px;'
-            f'border-radius:10px;font-size:12.5px;font-weight:{700 if actif else 600};text-decoration:none;white-space:nowrap;{style}">{label}</a></td>'
+            f'<a class="tab" href="{e(lien_course)}#{cle}" style="display:inline-block;margin:0 4px 4px 0;padding:7px 12px;'
+            f'border-radius:10px;font-size:12.5px;line-height:16px;font-weight:{700 if actif else 600};text-decoration:none;white-space:nowrap;{style}">{label}</a>'
         )
+    # Liens en ligne (et non cellules de table) : sur un petit écran, la barre
+    # passe à la ligne au lieu d'élargir tout le mail.
     return f"""
-<tr><td class="sec" style="padding:14px 13px 0">
-  <table role="presentation" cellpadding="0" cellspacing="0"><tr>{cellules}</tr></table>
-</td></tr>"""
-
-
-def _cadre_navigateur(lien_course: str, contenu: str) -> str:
-    """Fenêtre de navigateur autour de la réplique : la barre d'adresse montre
-    l'URL réelle de la fiche, cliquable."""
-    url_affichee = lien_course.replace("https://", "")
-    return f"""
-<tr><td class="px" style="padding:0 20px">
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:separate;border:1px solid #2A241A;
-    border-radius:16px;overflow:hidden;background:{C['page']};box-shadow:0 30px 60px -20px rgba(0,0,0,.55),0 12px 24px -12px rgba(0,0,0,.35)">
-    <tr><td bgcolor="#221D15" style="background:#221D15;background-image:linear-gradient(180deg,#2C261C,#1C1811);padding:10px 12px;border-radius:15px 15px 0 0">
-      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%"><tr>
-        <td width="52" style="width:52px;font-size:13px;line-height:13px;white-space:nowrap">
-          <span style="color:#FF5F57">●</span><span style="color:#FEBC2E">●</span><span style="color:#28C840">●</span>
-        </td>
-        <td><a href="{e(lien_course)}" style="display:block;padding:5px 10px;border-radius:8px;background:#0F0C08;color:#D6C7A1;
-          font-size:11.5px;line-height:15px;text-decoration:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">&#128274; {e(url_affichee)}</a></td>
-      </tr></table>
-    </td></tr>
-    <tr><td bgcolor="{C['page']}" style="background:{C['page']};background-image:radial-gradient(ellipse at 18% 0%,rgba(245,158,11,.08) 0%,transparent 46%),linear-gradient(180deg,#FFFDF6 0%,#FAFAF8 60%);padding:0 0 16px">
-      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%">{contenu}</table>
-    </td></tr>
-  </table>
-</td></tr>"""
+<tr><td class="sec" style="padding:14px 16px 0;line-height:0">{cellules}</td></tr>"""
 
 
 def _classement(chevaux: list[dict], calcule_a: Optional[datetime]) -> str:
@@ -642,19 +544,6 @@ def _classement(chevaux: list[dict], calcule_a: Optional[datetime]) -> str:
 </td></tr>"""
 
 
-def _bouton(label: str, url: str) -> str:
-    """Bouton en relief : dégradé or, tranche plus sombre en bas, ombre portée."""
-    return f"""
-<table role="presentation" cellpadding="0" cellspacing="0" align="center" style="margin:0 auto">
-  <tr><td align="center" bgcolor="#D97706" style="border-radius:14px;background:#D97706;background-image:linear-gradient(180deg,#FCD34D 0%,#F59E0B 45%,#D97706 100%);
-    border-bottom:4px solid #92400E;box-shadow:0 14px 26px -12px rgba(180,83,9,.75),inset 0 1px 0 rgba(255,255,255,.6)">
-    <!--[if mso]><a href="{e(url)}" style="font-size:16px;color:#1C1917;font-weight:bold;text-decoration:none;padding:16px 30px;display:block">{label} &rarr;</a><![endif]-->
-    <!--[if !mso]><!--><a href="{e(url)}" style="display:inline-block;padding:16px 30px;font-size:16px;line-height:20px;font-weight:800;color:#1C1917;
-      text-decoration:none;font-family:{POLICE};letter-spacing:-.01em">{label} &rarr;</a><!--<![endif]-->
-  </td></tr>
-</table>"""
-
-
 def rendu_html(course: dict, chevaux: list[dict], lien_course: str, lien_desinscription: str,
                calcule_a: Optional[datetime] = None, responsable: str = "") -> str:
     """HTML complet du mail. `course` : champs de la table `courses` utiles à
@@ -677,139 +566,39 @@ def rendu_html(course: dict, chevaux: list[dict], lien_course: str, lien_desinsc
         + _classement(chevaux, calcule_a)
     )
 
-    return f"""<!doctype html>
-<html lang="fr" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="x-apple-disable-message-reformatting">
-<meta name="color-scheme" content="light">
-<meta name="supported-color-schemes" content="light">
-<title>Le pronostic de {e(nom)} — BlackTurf</title>
-<!--[if mso]><noscript><xml><o:OfficeDocumentSettings><o:PixelsPerInch>96</o:PixelsPerInch></o:OfficeDocumentSettings></xml></noscript><![endif]-->
-<style>
-  @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&display=swap');
-  body{{margin:0;padding:0;-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%}}
-  a{{text-decoration:none}}
-  @media only screen and (max-width:620px){{
-    .wrap{{width:100%!important}}
-    .px{{padding-left:10px!important;padding-right:10px!important}}
-    .col2{{display:block!important;width:100%!important;padding:0 0 10px 0!important}}
-    .stat{{padding:0 2px!important}}
-    .h1hero{{font-size:28px!important;line-height:33px!important}}
-    .outer{{padding:12px 4px 24px!important}}
-    .pod{{padding:0 3px!important}}
-    .podpct{{font-size:17px!important;padding-left:5px!important}}
-    .podnom{{font-size:11.5px!important;line-height:15px!important}}
-    .tab{{padding:6px 8px!important;font-size:12px!important}}
-    .cellpod{{padding:10px 8px!important}}
-    .sec{{padding-left:8px!important;padding-right:8px!important}}
-    .lec{{padding-left:10px!important;padding-right:10px!important}}
-    .rowin{{padding:12px 8px 12px 6px!important}}
-    .rk{{width:34px!important}}
-    .vic{{width:74px!important}}
-    .statin{{padding:6px 6px!important}}
-    .cas{{width:50px!important;padding-left:2px!important}}
-    .nom{{font-size:14px!important;line-height:18px!important}}
-    .vicpct{{font-size:22px!important;line-height:26px!important}}
-    .stitre{{font-size:8.5px!important;letter-spacing:.03em!important}}
-  }}
-</style>
-</head>
-<body style="margin:0;padding:0;background:#0F0D09;font-family:{TEXTE};color:{C['encre2']}">
-<div style="display:none;max-height:0;overflow:hidden;mso-hide:all;font-size:1px;line-height:1px;color:#0F0D09">{e(preheader)}&#8203;&zwnj;&nbsp;&#8203;&zwnj;&nbsp;&#8203;&zwnj;&nbsp;&#8203;&zwnj;&nbsp;&#8203;&zwnj;&nbsp;</div>
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" bgcolor="#0F0D09" style="width:100%;background:#0F0D09;background-image:radial-gradient(ellipse at 50% 0%,#3A2E17 0%,#15110B 45%,#0F0D09 100%)">
-<tr><td align="center" class="outer" style="padding:20px 8px 32px">
-<!--[if mso]><table role="presentation" width="640" align="center"><tr><td><![endif]-->
-<table role="presentation" class="wrap" width="640" cellpadding="0" cellspacing="0" style="width:640px;max-width:640px">
-
-  <!-- Barre du haut : logo + mention -->
-  <tr><td style="padding:0 0 12px">
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" bgcolor="#ffffff" style="width:100%;border-collapse:separate;background:#ffffff;border-radius:18px;border-top:4px solid #C99A3C;box-shadow:0 10px 30px -12px rgba(0,0,0,.6)">
-      <tr>
-        <td style="padding:10px 18px" valign="middle"><a href="{SITE}"><img src="{IMG}/logo-blackturf.png" width="104" alt="BlackTurf" style="display:block;width:104px;height:auto;border:0"></a></td>
-        <td align="right" valign="middle" style="padding:10px 18px">
-          <span style="display:inline-block;padding:6px 12px;border-radius:999px;background:#FEF3C7;border:1px solid #FCD34D;color:{C['orFonce']};font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;white-space:nowrap">&#9733; Pronostic IA offert</span>
-        </td>
-      </tr>
-    </table>
-  </td></tr>
-
-  <!-- Photo + titre -->
-  <tr><td style="border-radius:22px 22px 0 0;overflow:hidden;background:{C['nuit']}">
-    <a href="{e(lien_course)}"><img src="{IMG}/hero-{hero}.jpg" width="640" alt="Chevaux en course — photo d’illustration" style="display:block;width:100%;max-width:640px;height:auto;border:0;border-radius:22px 22px 0 0;color:#ffffff;font-size:13px"></a>
-  </td></tr>
-  <tr><td bgcolor="{C['nuit']}" class="px" style="background:{C['nuit']};padding:4px 28px 26px;color:#ffffff">
-    <div style="font-size:11px;line-height:16px;font-weight:800;letter-spacing:.2em;text-transform:uppercase;color:#E3C27A">Votre pronostic · {e(jour)}</div>
-    <h1 class="h1hero" style="margin:8px 0 10px;font-size:32px;line-height:37px;font-weight:700;letter-spacing:-.02em;color:#ffffff;font-family:{POLICE}">{e(nom)}</h1>
-    <div style="font-size:15px;line-height:23px;color:#D9D2C3">{e(hippodrome)} · départ <b style="color:#ffffff">{e(heure)}</b>. Voici la fiche de la course telle qu’elle apparaît sur BlackTurf, avec le classement complet de l’algorithme.</div>
-    {_podium_express(chevaux)}
-  </td></tr>
-
-  <!-- La fiche course, dans son navigateur -->
-  <tr><td bgcolor="{C['nuit']}" style="background:{C['nuit']};padding:0 0 28px">
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%">
-      {_cadre_navigateur(lien_course, contenu)}
-    </table>
-  </td></tr>
-
-  <!-- Appel à l'action -->
-  <tr><td bgcolor="{C['nuit']}" class="px" style="background:{C['nuit']};padding:0 28px 30px;text-align:center">
-    <div style="font-size:19px;line-height:26px;font-weight:700;color:#ffffff;font-family:{POLICE};margin:0 0 6px">La fiche complète vous attend</div>
-    <div style="font-size:14px;line-height:22px;color:#BDB4A2;margin:0 0 20px">Fiche détaillée de chaque partant, cotes en direct, argent engagé et plan de mise selon votre budget.</div>
-    {_bouton("Ouvrir la fiche sur BlackTurf", lien_course)}
-  </td></tr>
-
-  <!-- Comment lire -->
-  <tr><td bgcolor="{C['nuit']}" class="px" style="background:{C['nuit']};padding:0 20px 24px">
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:separate;background:#1D1810;border:1px solid #33291A;border-radius:16px">
-      <tr><td style="padding:16px 18px;font-size:12.5px;line-height:20px;color:#BDB4A2">
-        <div style="font-size:11px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;color:#E3C27A;margin-bottom:6px">Comment lire</div>
-        <b style="color:#F3EBDA">Victoire / Top 3</b> : probabilités estimées par le modèle. <b style="color:#F3EBDA">Cote juste</b> = 1 / probabilité de victoire, sans marge — le prix à partir duquel le pari devient rentable si la probabilité est exacte. <b style="color:#F3EBDA">Lecture du prix</b> = écart entre la cote payée par le marché et cette cote juste : <span style="color:#34D399">vert</span> quand le marché paie au-dessus, <span style="color:#FB7185">rouge</span> en dessous. Chiffres figés à l’envoi : les cotes continuent d’évoluer jusqu’au départ.
-      </td></tr>
-    </table>
-  </td></tr>
-
-  <!-- Instagram -->
-  <tr><td bgcolor="{C['nuit']}" class="px" style="background:{C['nuit']};padding:0 20px 28px;border-radius:0 0 22px 22px">
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" bgcolor="#2A1B3D" style="width:100%;border-collapse:separate;border-radius:18px;
-      background:#2A1B3D;background-image:linear-gradient(120deg,#F58529 0%,#DD2A7B 45%,#8134AF 75%,#515BD4 100%);border-bottom:3px solid #3B1E5A;box-shadow:0 18px 34px -18px rgba(221,42,123,.7)">
-      <tr>
-        <td width="76" valign="middle" style="width:76px;padding:16px 0 16px 18px">
-          <a href="{INSTAGRAM}"><img src="{IMG}/instagram-glyph.png" width="52" height="52" alt="Instagram" style="display:block;width:52px;height:52px;border:0;border-radius:14px;background:#ffffff"></a>
-        </td>
-        <td valign="middle" style="padding:16px 12px">
-          <div style="font-size:17px;line-height:22px;font-weight:800;color:#ffffff;font-family:{POLICE}">@blackturf.fr</div>
-          <div style="font-size:13px;line-height:19px;color:#FDE7F3">Les infos du jour, les coups de cœur et les arrivées, en story.</div>
-        </td>
-        <td align="right" valign="middle" style="padding:16px 18px 16px 0">
-          <a href="{INSTAGRAM}" style="display:inline-block;padding:10px 14px;border-radius:12px;background:#ffffff;color:#9B1B6B;font-size:13px;font-weight:800;text-decoration:none;white-space:nowrap;box-shadow:0 6px 14px -6px rgba(0,0,0,.45)">Suivre</a>
-        </td>
-      </tr>
-    </table>
-  </td></tr>
-
-  <!-- Pied -->
-  <tr><td style="padding:26px 20px 0;text-align:center">
-    <a href="{SITE}"><img src="{IMG}/cheval-or.png" width="64" alt="BlackTurf" style="display:inline-block;width:64px;height:auto;border:0"></a>
-    <div style="margin:10px 0 14px;font-size:12px;line-height:18px">
-      <a href="{SITE}/programme" style="color:#E3C27A;text-decoration:none;font-weight:700">Courses du jour</a>
-      <span style="color:#5B5140">&nbsp;·&nbsp;</span>
-      <a href="{SITE}/value-bets" style="color:#E3C27A;text-decoration:none;font-weight:700">Value bets</a>
-      <span style="color:#5B5140">&nbsp;·&nbsp;</span>
-      <a href="{INSTAGRAM}" style="color:#E3C27A;text-decoration:none;font-weight:700">Instagram</a>
-    </div>
-    <div style="font-size:11.5px;line-height:18px;color:#8C8272;max-width:520px;margin:0 auto">{e(responsable)}</div>
-    <div style="font-size:11.5px;line-height:18px;color:#8C8272;max-width:520px;margin:12px auto 0">
-      Vous recevez cet e-mail unique parce que vous l’avez demandé sur blackturf.fr. Ce n’est pas un abonnement : rien d’autre ne partira.
-      <a href="{e(lien_desinscription)}" style="color:#BDB4A2;text-decoration:underline">Ne plus recevoir ce type d’e-mail</a>.
-    </div>
-  </td></tr>
-
-</table>
-<!--[if mso]></td></tr></table><![endif]-->
-</td></tr></table>
-</body></html>"""
+    lecture = (
+        f"{D.fort('Victoire / Top 3')} : probabilités estimées par le modèle. "
+        f"{D.fort('Cote juste')} = 1 / probabilité de victoire, sans marge — le prix à partir duquel le pari "
+        "devient rentable si la probabilité est exacte. "
+        f"{D.fort('Lecture du prix')} = écart entre la cote payée par le marché et cette cote juste : "
+        '<span style="color:#34D399">vert</span> quand le marché paie au-dessus, '
+        '<span style="color:#FB7185">rouge</span> en dessous. '
+        "Chiffres figés à l’envoi : les cotes continuent d’évoluer jusqu’au départ."
+    )
+    mention = (
+        "Vous recevez cet e-mail unique parce que vous l’avez demandé sur blackturf.fr. "
+        "Ce n’est pas un abonnement : rien d’autre ne partira. "
+        + D.lien_pied("Ne plus recevoir ce type d’e-mail", lien_desinscription) + "."
+    )
+    rangees = (
+        D.barre_logo("&#9733; Pronostic IA offert")
+        + D.entete(
+            hero, f"Votre pronostic · {e(jour)}", e(nom),
+            f"{e(hippodrome)} · départ <b style=\"color:#ffffff\">{e(heure)}</b>. Voici la fiche de la course telle "
+            "qu’elle apparaît sur BlackTurf, avec le classement complet de l’algorithme.",
+            lien=lien_course, suite=_podium_express(chevaux),
+        )
+        + D.fenetre_site(lien_course, contenu)
+        + D.appel(
+            "La fiche complète vous attend",
+            "Fiche détaillée de chaque partant, cotes en direct, argent engagé et plan de mise selon votre budget.",
+            "Ouvrir la fiche sur BlackTurf", lien_course,
+        )
+        + D.encart("Comment lire", lecture)
+        + D.bloc_instagram()
+        + D.pied(mention, responsable or D.RESPONSABLE)
+    )
+    return D.document(f"Le pronostic de {nom}", preheader, rangees)
 
 
 def _podium_express(chevaux: list[dict]) -> str:

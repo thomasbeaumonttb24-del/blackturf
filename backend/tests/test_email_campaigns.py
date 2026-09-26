@@ -221,7 +221,7 @@ def test_render_escapes_and_limits_email_size():
     assert "instagram.com/blackturf.fr" in html and "logo-blackturf.png" in html
     assert "viewport" in html and "table-layout:fixed" in html
     assert "★★★★" in html and "Niveau 4/4" in html
-    assert "galop-lutte.jpg" in html and "Photo d’illustration" in html
+    assert "hero-valeurs.jpg" in html and "Photo d’illustration" in html
     assert "img/email/instagram-glyph.png" in html
     assert "https://example.com/unsub" in plain
 
@@ -233,7 +233,7 @@ def test_three_star_signal_and_weekly_photo():
     assert "★★★</span><span" in html and "☆</span>" in html
     assert "Niveau 3/4" in plain
     html, _ = weekly({"debut": "14/09/2026", "fin": "20/09/2026", "top": [], "profils": []})
-    assert "galop-foule.jpg" in html and "sans lien avec les courses" in html
+    assert "hero-bilan.jpg" in html and "sans lien avec les courses" in html
     assert "Toute la semaine" not in html
     html, plain = weekly({"debut": "14/09/2026", "fin": "20/09/2026", "top": [],
                           "algo": {"courses": 7, "gagnant_top3": 4, "premier_gagnant": 2,

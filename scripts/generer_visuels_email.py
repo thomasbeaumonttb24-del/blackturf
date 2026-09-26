@@ -138,9 +138,9 @@ def disciplines() -> None:
         teinte.save(SORTIE / f"disc-{nom}.png", optimize=True)
 
 
-def tuile_ia(taille: int = 88) -> None:
-    """Tuile or en relief qui porte l'en-tête « classement de l'algorithme »
-    (IconeTuile côté site)."""
+def tuile(texte: str, nom: str, taille: int = 88, echelle: float = .34) -> None:
+    """Tuile or en relief qui porte les en-têtes de section (IconeTuile côté
+    site) : « IA » pour le classement, pictogrammes pour les autres mails."""
     s = taille * 4
     im = Image.new("RGBA", (s, s), (0, 0, 0, 0))
     ombre = Image.new("RGBA", (s, s), (0, 0, 0, 0))
@@ -158,12 +158,22 @@ def tuile_ia(taille: int = 88) -> None:
     im.alpha_composite(Image.composite(corps, Image.new("RGBA", (s, s), (0, 0, 0, 0)), masque))
     d = ImageDraw.Draw(im)
     d.rounded_rectangle((s * .08, s * .06, s * .92, s * .90), s * .24, outline=(255, 255, 255, 150), width=int(s * .02))
-    police = ImageFont.truetype(POLICE, int(s * .34))
-    bb = d.textbbox((0, 0), "IA", font=police)
+    if texte == "cadenas":
+        # Pas de glyphe cadenas dans DejaVu : dessiné à la main, même relief.
+        for dy, coul in ((s * .02, (146, 64, 14, 140)), (0, (255, 255, 255, 255))):
+            d.arc((s * .36, s * .22 + dy, s * .64, s * .52 + dy), 180, 360, fill=coul, width=int(s * .055))
+            d.line((s * .3875, s * .37 + dy, s * .3875, s * .46 + dy), fill=coul, width=int(s * .055))
+            d.line((s * .6125, s * .37 + dy, s * .6125, s * .46 + dy), fill=coul, width=int(s * .055))
+            d.rounded_rectangle((s * .30, s * .44 + dy, s * .70, s * .72 + dy), s * .05, fill=coul)
+        d.ellipse((s * .47, s * .53, s * .53, s * .59), fill=(217, 119, 6, 255))
+        im.resize((taille, taille), Image.LANCZOS).save(SORTIE / f"tuile-{nom}.png", optimize=True)
+        return
+    police = ImageFont.truetype(POLICE, int(s * echelle))
+    bb = d.textbbox((0, 0), texte, font=police)
     tx, ty = (s - (bb[2] - bb[0])) / 2 - bb[0], (s * .96 - (bb[3] - bb[1])) / 2 - bb[1]
-    d.text((tx, ty + s * .02), "IA", font=police, fill=(146, 64, 14, 140))
-    d.text((tx, ty), "IA", font=police, fill=(255, 255, 255, 255))
-    im.resize((taille, taille), Image.LANCZOS).save(SORTIE / "tuile-ia.png", optimize=True)
+    d.text((tx, ty + s * .02), texte, font=police, fill=(146, 64, 14, 140))
+    d.text((tx, ty), texte, font=police, fill=(255, 255, 255, 255))
+    im.resize((taille, taille), Image.LANCZOS).save(SORTIE / f"tuile-{nom}.png", optimize=True)
 
 
 def dessiner_casaque(corps: str, manches: str, motif: Optional[str] = None, taille: int = 96) -> Image.Image:
@@ -219,7 +229,12 @@ if __name__ == "__main__":
     banniere("attele-action.jpg", "trot", focale_y=0.55)
     logo()
     disciplines()
-    tuile_ia()
+    banniere("galop-vitesse.jpg", "valeurs", focale_y=0.45)
+    banniere("galop-foule.jpg", "bilan", focale_y=0.40)
+    banniere("galop-stalles.jpg", "bienvenue", focale_y=0.55)
+    tuile("IA", "ia")
+    for texte, nom in (("★", "etoile"), ("€", "euro"), ("✉", "lettre"), ("✓", "valide"), ("cadenas", "cle"), ("%", "pourcent")):
+        tuile(texte, nom, echelle=.44)
     cheval_or()
     dessiner_casaque("#E7E5E4", "#D6D3D1").save(SORTIE / "casaque-neutre.png", optimize=True)
     print("Visuels écrits dans", SORTIE)

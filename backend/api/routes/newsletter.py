@@ -86,25 +86,13 @@ INSTAGRAM_URL = "https://www.instagram.com/blackturf.fr/"
 
 
 def _mail_confirmation_html(lien: str) -> str:
-    from services.email_templates import layout, button
-    return layout(
-        "Confirmez votre inscription", "BIENVENUE CHEZ BLACKTURF",
-        "Chaque lundi dès 9 h : les meilleurs plans bénéficiaires et le bilan de la semaine, pertes comprises.",
-        button("Confirmer mon inscription", lien)
-        + "<p>Un seul envoi par semaine. Si les rapports officiels sont incomplets, nous attendons leur validation avant de publier le bilan.</p>"
-        + "<p>Vous n’êtes pas à l’origine de cette demande ? Ignorez ce message : sans confirmation, aucune lettre ne sera envoyée.</p>",
-    )
+    from services.email_compte import confirmation_newsletter
+    return confirmation_newsletter(lien)[0]
 
 
 def _mail_confirmation_texte(lien: str) -> str:
-    return (
-        "Confirmez votre inscription à la lettre hebdomadaire BlackTurf.\n\n"
-        "Chaque lundi : le bilan chiffré de la semaine, gains comme pertes.\n\n"
-        f"{lien}\n\n"
-        f"En attendant lundi, le bilan du jour passe aussi sur Instagram : {INSTAGRAM_URL}\n\n"
-        "Vous n'êtes pas à l'origine de cette demande ? Ignorez ce message : sans "
-        "confirmation, aucune lettre ne partira."
-    )
+    from services.email_compte import confirmation_newsletter
+    return confirmation_newsletter(lien)[1]
 
 
 @router.post(

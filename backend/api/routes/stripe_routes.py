@@ -580,16 +580,12 @@ async def cancel_subscription(
             html=f"<p>Demande de résiliation.</p><p>User: {user.email} ({user.user_id})</p>"
                  f"<p>Plan: {user.plan} — via Stripe: {cancelled_via_stripe}</p>",
         )
+        from services.email_compte import resiliation
+        html, texte = resiliation(cancelled_via_stripe)
         await send_email(
             to=user.email,
             subject="BlackTurf — Votre demande de résiliation",
-            html="<p>Votre demande de résiliation a bien été enregistrée.</p>"
-                 + ("<p>Votre abonnement prendra fin à l'échéance de la période en cours ; "
-                    "vous gardez l'accès jusque-là.</p>" if cancelled_via_stripe else
-                    "<p>Elle sera traitée sous 72h. Vous conservez l'accès jusqu'au traitement. "
-                    "Pour toute question : contact@blackturf.fr</p>")
-                 + "<hr/><p style='color:#666;font-size:11px;'>Jeu responsable — "
-                   "joueurs-info-service.fr — 09 74 75 13 13</p>",
+            html=html, text=texte,
         )
     except Exception as e:  # noqa: BLE001
         log.warning("stripe.cancel.email_failed", user_id=user.user_id, error=str(e)[:120])
