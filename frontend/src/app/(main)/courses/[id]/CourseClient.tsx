@@ -531,6 +531,7 @@ function MiseCalculatorWidget({
   predictions,
   statut,
   onJouerDefi,
+  onAllerDefi,
 }: {
   courseId: string;
   userPlan: string | undefined;
@@ -538,6 +539,8 @@ function MiseCalculatorWidget({
   predictions: Prediction[] | null;
   statut?: string;
   onJouerDefi?: (type: DefiTypePari, chevaux: number[]) => void;
+  /** Ouvre l'onglet Défi : ouvert à tous, même sans plan de mise disponible. */
+  onAllerDefi?: () => void;
 }) {
   const [montant, setMontant] = useState("");
   const [plan, setPlan] = useState<MisePlan | null>(null);
@@ -630,7 +633,7 @@ function MiseCalculatorWidget({
       <VoileAbonne
         icone={Calculator}
         titre="Votre plan de mise sur cette course"
-        texte="Entrez votre budget : BlackTurf répartit vos mises sur les paris les plus justes de la course. Un plan par jour est offert avec le compte gratuit."
+        texte="Entrez votre budget : BlackTurf répartit vos mises sur les paris les plus justes de la course. Un plan par jour est offert avec le compte gratuit, qui ouvre aussi le Défi du mois : vos propres paris en points, un abonnement à gagner."
         action={
           <>
             <Link
@@ -695,6 +698,19 @@ function MiseCalculatorWidget({
           variant="brand"
           className="w-auto"
         />
+        {/* Sans plan de mise, le défi reste ouvert : ses propres chevaux, sans quota. */}
+        {onAllerDefi && statut === "a_venir" && (
+          <div style={{ margin: "20px auto 0", maxWidth: 440, borderRadius: 14, background: CX.goldBg, border: `1px solid ${CX.goldBd}`, padding: "12px 14px", textAlign: "left", display: "flex", alignItems: "center", gap: 12 }}>
+            <Medal className="h-5 w-5 shrink-0" style={{ color: CX.goldDeep }} aria-hidden="true" />
+            <p style={{ margin: 0, flex: 1, fontSize: 12.5, lineHeight: 1.45, color: CX.ink2 }}>
+              <b>Le Défi du mois reste ouvert.</b> Jouez vos propres chevaux en points, sans limite de plan : le meilleur solde gagne un abonnement.
+            </p>
+            <button type="button" onClick={onAllerDefi}
+              style={{ flexShrink: 0, borderRadius: 10, background: CX.goldDeep, color: "#fff", fontSize: 12.5, fontWeight: 700, padding: "8px 12px", border: 0, cursor: "pointer" }}>
+              Jouer au Défi
+            </button>
+          </div>
+        )}
       </div>
     );
   }
@@ -3547,6 +3563,7 @@ export default function CoursePage({
                   setDefiPrefill({ type, chevaux, cle: Date.now() });
                   allerA("defi");
                 }}
+                onAllerDefi={() => allerA("defi")}
               />
             </div>
           </div>
