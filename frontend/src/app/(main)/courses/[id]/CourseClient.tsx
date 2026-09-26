@@ -1526,7 +1526,32 @@ function StatutPari({ statut, gain }: { statut: "gagne" | "perdu" | "en_attente"
    d'écran), qui défile dans son propre conteneur sur mobile. */
 function BilanDetail({ bilan }: { bilan: BilanData }) {
   return (
-    <div className="overflow-x-auto rounded-xl border border-stone-200 bg-white">
+    <>
+    {/* Téléphone : une carte par pari. Le tableau (460 px minimum) y faisait
+        défiler Mise et Résultat hors de l'écran, et coupait les combinaisons. */}
+    <ul className="divide-y divide-stone-100 overflow-hidden rounded-xl border border-stone-200 bg-white sm:hidden">
+      {bilan.paris.map((p, i) => (
+        <li key={i} className={cn("px-3 py-2.5", p.statut === "gagne" && "bg-emerald-50/40")}>
+          <div className="flex items-center justify-between gap-2">
+            <span className="min-w-0 text-[13px] font-medium text-slate-900">{p.type}</span>
+            <span className="shrink-0"><StatutPari statut={p.statut} gain={p.gain} /></span>
+          </div>
+          <div className="mt-1 flex items-baseline justify-between gap-2 text-[12px] text-stone-600">
+            <span className="min-w-0 font-mono">{p.chevaux.map((c) => `N°${c.numero}`).join(" + ")}</span>
+            <span className="shrink-0 whitespace-nowrap tabular-nums">mise {eur(p.mise, 0)}</span>
+          </div>
+        </li>
+      ))}
+      <li className="flex items-center justify-between gap-2 bg-stone-50/80 px-3 py-2.5 text-[13px]">
+        <span className="min-w-0 font-semibold text-slate-900">
+          {bilan.nb_gagnes}/{bilan.nb_paris} gagné{bilan.nb_gagnes > 1 ? "s" : ""} · mise {eur(bilan.total_mise, 0)}
+        </span>
+        <span className={cn("shrink-0 font-display font-bold tabular-nums", bilan.total_gain > 0 ? "text-emerald-700" : "text-stone-600")}>
+          {eur(bilan.total_gain)}
+        </span>
+      </li>
+    </ul>
+    <div className="hidden overflow-x-auto rounded-xl border border-stone-200 bg-white sm:block">
       <table className="w-full min-w-[460px] border-collapse text-[13px]">
         <caption className="sr-only">Détail des paris du plan et de leur règlement</caption>
         <thead>
@@ -1575,6 +1600,7 @@ function BilanDetail({ bilan }: { bilan: BilanData }) {
         </tfoot>
       </table>
     </div>
+    </>
   );
 }
 
@@ -1947,7 +1973,9 @@ function BilanMiseSection({ courseId, paywall = false }: { courseId: string; pay
                 label="Recevoir les plans avant le départ — 12€/mois"
                 variant="brand"
                 size="default"
-                className="w-auto"
+                // Libellé trop long pour une ligne sur téléphone : il débordait
+                // du bouton. Pleine largeur et retour à la ligne autorisé.
+                className="h-auto min-h-10 w-full whitespace-normal py-2 text-center leading-snug sm:w-auto"
               />
               <Link
                 href="/track-record"

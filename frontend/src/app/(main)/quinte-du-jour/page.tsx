@@ -185,13 +185,15 @@ export default async function QuinteDuJourPage() {
 
             <Section title={`Les ${course.nb_partants} partants du Quinté+`}>
               <div className="overflow-x-auto">
-                <table className="w-full min-w-[520px] text-sm">
+                {/* Sur téléphone : numéro, cheval, cote. Jockey et musique faisaient
+                    défiler la table et coupaient la colonne de droite. */}
+                <table className="w-full text-sm sm:min-w-[520px]">
                   <thead>
                     <tr className="border-b border-amber-100 text-left text-[11px] uppercase tracking-wide text-brand-charcoal">
                       <th className="py-2 pr-3">N°</th>
                       <th className="py-2 pr-3">Cheval</th>
-                      <th className="py-2 pr-3">Jockey</th>
-                      <th className="py-2 pr-3">Musique</th>
+                      <th className="hidden py-2 pr-3 sm:table-cell">Jockey</th>
+                      <th className="hidden py-2 pr-3 sm:table-cell">Musique</th>
                       <th className="py-2 pr-3 text-right">Cote</th>
                     </tr>
                   </thead>
@@ -211,10 +213,10 @@ export default async function QuinteDuJourPage() {
                           {titleCase(p.nom_cheval)}
                           {p.non_partant ? " (non-partant)" : ""}
                         </td>
-                        <td className="py-2 pr-3 text-brand-charcoal">
+                        <td className="hidden py-2 pr-3 text-brand-charcoal sm:table-cell">
                           {p.jockey ? titleCase(p.jockey) : "—"}
                         </td>
-                        <td className="py-2 pr-3 font-mono text-[12px] text-brand-charcoal">
+                        <td className="hidden py-2 pr-3 font-mono text-[12px] text-brand-charcoal sm:table-cell">
                           {p.musique ?? "—"}
                         </td>
                         <td className="py-2 pr-3 text-right tabular-nums">
@@ -256,7 +258,7 @@ export default async function QuinteDuJourPage() {
                   Rapports pour 1 € de mise, publiés par le PMU après l&apos;arrivée.
                 </p>
                 <div className="mt-3 overflow-x-auto">
-                  <table className="w-full min-w-[380px] text-sm">
+                  <table className="w-full text-sm">
                     <tbody>
                       {rapports.map(([code, val]) => (
                         <tr key={code} className="border-b border-amber-50">
