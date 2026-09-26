@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { Trophy, Target, ShieldCheck, Sparkles } from "lucide-react";
-import { IdentiteCheval, CasaqueNumero } from "@/components/courses/identite-cheval";
+import { CasaqueNumero } from "@/components/courses/identite-cheval";
 import type { SeoVerdict, SeoPronoCheval } from "@/lib/seo";
 
 /**
@@ -107,14 +107,17 @@ export function VerdictAlgoLigne({ v, courseId }: { v: SeoVerdict; courseId: str
         {ton.label}
       </span>
       {v.favori_numero != null && (
-        <span className="inline-flex min-w-0 items-center gap-1">
-          <span className="text-stone-600">Favori algo :</span>
-          <IdentiteCheval numero={v.favori_numero} nom={nomTitre(v.favori_nom)} courseId={courseId} />
+        <span className="inline-flex min-w-0 flex-wrap items-center gap-x-1 gap-y-0.5">
+          <span className="whitespace-nowrap text-stone-600">Favori algo :</span>
+          {/* Numéro seul sur téléphone : le nom, coupé à dix lettres, poussait
+              la cote et la place d'arrivée sur deux lignes étroites. */}
+          <CasaqueNumero numero={v.favori_numero} courseId={courseId} />
+          <span className="hidden min-w-0 truncate sm:inline">{nomTitre(v.favori_nom)}</span>
           {v.favori_cote != null && (
-            <span className="text-stone-600">à {v.favori_cote.toLocaleString("fr-FR", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}</span>
+            <span className="whitespace-nowrap text-stone-600">à {v.favori_cote.toLocaleString("fr-FR", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}</span>
           )}
           {!v.gagnant_top1 && v.favori_position != null && (
-            <span className="text-stone-600">→ arrivé {ordinal(v.favori_position)}</span>
+            <span className="whitespace-nowrap text-stone-600">→ arrivé {ordinal(v.favori_position)}</span>
           )}
         </span>
       )}

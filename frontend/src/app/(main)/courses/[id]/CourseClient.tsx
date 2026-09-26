@@ -267,22 +267,27 @@ function ComparateurChevaux({ partants }: { partants: Partant[] }) {
 
   const Select = ({ value, onChange, exclude, cote }: { value: number | null; onChange: (n: number) => void; exclude: number | null; cote: "a" | "b" }) => (
     <label className={cn(
-      "relative flex min-w-0 flex-1 items-center gap-2 rounded-xl px-3 py-2 ring-1 ring-inset transition-colors focus-within:ring-amber-400",
+      "relative flex min-w-0 flex-1 flex-col items-center gap-1.5 rounded-xl px-2 py-2 ring-1 sm:flex-row sm:gap-2 sm:px-3 ring-inset transition-colors focus-within:ring-amber-400",
       cote === "a" ? "bg-gradient-to-br from-amber-50 to-white ring-amber-200" : "bg-gradient-to-br from-sky-50 to-white ring-sky-200",
     )}>
       <span className="sr-only">{cote === "a" ? "Premier cheval" : "Second cheval"}</span>
       <CasaqueNumero numero={value} />
+      {/* Le nom s'affiche en entier (sur deux lignes au besoin) ; le <select>
+          natif, transparent, couvre toute la pastille et reste la cible du doigt.
+          Un <select> visible tronquait le nom à deux lettres sur téléphone. */}
+      <span aria-hidden="true" className="min-w-0 max-w-full flex-1 break-words text-center text-[12px] font-bold leading-tight text-stone-900 sm:pr-4 sm:text-left sm:text-[12.5px]" style={{ fontFamily: CX.sg }}>
+        {jouables.find((p) => p.numero === value)?.nom_cheval ?? "—"}
+      </span>
       <select
         value={value ?? ""}
         onChange={(e) => onChange(Number(e.target.value))}
-        className="min-w-0 flex-1 cursor-pointer appearance-none truncate bg-transparent pr-5 text-[13px] font-bold text-stone-900 outline-none"
-        style={{ fontFamily: CX.sg }}
+        className="absolute inset-0 h-full w-full cursor-pointer appearance-none opacity-0"
       >
         {jouables.filter((p) => p.numero !== exclude).map((p) => (
           <option key={p.numero} value={p.numero}>{p.numero} · {p.nom_cheval}</option>
         ))}
       </select>
-      <ChevronDown className="pointer-events-none absolute right-2.5 h-4 w-4 text-stone-400" aria-hidden="true" />
+      <ChevronDown className="pointer-events-none absolute right-2 top-2.5 h-4 w-4 text-stone-400 sm:right-2.5 sm:top-1/2 sm:-translate-y-1/2" aria-hidden="true" />
     </label>
   );
 
@@ -387,14 +392,19 @@ function ComparaisonCotes({ partants }: { partants: Partant[] }) {
   );
   if (activeSources.length <= 1) return null;
 
-  const HEAD_CELL = { padding: "9px 8px", fontSize: 10, fontWeight: 700, textTransform: "uppercase" as const, textAlign: "right" as const, color: CX.gray400, background: CX.surf2 };
+  const HEAD_CELL = { padding: "9px 8px", fontSize: 10, whiteSpace: "nowrap" as const, fontWeight: 700, textTransform: "uppercase" as const, textAlign: "right" as const, color: CX.gray400, background: CX.surf2 };
   const nbCols = activeSources.length;
 
   return (
     <div style={{ overflowX: "auto", borderTop: `1px solid ${CX.bd4}` }}>
-      <div style={{ display: "grid", gridTemplateColumns: `1.6fr repeat(${nbCols},1fr) 0.8fr`, gap: 0, minWidth: 640 }}>
+      {/* Colonne cheval à sa largeur naturelle et collée à gauche : sur téléphone
+          on n'y met que le numéro (un nom coupé à quatre lettres, « JOYE… », ne
+          disait rien) et elle reste visible pendant le défilement des cotes. */}
+      <div style={{ display: "grid", gridTemplateColumns: `max-content repeat(${nbCols},minmax(62px,1fr)) minmax(64px,.8fr)`, gap: 0, alignItems: "stretch" }}>
         {/* En-tête */}
-        <div style={{ padding: "9px 14px", fontSize: 10, fontWeight: 700, textTransform: "uppercase", color: CX.gray400, background: CX.surf2 }}>Cheval</div>
+        <div className="sticky left-0 z-[1] px-3 sm:px-3.5" style={{ paddingTop: 9, paddingBottom: 9, fontSize: 10, fontWeight: 700, textTransform: "uppercase", color: CX.gray400, background: CX.surf2 }}>
+          <span className="sm:hidden">N°</span><span className="hidden sm:inline">Cheval</span>
+        </div>
         {activeSources.map((s) => (
           <div key={s.key} style={HEAD_CELL}>{s.label}</div>
         ))}
@@ -405,19 +415,20 @@ function ComparaisonCotes({ partants }: { partants: Partant[] }) {
           const mv = p.mouvement_cote_pct;
           return (
             <Fragment key={p.participation_id}>
-              <div style={{ padding: "9px 14px", fontSize: 12.5, color: CX.ink2, borderTop: `1px solid ${CX.bd4}` }}>
-                <IdentiteCheval numero={p.numero} nom={p.nom_cheval} />
+              <div className="sticky left-0 z-[1] flex items-center gap-1.5 bg-white px-3 sm:px-3.5" style={{ paddingTop: 7, paddingBottom: 7, fontSize: 12.5, color: CX.ink2, borderTop: `1px solid ${CX.bd4}` }}>
+                <CasaqueNumero numero={p.numero} />
+                <span className="hidden whitespace-nowrap sm:inline">{p.nom_cheval}</span>
               </div>
               {activeSources.map((s) => {
                 const val = (p as unknown as Record<string, unknown>)[s.key] as number | null;
                 const isBest = val != null && coteMin != null && val === coteMin;
                 return (
-                  <div key={s.key} style={{ padding: "9px 8px", fontFamily: CX.sg, fontSize: 12.5, fontWeight: isBest ? 700 : 500, textAlign: "right", color: isBest ? CX.em : val == null ? CX.muted : CX.ink2, borderTop: `1px solid ${CX.bd4}` }}>
+                  <div key={s.key} style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", padding: "9px 8px", fontFamily: CX.sg, fontSize: 12.5, fontWeight: isBest ? 700 : 500, textAlign: "right", color: isBest ? CX.em : val == null ? CX.muted : CX.ink2, borderTop: `1px solid ${CX.bd4}` }}>
                     {val ? formatCoteFr(val) : "—"}
                   </div>
                 );
               })}
-              <div style={{ padding: "9px 12px", fontFamily: CX.sg, fontSize: 12, fontWeight: 600, textAlign: "right", color: mv == null ? CX.muted : mv > 0 ? CX.em : CX.red, borderTop: `1px solid ${CX.bd4}` }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", whiteSpace: "nowrap", padding: "9px 12px", fontFamily: CX.sg, fontSize: 12, fontWeight: 600, textAlign: "right", color: mv == null ? CX.muted : mv > 0 ? CX.em : CX.red, borderTop: `1px solid ${CX.bd4}` }}>
                 {mv != null ? `${mv > 0 ? "▼" : "▲"} ${Math.abs(mv).toLocaleString("fr-FR", { maximumFractionDigits: 1 })} %` : "—"}
               </div>
             </Fragment>
@@ -1081,7 +1092,7 @@ function ResultatsSection({ resultats, partants }: {
                   <td className="px-2 py-2 tabular-nums"><CasaqueNumero numero={c.numero} /></td>
                   <td className="px-2 py-2">
                     <span className="line-through decoration-rose-400/60">{c.nom}</span>
-                    <span className="ml-2 align-middle text-[11px] font-medium text-rose-700">{fmtIncident(c.incident)}</span>
+                    <span className="block text-[11px] font-medium leading-tight text-rose-700">{fmtIncident(c.incident)}</span>
                   </td>
                   {hasTemps && <td className="px-2 py-2 hidden sm:table-cell" />}
                   <td className="px-2 py-2 text-right font-mono tabular-nums">
@@ -1153,7 +1164,7 @@ function ResultatsSection({ resultats, partants }: {
                       <div className="space-y-0.5">
                         {rows.map((r, i) => (
                           <div key={i} className="flex items-baseline justify-between gap-2 text-xs">
-                            <span className="truncate text-muted-foreground">
+                            <span className="min-w-0 text-muted-foreground">
                               {isMulti
                                 ? <>{fmtMulti(r.libelle) && <span className="font-semibold text-foreground">{fmtMulti(r.libelle)}</span>}{fmtMulti(r.libelle) ? " · " : ""}{fmtCombo(r.combinaison)}</>
                                 : (fmtCombo(r.combinaison) || "—")}
@@ -1343,12 +1354,12 @@ function PronosticVerdictSection({ predictions, classement }: {
             <div
               key={p.participation_id}
               className={cn(
-                "grid grid-cols-[30px_minmax(0,1fr)_92px] items-center gap-3 border-b border-stone-100 px-3 py-2.5 last:border-b-0 sm:grid-cols-[30px_minmax(0,1fr)_120px_92px]",
+                "grid grid-cols-[28px_minmax(0,1fr)_auto] items-center gap-2 border-b border-stone-100 px-3 py-2.5 last:border-b-0 sm:grid-cols-[30px_minmax(0,1fr)_120px_92px]",
                 pv.ligne,
               )}
             >
               <span className={cn(
-                "flex h-7 w-7 items-center justify-center rounded-lg font-display text-[13px] font-bold tabular-nums ring-1",
+                "flex h-7 w-7 shrink-0 items-center justify-center rounded-lg font-display text-[13px] font-bold tabular-nums ring-1",
                 p.rang_predit === 1 ? "bg-amber-100 text-amber-900 ring-amber-200"
                   : p.rang_predit <= 3 ? "bg-stone-100 text-slate-700 ring-stone-200"
                   : "bg-white text-stone-600 ring-stone-200",
@@ -1360,15 +1371,18 @@ function PronosticVerdictSection({ predictions, classement }: {
                 {/* Le NUMÉRO domine le nom : c'est lui qu'on coche sur un ticket,
                     qu'annonce le commentaire de course et qu'on retrouve dans
                     l'arrivée officielle. */}
-                <span className="flex items-baseline gap-1.5 truncate">
-                  <span className="font-display text-[15px] font-bold tabular-nums text-slate-900"><CasaqueNumero numero={p.numero} /></span>
-                  <span className="truncate text-[13px] text-stone-600">{p.nom_cheval}</span>
+                {/* Nom complet, sur deux lignes s'il le faut : tronqué à 150 px
+                    (« JOYEUSE DE L… ») il ne se lisait plus, et le badge du
+                    numéro, rétréci par `truncate`, venait le recouvrir. */}
+                <span className="flex min-w-0 items-center gap-1.5">
+                  <span className="shrink-0 font-display text-[15px] font-bold tabular-nums text-slate-900"><CasaqueNumero numero={p.numero} /></span>
+                  <span className="min-w-0 break-words text-[12.5px] leading-tight text-stone-600 sm:text-[13px]">{p.nom_cheval}</span>
                 </span>
                 <div className="mt-1 flex items-center gap-2 sm:hidden">
                   <div className="h-1.5 w-16 overflow-hidden rounded-full bg-stone-100">
                     <div className="h-full rounded-full bg-stone-300" style={{ width: `${Math.max(2, ((p.proba_top3 || 0) / maxP3) * 100)}%` }} />
                   </div>
-                  <span className="text-[11px] tabular-nums text-muted-foreground">
+                  <span className="whitespace-nowrap text-[11px] tabular-nums text-muted-foreground">
                     top-3 {Math.round((p.proba_top3 || 0) * 100)} %
                   </span>
                 </div>
@@ -1386,7 +1400,10 @@ function PronosticVerdictSection({ predictions, classement }: {
               <span className="justify-self-end">
                 <span className={cn("inline-flex items-center gap-1 rounded-full px-2 py-1 text-[11.5px] font-semibold tabular-nums ring-1", pv.cls)}>
                   <pv.Icone className="h-3 w-3" aria-hidden="true" />
-                  {pv.txt}
+                  {/* « non classé » prenait sur téléphone la place du nom du cheval. */}
+                  {pos == null
+                    ? <><span className="sm:hidden" title="non classé">NC</span><span className="hidden sm:inline">{pv.txt}</span></>
+                    : pv.txt}
                 </span>
               </span>
             </div>
