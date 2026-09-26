@@ -11,6 +11,7 @@ import { EtapesFonctionnement } from "@/components/home/EtapesFonctionnement";
 import { Button } from "@/components/ui/button";
 import { Navbar } from "@/components/layout/Navbar";
 import { Footer } from "@/components/layout/Footer";
+import { BottomNav } from "@/components/layout/BottomNav";
 import { ScrollReveal } from "@/components/ui/ScrollReveal";
 import { LiveTicker } from "@/components/ui/LiveTicker";
 import { CalculatorDemo } from "@/components/home/CalculatorDemo";
@@ -233,7 +234,9 @@ export default async function HomePage() {
   const FAQ = buildFaq(tr);
 
   return (
-    <div className="flex flex-col min-h-screen bg-brand-warm">
+    // pb mobile = hauteur de la BottomNav + safe-area : sans elle, le bas du pied de page
+    // passerait sous la barre sur téléphone.
+    <div className="flex flex-col min-h-screen bg-brand-warm pb-[calc(68px+env(safe-area-inset-bottom))] md:pb-0">
       {/* L'accueil n'est PAS dans le groupe (main) : il compose lui-même sa navigation et
           son pied de page. Il n'avait donc ni repère `main` ni lien d'évitement — la page
           la plus visitée du site était la seule sans structure de repères. */}
@@ -1104,6 +1107,7 @@ export default async function HomePage() {
       </main>
 
       <Footer />
+      <BottomNav />
     </div>
   );
 }
