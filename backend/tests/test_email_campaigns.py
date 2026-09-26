@@ -218,7 +218,7 @@ def test_render_escapes_and_limits_email_size():
     assert "<img src=x>" not in html and "&lt;img src=x&gt;" in html
     assert html.count("Consulter cette course") == 12
     assert len(html.encode()) < 100_000
-    assert "instagram.com/blackturf.fr" in html and "logo-blackturf.png" in html
+    assert "instagram.com/blackturf.fr" in html and "logo-nuit.png" in html
     assert "viewport" in html and "table-layout:fixed" in html
     assert "★★★★" in html and "Niveau 4/4" in html
     assert "hero-valeurs.jpg" in html and "Photo d’illustration" in html

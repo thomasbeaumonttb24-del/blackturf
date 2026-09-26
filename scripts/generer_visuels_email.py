@@ -126,6 +126,38 @@ def logo() -> None:
     fond.quantize(colors=96, method=Image.MEDIANCUT).save(SORTIE / "logo-blackturf.png", optimize=True)
 
 
+def logo_nuit() -> None:
+    """Logo pour fond sombre, fond transparent : le cheval noir devient crème,
+    l'anneau et le nom restent or. Un fond sombre n'est jamais modifié par les
+    modes sombres des clients mail, contrairement à un bandeau blanc."""
+    im = Image.open(RACINE / "logo-blackturf.png").convert("RGBA")
+    fond = Image.new("RGBA", im.size, (255, 255, 255, 255))
+    plat = Image.alpha_composite(fond, im).convert("RGB")
+    masque = Image.eval(plat.convert("L"), lambda v: 255 if v < 235 else 0)
+    boite = masque.getbbox()
+    plat = plat.crop(boite)
+    out = Image.new("RGBA", plat.size, (0, 0, 0, 0))
+    src, dst = plat.load(), out.load()
+    creme, clair = _rgb("#F3E3B5"), _rgb("#FFF8E6")
+    for y in range(plat.height):
+        for x in range(plat.width):
+            r, g, b = src[x, y]
+            mx, mn = max(r, g, b), min(r, g, b)
+            sat = (mx - mn) / (mx or 1)
+            lum = (r + g + b) / 765
+            if lum < 0.42:                         # corps du cheval (noir bruité) → crème plein
+                dst[x, y] = (*creme, 255)
+            elif sat > 0.25 and lum < 0.9:        # or : conservé, un peu éclairci
+                a = 255 if lum < 0.8 else round(255 * (0.9 - lum) / 0.1)
+                dst[x, y] = (min(255, int(r * 1.12)), min(255, int(g * 1.12)), min(255, int(b * 1.1)), max(0, a))
+            elif lum < 0.85:                       # noir du cheval → crème, reflets plus clairs
+                t = lum / 0.85
+                a = 255 if lum < 0.7 else round(255 * (0.85 - lum) / 0.15)
+                dst[x, y] = (*(round(creme[i] + (clair[i] - creme[i]) * t) for i in range(3)), a)
+    out = out.resize((240, round(out.height * 240 / out.width)), Image.LANCZOS)
+    out.quantize(colors=128, method=Image.FASTOCTREE).save(SORTIE / "logo-nuit.png", optimize=True)
+
+
 def disciplines() -> None:
     """Silhouettes de discipline teintées, comme le masque CSS de la fiche course."""
     for nom, couleur in DISCIPLINES.items():
@@ -228,6 +260,7 @@ if __name__ == "__main__":
     banniere("galop-lutte.jpg", "galop", focale_y=0.62)
     banniere("attele-action.jpg", "trot", focale_y=0.55)
     logo()
+    logo_nuit()
     disciplines()
     banniere("galop-vitesse.jpg", "valeurs", focale_y=0.45)
     banniere("galop-foule.jpg", "bilan", focale_y=0.40)

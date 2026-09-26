@@ -172,7 +172,7 @@ def _plan(rank, plan, url):
     <div style="font-size:12.5px;line-height:18px;color:{C['stone5']}">&#9719; {e(plan['date'])}</div>
   </td>
 </tr></table>
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" bgcolor="{C['vertFond']}" style="width:100%;margin-top:12px;border-collapse:separate;background:{C['vertFond']};background-image:linear-gradient(135deg,#ECFDF5,#D1FAE5);border:1px solid {C['vertBord']};border-bottom:3px solid #6EE7B7;border-radius:14px">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" bgcolor="{C['vertFond']}" style="width:100%;margin-top:12px;border-collapse:separate;background:{C['vertFond']};border:1px solid {C['vertBord']};border-bottom:3px solid #6EE7B7;border-radius:14px">
   <tr><td style="padding:12px 14px">
     <div style="font-size:10px;line-height:14px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:{C['vert']}">Bénéfice net du plan</div>
     <div class="gros" style="font-size:34px;line-height:40px;font-weight:700;color:#065F46;font-family:{POLICE};letter-spacing:-.02em">+{e(euro(plan['net']))}</div>

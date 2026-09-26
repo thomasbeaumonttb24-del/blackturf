@@ -334,7 +334,7 @@ def _ligne_cheval(c: dict, meilleur: Optional[int]) -> str:
     podium = rang <= 3
     fond = "#FFFBEB" if fav else "#ffffff"
     fond_css = (
-        f"background:{fond};background-image:linear-gradient(90deg,#FEF3C7 0%,#FFFBEB 40%,#ffffff 100%);" if fav
+        f"background:{fond};" if fav
         else f"background:{fond};"
     )
     lisere = PODIUM.get(rang)
@@ -475,7 +475,7 @@ def _entete_course(course: dict, lien_course: str) -> str:
     return f"""
 <tr><td class="sec" style="padding:16px 16px 0">
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" bgcolor="#FFFBF0" style="width:100%;border-collapse:separate;
-    background:#FFFBF0;background-image:linear-gradient(180deg,#FFFBF0,#ffffff);border:1px solid #F5E6C4;border-bottom:3px solid #EAD9B0;
+    background:#FFFBF0;border:1px solid #F5E6C4;border-bottom:3px solid #EAD9B0;
     border-radius:22px;box-shadow:0 1px 3px rgba(0,0,0,.04),0 16px 44px -26px rgba(180,83,9,.28)">
     <tr><td style="padding:20px 20px 18px">
       <div style="line-height:30px">{" ".join(badges)}</div>

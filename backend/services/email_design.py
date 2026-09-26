@@ -175,11 +175,11 @@ def rangee_nuit(contenu: str, padding: str = "0 28px 28px", classe: str = "px", 
 def barre_logo(mention: str) -> str:
     return f"""
   <tr><td style="padding:0 0 12px">
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" bgcolor="#ffffff" style="width:100%;border-collapse:separate;background:#ffffff;border-radius:18px;border-top:4px solid #C99A3C;box-shadow:0 10px 30px -12px rgba(0,0,0,.6)">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" bgcolor="#1A160F" style="width:100%;border-collapse:separate;background:#1A160F;border:1px solid #33291A;border-radius:18px;border-top:3px solid #C99A3C;box-shadow:0 10px 30px -12px rgba(0,0,0,.6)">
       <tr>
-        <td class="logo" style="padding:10px 18px" valign="middle"><a href="{SITE}"><img src="{IMG}/logo-blackturf.png" width="104" alt="BlackTurf" style="display:block;width:104px;height:auto;border:0"></a></td>
+        <td class="logo" style="padding:10px 18px" valign="middle"><a href="{SITE}"><img src="{IMG}/logo-nuit.png" width="84" alt="BlackTurf" style="display:block;width:84px;height:auto;border:0"></a></td>
         <td align="right" valign="middle" style="padding:10px 18px">
-          <span class="mention" style="display:inline-block;padding:6px 12px;border-radius:999px;background:#FEF3C7;border:1px solid #FCD34D;color:{C['orFonce']};font-size:11px;line-height:14px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;white-space:nowrap">{mention}</span>
+          <span class="mention" style="display:inline-block;padding:6px 12px;border-radius:999px;background:#2A2215;border:1px solid #5B4A2A;color:{C['orNuit']};font-size:11px;line-height:14px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;white-space:nowrap">{mention}</span>
         </td>
       </tr>
     </table>
@@ -235,7 +235,7 @@ def fenetre_site(url: str, contenu_rangees: str) -> str:
           font-size:11.5px;line-height:15px;text-decoration:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">&#128274; {e(affichee)}</a></td>
       </tr></table>
     </td></tr>
-    <tr><td bgcolor="{C['page']}" style="background:{C['page']};background-image:radial-gradient(ellipse at 18% 0%,rgba(245,158,11,.08) 0%,transparent 46%),linear-gradient(180deg,#FFFDF6 0%,#FAFAF8 60%);padding:0 0 16px">
+    <tr><td bgcolor="{C['page']}" style="background:{C['page']};padding:0 0 16px">
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%">{contenu_rangees}</table>
     </td></tr>
   </table>
@@ -252,10 +252,10 @@ def bouton(label: str, url: str) -> str:
     """Bouton en relief : dégradé or, tranche sombre en bas, ombre portée."""
     return f"""
 <table role="presentation" cellpadding="0" cellspacing="0" align="center" style="margin:0 auto">
-  <tr><td align="center" bgcolor="#D97706" style="border-radius:14px;background:#D97706;background-image:linear-gradient(180deg,#FCD34D 0%,#F59E0B 45%,#D97706 100%);
-    border-bottom:4px solid #92400E;box-shadow:0 14px 26px -12px rgba(180,83,9,.75),inset 0 1px 0 rgba(255,255,255,.6)">
-    <!--[if mso]><a href="{e(url)}" style="font-size:16px;color:#1C1917;font-weight:bold;text-decoration:none;padding:16px 30px;display:block">{label} &rarr;</a><![endif]-->
-    <!--[if !mso]><!--><a href="{e(url)}" style="display:inline-block;padding:16px 30px;font-size:16px;line-height:20px;font-weight:800;color:#1C1917;
+  <tr><td align="center" bgcolor="#B45309" style="border-radius:14px;background:#B45309;background-image:linear-gradient(180deg,#E08A1E 0%,#C2620C 50%,#A14A08 100%);
+    border-top:1px solid #F5B54A;border-bottom:4px solid #6B2F06;box-shadow:0 14px 26px -12px rgba(180,83,9,.75)">
+    <!--[if mso]><a href="{e(url)}" style="font-size:16px;color:#ffffff;font-weight:bold;text-decoration:none;padding:16px 30px;display:block">{label} &rarr;</a><![endif]-->
+    <!--[if !mso]><!--><a href="{e(url)}" style="display:inline-block;padding:16px 30px;font-size:16px;line-height:20px;font-weight:800;color:#ffffff;text-shadow:0 1px 1px rgba(0,0,0,.35);
       text-decoration:none;font-family:{POLICE};letter-spacing:-.01em">{label} &rarr;</a><!--<![endif]-->
   </td></tr>
 </table>"""
