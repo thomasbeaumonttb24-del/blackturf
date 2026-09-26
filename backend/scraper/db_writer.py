@@ -7,7 +7,7 @@ import structlog
 from typing import Optional
 from datetime import datetime, date, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update, text
+from sqlalchemy import func, select, update, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from db.models import (
@@ -313,6 +313,10 @@ def champs_maj_course(course: CourseScrape, date_heure: Optional[datetime],
         # Heure de départ conditionnelle : `None` = payload PMU illisible, et une
         # heure illisible ne doit JAMAIS écraser l'heure correcte déjà en base.
         **({"date_heure": date_heure} if date_heure else {}),
+        # L'heure initiale ne recule jamais avec un retard : elle ne peut que
+        # s'avancer (course avancée). LEAST ignore le NULL des courses anciennes.
+        **({"heure_depart_initiale": func.least(Course.__table__.c.heure_depart_initiale, date_heure)}
+           if date_heure else {}),
         "nom": _t(course.nom, 200),
         "terrain_officiel": course.terrain,
         "terrain_code": course.terrain_code,
@@ -378,6 +382,7 @@ async def save_course_to_db(session: AsyncSession, course: CourseScrape) -> Opti
         # Colonne NOT NULL : à l'INSERT seulement, un payload illisible retombe sur
         # l'instant courant (une ligne datée faux vaut mieux qu'une course perdue).
         date_heure=date_heure or datetime.now(timezone.utc),
+        heure_depart_initiale=date_heure,
         hippodrome_nom=_t(course.hippodrome, 100),
         discipline=_t(course.discipline, 20),
         distance=course.distance,

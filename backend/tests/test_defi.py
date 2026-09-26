@@ -127,9 +127,9 @@ async def test_pseudo_obligatoire_pour_jouer(db):
         await defi.engager_pari(db, u, "C1", "Simple Gagnant", [3], 10)
 
 
-async def test_depot_ferme_avant_le_depart(db):
+async def test_depot_ferme_a_l_heure_du_depart(db):
     u = await _user(db)
-    await _course(db, depart=MAINTENANT + timedelta(minutes=1))
+    await _course(db, depart=MAINTENANT - timedelta(seconds=1))
     with pytest.raises(defi.DefiErreur, match="fermés"):
         await defi.engager_pari(db, u, "C1", "Simple Gagnant", [3], 10)
 
@@ -656,3 +656,28 @@ async def test_pari_engage_apres_le_depart_definitif_est_rembourse(db):
     await db.refresh(trop_tard)
     assert (a_temps.statut, a_temps.points_retour) == ("gagne", 42.0)
     assert (trop_tard.statut, trop_tard.points_retour) == ("rembourse", 20.0)
+
+
+async def test_paris_fermes_pile_a_l_heure_annoncee_meme_si_la_course_est_retardee(db):
+    u = await _user(db)
+    annoncee = datetime.now(timezone.utc) + timedelta(seconds=30)
+    c = await _course(db, depart=annoncee)
+    c.heure_depart_initiale = annoncee
+    await db.commit()
+    # 30 s avant l'heure annoncée : ouvert, sans marge.
+    assert (await defi.engager_pari(db, u, "C1", "Simple Gagnant", [3], 10)).statut == "en_attente"
+    # Le PMU repousse le départ de 12 min : à l'heure annoncée, c'est fermé quand même.
+    c.date_heure = annoncee + timedelta(minutes=12)
+    await db.commit()
+    with pytest.raises(defi.DefiErreur, match="fermés"):
+        await defi.engager_pari(db, u, "C1", "Simple Gagnant", [4], 10, now=annoncee)
+    with pytest.raises(defi.DefiErreur, match="fermés"):
+        await defi.engager_pari(db, u, "C1", "Simple Gagnant", [4], 10, now=annoncee + timedelta(minutes=5))
+    assert defi.limite_depot(c) == annoncee
+
+
+async def test_course_avancee_ferme_plus_tot(db):
+    c = await _course(db, depart=MAINTENANT + timedelta(hours=1))
+    c.heure_depart_initiale = MAINTENANT + timedelta(hours=1)
+    c.date_heure = MAINTENANT + timedelta(minutes=20)       # le PMU avance la course
+    assert defi.limite_depot(c) == MAINTENANT + timedelta(minutes=20)

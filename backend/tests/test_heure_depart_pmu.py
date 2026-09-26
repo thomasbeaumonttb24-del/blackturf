@@ -86,3 +86,12 @@ def test_upsert_course_utilise_bien_ces_champs():
 
     src = inspect.getsource(db_writer.save_course_to_db)
     assert "set_=champs_maj_course(" in src
+
+
+def test_heure_initiale_ne_recule_jamais_avec_un_retard():
+    """Défi du mois : l'heure initiale (fermeture des paris) ne suit pas les retards,
+    seulement les avances — LEAST(heure initiale en base, heure publiée)."""
+    heure = _parse_datetime_strict("1788889020000")
+    expr = champs_maj_course(_course(), heure, None)["heure_depart_initiale"]
+    assert "least" in str(expr).lower()
+    assert "heure_depart_initiale" not in champs_maj_course(_course(date_heure=""), None, None)

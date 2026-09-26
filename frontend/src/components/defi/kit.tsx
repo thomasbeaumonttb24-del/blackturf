@@ -12,7 +12,7 @@ export const DEFI_REGLES_DEFAUT = {
   points_max: 100,
   min_paris_classement: 10,
   max_paris_par_course: 3,
-  verrou_minutes: 2,
+  verrou_minutes: 0,
   recompenses: [
     { rang: 1, plan: "expert", jours: 30 },
     { rang: 2, plan: "standard", jours: 30 },

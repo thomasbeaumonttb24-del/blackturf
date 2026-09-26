@@ -7,7 +7,8 @@ gagnant rapporte ``points × rapport PMU officiel à l'arrivée``. Le meilleur
 solde en fin de mois gagne.
 
 Ce qui rend le classement non trichable :
-  - le dépôt ferme avant le départ PRÉVU, à l'heure du serveur ;
+  - le dépôt ferme à l'heure de départ ANNONCÉE (un retard ne le rouvre pas),
+    à l'heure du serveur ;
   - un pari engagé ne se modifie ni ne se supprime ;
   - le rapport et le résultat viennent de l'arrivée officielle (settle_pari),
     jamais d'une saisie du joueur ;
@@ -43,7 +44,9 @@ POINTS_MAX = 100
 MIN_PARIS_CLASSEMENT = 10
 # Au-delà, on n'est plus dans le pronostic mais dans l'arrosage de la course.
 MAX_PARIS_PAR_COURSE = 3
-VERROU_AVANT_DEPART = timedelta(minutes=2)
+# Les paris ferment PILE à l'heure de départ annoncée au programme, et le restent
+# si la course part en retard (cf. heure_fermeture).
+VERROU_AVANT_DEPART = timedelta(0)
 # Un pari gagnant dont le PMU n'a toujours pas publié le rapport 72 h après la
 # course est remboursé : sans cela il resterait « en attente » à vie et bloquerait
 # la remise des récompenses du mois (qui exige zéro pari en attente).
@@ -186,8 +189,16 @@ def mois_courant(now: Optional[datetime] = None) -> str:
     return mois_de(now or datetime.now(timezone.utc))
 
 
+def heure_fermeture(course: Course) -> datetime:
+    """Heure de départ initialement annoncée : un retard du PMU ne rouvre jamais
+    les paris ; une course avancée les ferme plus tôt."""
+    actuelle = _utc(course.date_heure)
+    initiale = getattr(course, "heure_depart_initiale", None)
+    return min(actuelle, _utc(initiale)) if initiale else actuelle
+
+
 def limite_depot(course: Course) -> datetime:
-    return _utc(course.date_heure) - VERROU_AVANT_DEPART
+    return heure_fermeture(course) - VERROU_AVANT_DEPART
 
 
 def depot_ouvert(course: Course, now: Optional[datetime] = None) -> bool:

@@ -209,6 +209,9 @@ class Course(Base):
     numero_reunion: Mapped[int | None] = mapped_column(Integer)
     nom: Mapped[str | None] = mapped_column(String(200))
     date_heure: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    # Heure de départ ANNONCÉE au premier scrape (jamais repoussée par un retard,
+    # seulement avancée si le PMU avance la course). Ferme les paris du Défi.
+    heure_depart_initiale: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     hippodrome_nom: Mapped[str] = mapped_column(String(100))
 
     # Caractéristiques
