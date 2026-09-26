@@ -766,7 +766,7 @@ export interface SeoTrackRecord {
  *  (128 ms mesurés en prod). Best-effort : la page reste valable sans eux. */
 export async function fetchTrackRecord(): Promise<SeoTrackRecord | null> {
   try {
-    const res = await fetch(`${API}/stats/track-record`, { next: { revalidate: 900 } });
+    const res = await fetch(`${API}/stats/track-record`, { next: { revalidate: 60 } });
     if (!res.ok) return null;
     return (await res.json()) as SeoTrackRecord;
   } catch {
