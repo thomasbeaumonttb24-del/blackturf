@@ -24,7 +24,9 @@ Le top et le bilan proviennent de la même règle que les visuels publics : dern
 
 ## Présentation et aperçu
 
-Les modèles vivent dans `backend/services/email_templates.py`. Ils utilisent le logo public, un seul axe de lecture, des cartes et des styles intégrés compatibles avec les clients mail courants, plus une version texte. Le lien Instagram est présent dans les deux lettres. Générer des aperçus **fictifs**, sans base ni envoi :
+Les modèles vivent dans `backend/services/email_templates.py` (lettres), `backend/services/email_pronostic.py` (pronostic gratuit, réplique de la fiche course) et `backend/services/email_compte.py` (confirmation de lettre, vérification d'adresse, mot de passe, résiliation). Tous partagent l'habillage de `backend/services/email_design.py` : fond nuit, logo or détouré, photo fondue, fenêtre du site, bouton or en relief, bloc Instagram, pied légal, plus une version texte. Les reliefs (médailles, tuiles, bannières, casaque neutre) sont des images générées par `scripts/generer_visuels_email.py` dans `frontend/public/img/email/`.
+
+**Mode sombre.** Gmail, Outlook.com et d'autres assombrissent les fonds clairs et éclaircissent les textes sombres, sans toucher aux images ni aux dégradés CSS. Règles à respecter : aucun dégradé sur une surface claire (couleur unie seulement), aucun texte sombre posé sur une image ou un dégradé, logo et bandeaux sur fond sombre, bouton en texte blanc sur or foncé. Le lien Instagram est présent dans les deux lettres. Générer des aperçus **fictifs**, sans base ni envoi :
 
 Le bilan IA affiche les pourcentages à une décimale et les comptes bruts entre parenthèses. L'icône Instagram est servie depuis `frontend/public/img/email/instagram-glyph.png` ; sa [source est le glyphe Meta publié sur Wikimedia Commons](https://commons.wikimedia.org/wiki/File:Instagram_Glyph_Gradient_RGB_logo.svg). L'image et le texte voisin renvoient au compte `@blackturf.fr`.
 

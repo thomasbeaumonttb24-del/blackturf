@@ -357,7 +357,11 @@ async def send_daily(session, now=None):
             items.append({"course_id": course.course_id,
                           "heure": utc(course.date_heure).astimezone(PARIS).strftime("%H:%M"),
                           "hippodrome": course.hippodrome_nom, "nom_cheval": horse.nom,
-                          "numero": part.numero, "ev": ev, "niveau": vb.niveau})
+                          "numero": part.numero, "ev": ev, "niveau": vb.niveau,
+                          # Habillage de la carte, comme la page Value bets.
+                          "course_nom": course.nom, "reunion": course.numero_reunion,
+                          "course_num": course.numero, "cote": part.cote_pmu,
+                          "casaque_url": part.casaque_image_url})
         if not items:
             continue
         html, plain = daily(items, local.strftime("%d/%m/%Y à %H:%M (Paris)"), _unsubscribe_url(user.user_id))

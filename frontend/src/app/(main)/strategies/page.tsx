@@ -54,7 +54,6 @@ function StrategieCard({
         <div className="flex items-start justify-between gap-2 mb-3">
           <h3 className="font-semibold">{strat.nom}</h3>
           <div className="flex gap-1">
-            {strat.alerte_email && <Badge variant="warning" className="text-[10px]">📧 Alerte</Badge>}
             {strat.partage_communaute && <Badge variant="secondary" className="text-[10px]">🌍 Partagée</Badge>}
           </div>
         </div>
@@ -299,14 +298,9 @@ export default function StrategiesPage() {
                 </div>
               </div>
 
-              <label className="flex items-center gap-2 text-sm cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={formData.alerte_email}
-                  onChange={(e) => setFormData({ ...formData, alerte_email: e.target.checked })}
-                />
-                Recevoir une alerte email quand un signal est détecté
-              </label>
+              {/* Pas de case « alerte e-mail » : `alerte_email` est enregistré par l'API
+                  mais aucun envoi n'y est branché (services/alerts.py n'envoie qu'un
+                  digest quotidien). Proposer la case promettait un mail qui ne part pas. */}
 
               <div className="flex gap-2">
                 <Button type="submit" variant="brand" size="sm">Créer la stratégie</Button>

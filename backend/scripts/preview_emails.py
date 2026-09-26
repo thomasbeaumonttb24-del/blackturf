@@ -4,11 +4,13 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from services.email_templates import daily, weekly
+from services import email_compte
 
 out = Path(__file__).resolve().parents[2] / "docs" / "email-previews"
 out.mkdir(parents=True, exist_ok=True)
 items = [
-    {"course_id": "demo", "heure": "13:45", "hippodrome": "Vincennes · exemple fictif", "nom_cheval": "Cheval de démonstration", "numero": 8, "niveau": 3, "ev": .142},
+    {"course_id": "demo", "heure": "13:45", "hippodrome": "Vincennes · exemple fictif", "nom_cheval": "Cheval de démonstration", "numero": 8, "niveau": 3, "ev": .142,
+     "course_nom": "Prix de démonstration", "reunion": 1, "course_num": 4, "cote": 7.5, "casaque_url": None},
     {"course_id": "demo", "heure": "15:10", "hippodrome": "ParisLongchamp · exemple fictif", "nom_cheval": "Un nom particulièrement long pour vérifier le retour à la ligne", "numero": 12, "niveau": 4, "ev": .186},
 ]
 data = {"debut": "14/09/2026 (DÉMONSTRATION)", "fin": "20/09/2026 · chiffres fictifs",
@@ -23,6 +25,13 @@ unsub = "https://blackturf.fr/newsletter"
 for name, rendered in (("quotidien", daily(items, "DÉMONSTRATION — données fictives", unsub)),
                        ("hebdomadaire", weekly(data, unsub, "https://blackturf.fr/newsletter"))):
     html, plain = rendered
+    (out / (name + ".html")).write_text(html, encoding="utf-8")
+    (out / (name + ".txt")).write_text(plain, encoding="utf-8")
+for name, (html, plain) in (
+        ("confirmation-lettre", email_compte.confirmation_newsletter("https://blackturf.fr/newsletter")),
+        ("verification-adresse", email_compte.verification_adresse("Prénom", "https://blackturf.fr/verifier-email")),
+        ("mot-de-passe", email_compte.reinitialisation_mot_de_passe("Prénom", "https://blackturf.fr/reinitialiser-mot-de-passe")),
+        ("resiliation", email_compte.resiliation(True))):
     (out / (name + ".html")).write_text(html, encoding="utf-8")
     (out / (name + ".txt")).write_text(plain, encoding="utf-8")
 print(out)
