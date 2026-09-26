@@ -1513,14 +1513,19 @@ async def _invalidate_stats_caches(course_id: str) -> None:
             # Palmarès public (page d'accueil) : « mis à jour à chaque fin de course »
             # doit être vrai, sinon le bandeau live affiche jusqu'à 5 min de retard.
             "stats:palmares-public",
-            # NB: stats:track-record + stats:profils retires de la purge immediate
-            # (recalcul froid ~2s). Geres par TTL 1h + job warm_caches /30min.
+            # NB: stats:track-record n'est PAS purgé (recalcul froid ~29 s) : il est
+            # marqué périmé ci-dessous et recalculé dans la minute par le scheduler.
             f"course_detail:{course_id}", f"analyse:{course_id}",
         ]
         await redis.delete(*keys)
         log.info("pipeline.stats_cache_invalidated", course_id=course_id, n_keys=len(keys))
     except Exception as e:
         log.warning("pipeline.stats_cache_invalidate_skip", err=str(e)[:140])
+    try:
+        from api.routes.stats import marquer_track_record_perime
+        await marquer_track_record_perime()
+    except Exception as e:
+        log.warning("pipeline.track_record_mark_skip", err=str(e)[:140])
 
 
 # Délai minimal entre deux retrains INCRÉMENTAUX (post-course). 6 h → au plus 4/jour,
