@@ -1,5 +1,5 @@
 "use client";
-import { CARTE_CLS, IconeTuile, SG } from "@/components/courses/course-ui";
+import { BoutonAbonnement, CARTE_CLS, IconeTuile, PastilleReserve, SG, VoileAbonne } from "@/components/courses/course-ui";
 import { CasaqueNumero, IdentiteCheval } from "@/components/courses/identite-cheval";
 
 /**
@@ -240,24 +240,28 @@ export function ConfrontationsCard({ courseId }: { courseId: string }) {
           const bMene = p.b_victoires > p.a_victoires;
           return (
             <li key={i} className="rounded-xl border border-stone-100 bg-stone-50/60 px-3 py-2.5">
+              {/* Chaque côté : numéro fixe, puis le nom complet dès que l'écran
+                  le permet. Sur téléphone il n'y a la place que pour le numéro :
+                  avant, `truncate` y rétrécissait le badge, qui recouvrait un
+                  nom de toute façon coupé à quatre lettres. */}
               <div className="flex items-center gap-2 text-[13px]">
-                <span className="flex min-w-0 flex-1 items-baseline gap-1.5 truncate">
-                  <span className={cn("font-display text-[15px] font-bold tabular-nums", aMene ? "text-slate-900" : "text-stone-700")}>
+                <span className="flex min-w-0 flex-1 items-center gap-1.5">
+                  <span className={cn("shrink-0 font-display text-[15px] font-bold tabular-nums", aMene ? "text-slate-900" : "text-stone-700")}>
                     <CasaqueNumero numero={p.a_numero} />
                   </span>
-                  <span className={cn("truncate text-[12.5px]", aMene ? "font-semibold text-slate-800" : "text-stone-600")}>
+                  <span className={cn("hidden min-w-0 text-[12.5px] leading-tight sm:inline", aMene ? "font-semibold text-slate-800" : "text-stone-600")}>
                     {p.a_nom}
                   </span>
                 </span>
-                <span className="shrink-0 rounded-md bg-white px-2 py-0.5 font-display text-xs font-bold tabular-nums text-slate-900 ring-1 ring-stone-200">
+                <span className="shrink-0 whitespace-nowrap rounded-md bg-white px-2 py-0.5 font-display text-xs font-bold tabular-nums text-slate-900 ring-1 ring-stone-200">
                   {p.a_victoires} – {p.b_victoires}
                 </span>
-                <span className="flex min-w-0 flex-1 items-baseline justify-end gap-1.5 truncate">
-                  <span className={cn("font-display text-[15px] font-bold tabular-nums", bMene ? "text-slate-900" : "text-stone-700")}>
-                    <CasaqueNumero numero={p.b_numero} />
-                  </span>
-                  <span className={cn("truncate text-[12.5px]", bMene ? "font-semibold text-slate-800" : "text-stone-600")}>
+                <span className="flex min-w-0 flex-1 items-center justify-end gap-1.5 text-right">
+                  <span className={cn("hidden min-w-0 text-[12.5px] leading-tight sm:inline", bMene ? "font-semibold text-slate-800" : "text-stone-600")}>
                     {p.b_nom}
+                  </span>
+                  <span className={cn("shrink-0 font-display text-[15px] font-bold tabular-nums", bMene ? "text-slate-900" : "text-stone-700")}>
+                    <CasaqueNumero numero={p.b_numero} />
                   </span>
                 </span>
               </div>
@@ -709,11 +713,24 @@ export function EnjeuxParChevalCard({ courseId, courseTerminee, poolTotalEur }: 
 
   if (erreur === 401 || erreur === 403) {
     return (
-      <Card title="L'argent, cheval par cheval" icon={Coins}>
-        <p className="flex items-start gap-2 text-xs leading-5 text-muted-foreground">
-          <Lock className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-700" aria-hidden="true" />
-          L&apos;argent réellement misé sur chaque cheval, et les afflux en direct.
-        </p>
+      <Card title="L'argent, cheval par cheval" icon={Coins} aside={<PastilleReserve libelle="Standard" />}>
+        {/* Décor : barres neutres, aucune somme — le montant réel reste réservé. */}
+        <VoileAbonne
+          icone={Coins}
+          titre="L'argent réellement misé sur chaque cheval"
+          texte="La masse jouée cheval par cheval et les afflux en direct jusqu'au départ : qui les parieurs soutiennent vraiment."
+          action={<BoutonAbonnement connecte={erreur === 403} />}
+          decor={
+            <div className="space-y-2.5 py-2">
+              {[82, 64, 51, 38, 27, 18].map((w, i) => (
+                <div key={w} className="flex items-center gap-3">
+                  <span className="h-[22px] w-[28px] shrink-0 rounded-md bg-slate-700/80" />
+                  <span className="h-3 rounded-full bg-gradient-to-r from-amber-300 to-amber-500" style={{ width: `${w}%`, opacity: 1 - i * 0.1 }} />
+                </div>
+              ))}
+            </div>
+          }
+        />
       </Card>
     );
   }
@@ -1246,78 +1263,12 @@ const CAPACITES: Capacite[] = [
   },
 ];
 
-export function CapacitesAbonnementCard({ apercu }: { apercu?: ApercuAnalyse | null }) {
-  // La carte parle de CE champ, pas d'un dépliant : quand le serveur a compté
-  // les signaux de la course, c'est ce nombre qui s'affiche. Absent → le texte
-  // générique reprend la main, on n'écrit jamais « des signaux ».
-  const nbSignaux = apercu?.signaux_course?.total ?? null;
-  // Course courue : tout ce qui suit est DÉJÀ ouvert sur cette page — la course
-  // n'est plus jouable. Garder « sur cette course » se contredirait à l'écran ;
-  // ce que l'abonnement ouvre, ici, ce sont les courses qui restent à courir.
-  const revele = Boolean(apercu?.revele);
-
-  return (
-    <Card
-      title={revele
-        ? "Ce que l'abonnement ouvre sur les courses à venir"
-        : "Ce que l'abonnement ouvre sur cette course"}
-      icon={Lock}
-      aside="Standard 12 € · Expert 19 €"
-    >
-      <div className="grid gap-2.5 sm:grid-cols-2">
-        {CAPACITES.map((c) => {
-          const Icone = c.icone;
-          const expert = c.plan === "Expert";
-          return (
-            <div
-              key={c.titre}
-              className="flex gap-3 rounded-2xl border border-stone-200 bg-stone-50/50 p-3.5 transition-colors hover:border-amber-200 hover:bg-amber-50/30"
-            >
-              <span
-                className={cn(
-                  "inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ring-1",
-                  expert
-                    ? "bg-emerald-50 text-emerald-700 ring-emerald-200"
-                    : "bg-amber-50 text-amber-800 ring-amber-200",
-                )}
-              >
-                <Icone className="h-[17px] w-[17px]" aria-hidden="true" />
-              </span>
-              <div className="min-w-0">
-                <p className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                  <span className="font-display text-[13.5px] font-bold text-slate-900">{c.titre}</span>
-                  <span
-                    className={cn(
-                      "rounded-full px-1.5 py-0.5 text-[10px] font-semibold",
-                      expert ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-900",
-                    )}
-                  >
-                    {c.plan}
-                  </span>
-                </p>
-                <p className="mt-1 text-[12px] leading-5 text-stone-600">
-                  {c.titre === "Les signaux, pour et contre" && nbSignaux
-                    ? revele
-                      ? `${nbSignaux} signaux ont été retenus sur cette course — autant sur chacune de celles de ce soir.`
-                      : `${nbSignaux} signaux retenus sur cette course : ce qui joue en faveur de chaque cheval et ce qui joue contre lui.`
-                    : c.texte}
-                </p>
-                {c.onglet && <p className="mt-1 text-[11px] text-stone-600">onglet {c.onglet}</p>}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </Card>
-  );
-}
-
 // ─── Bandeau d'abonnement — le SEUL de la page ────────────────────────────────
 // Trois boutons d'abonnement se disputaient l'onglet Synthèse (aperçu, table du
 // classement, encart de preuve). Aucun ne gagnait, et l'ensemble se lisait comme
 // une page de vente. Un seul appel, placé APRÈS la démonstration : les cartes
 // au-dessus redeviennent de l'information.
-export function CtaAbonnementBand({ connecte, revele }: { connecte: boolean; revele?: boolean }) {
+export function CtaAbonnementBand({ connecte, revele, nbSignaux }: { connecte: boolean; revele?: boolean; nbSignaux?: number | null }) {
   // Preuve chiffrée et RÉELLE : fréquence à laquelle le gagnant sort du top 3 du
   // modèle sur l'historique vérifié. `null` tant qu'elle n'est pas mesurable →
   // la ligne disparaît plutôt que d'afficher un chiffre de repli.
@@ -1331,42 +1282,82 @@ export function CtaAbonnementBand({ connecte, revele }: { connecte: boolean; rev
     ? connecte ? "Voir les courses à venir" : "Essayer 7 jours gratuitement"
     : connecte ? "Débloquer le pronostic — 12 €/mois" : "Voir le pronostic — essai 7 jours gratuit";
 
+  // Ce que débloque l'abonnement : l'inventaire des capacités réelles (cf.
+  // CAPACITES), une ligne chacune, avec la formule qui l'ouvre.
+
   return (
-    <section className="overflow-hidden rounded-2xl border border-amber-200 bg-gradient-to-br from-amber-50 via-white to-white p-5 sm:p-6">
-      <h2 className="font-display text-[17px] font-bold leading-snug text-slate-900 sm:text-[19px]">
-        La cote dit qui les parieurs préfèrent.
-        <span className="block text-amber-800">Elle ne dit pas qui a le plus de chances.</span>
-      </h2>
-      <p className="mt-2 max-w-xl text-[13px] leading-6 text-stone-600">
-        {revele
-          ? "Sur les courses à venir, le classement complet, les signaux et le plan de mise sont ouverts aux abonnés — avant le départ, pas après."
-          : "L'abonnement ouvre les noms du classement, les signaux de chaque cheval et le plan de mise ajusté à votre budget."}
-      </p>
-      <div className="mt-4 flex flex-wrap items-center gap-3">
-        <a
-          href={href}
-          className="inline-flex min-h-11 items-center gap-2 rounded-xl bg-amber-500 px-5 text-[13.5px] font-semibold text-brand-dark shadow-[0_10px_24px_-14px_rgba(146,64,14,.85)] transition-colors hover:bg-amber-600"
-        >
-          {libelle}
-          <ArrowRight className="h-4 w-4" aria-hidden="true" />
-        </a>
-        <a href="/tarifs" className="text-[12.5px] font-medium text-stone-600 underline underline-offset-2 hover:text-amber-800">
-          Comparer les formules
-        </a>
+    <section className="relative overflow-hidden rounded-[22px] bg-gradient-to-br from-[#1C1917] via-[#231F1B] to-[#2B2419] p-5 text-white ring-1 ring-amber-500/20 shadow-[0_24px_48px_-28px_rgba(28,25,23,.9)] sm:p-7">
+      {/* Halo doré : relief, sans image */}
+      <span aria-hidden="true" className="pointer-events-none absolute -right-24 -top-24 h-72 w-72 rounded-full bg-amber-500/20 blur-3xl" />
+      <span aria-hidden="true" className="pointer-events-none absolute -bottom-28 left-10 h-56 w-56 rounded-full bg-amber-300/10 blur-3xl" />
+      <div className="relative grid gap-6 lg:grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)] lg:items-center">
+        <div>
+          <p className="m-0 inline-flex items-center gap-1.5 rounded-full bg-amber-400/15 px-2.5 py-1 text-[10.5px] font-bold uppercase tracking-[.12em] text-amber-300 ring-1 ring-inset ring-amber-400/30">
+            <Sparkles className="h-3 w-3" aria-hidden="true" /> BlackTurf Standard
+          </p>
+          <h2 className="mt-3 font-display text-[19px] font-bold leading-snug text-white sm:text-[22px]">
+            La cote dit qui les parieurs préfèrent.
+            <span className="block text-amber-300">Elle ne dit pas qui a le plus de chances.</span>
+          </h2>
+          <p className="mt-2 max-w-xl text-[13px] leading-6 text-stone-300">
+            {revele
+              ? "Sur les courses à venir, le classement complet, les signaux et le plan de mise sont ouverts aux abonnés — avant le départ, pas après."
+              : "L'abonnement ouvre les noms du classement, les signaux de chaque cheval et le plan de mise ajusté à votre budget."}
+          </p>
+          <div className="mt-5 flex flex-wrap items-center gap-3">
+            <a
+              href={href}
+              className="inline-flex min-h-11 items-center gap-2 rounded-xl bg-gradient-to-b from-amber-300 to-amber-500 px-5 text-[13.5px] font-bold text-stone-900 shadow-[inset_0_1px_0_rgba(255,255,255,.55),0_12px_26px_-12px_rgba(245,158,11,.9)] transition-[transform,filter] hover:-translate-y-0.5 hover:brightness-105"
+            >
+              {libelle}
+              <ArrowRight className="h-4 w-4" aria-hidden="true" />
+            </a>
+            <a href="/tarifs" className="text-[12.5px] font-medium text-stone-300 underline underline-offset-2 hover:text-amber-300">
+              Comparer les formules
+            </a>
+          </div>
+          {/* La carte est exigée par Stripe (payment_method_collection="always") :
+              écrire « sans CB » ici contredirait le tunnel et la page /tarifs. */}
+          <p className="mt-3 text-[11.5px] text-stone-400">
+            Sans engagement · carte requise, aucun prélèvement avant la fin de l&apos;essai
+          </p>
+        </div>
+
+        <div className="rounded-2xl bg-white/[.04] p-4 ring-1 ring-inset ring-white/10 backdrop-blur-sm">
+          <p className="m-0 mb-2.5 text-[10.5px] font-bold uppercase tracking-[.12em] text-stone-400">
+            {revele ? "Sur chaque course à venir" : "Ce que l'abonnement ouvre ici"}
+          </p>
+          <ul className="m-0 space-y-2 p-0">
+            {CAPACITES.map((c) => {
+              const Icone = c.icone;
+              const expert = c.plan === "Expert";
+              const titre = c.titre === "Les signaux, pour et contre" && nbSignaux ? `${nbSignaux} signaux, pour et contre` : c.titre;
+              return (
+                <li key={c.titre} className="flex items-center gap-2.5 text-[13px] text-stone-100" title={c.texte}>
+                  <span className={cn(
+                    "inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-lg ring-1 ring-inset",
+                    expert ? "bg-emerald-400/15 text-emerald-300 ring-emerald-400/30" : "bg-amber-400/15 text-amber-300 ring-amber-400/30",
+                  )}>
+                    <Icone className="h-3.5 w-3.5" aria-hidden="true" />
+                  </span>
+                  <span className="min-w-0 flex-1 leading-snug">{titre}</span>
+                  <span className={cn("shrink-0 rounded-full px-1.5 py-0.5 text-[9.5px] font-bold", expert ? "bg-emerald-400/15 text-emerald-300" : "bg-white/10 text-stone-300")}>
+                    {c.plan}
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+          {precision != null && (
+            <p className="m-0 mt-4 flex flex-wrap items-baseline gap-x-2 border-t border-white/10 pt-3 text-[12px] text-stone-300">
+              <span className="font-display text-[22px] font-bold leading-none tabular-nums text-amber-300">
+                {Math.round(precision * 100)} %
+              </span>
+              <span>des gagnants dans le top 3 du modèle, sur l&apos;historique vérifié</span>
+            </p>
+          )}
+        </div>
       </div>
-      {precision != null && (
-        <p className="mt-4 flex flex-wrap items-baseline gap-x-2 text-[12.5px] text-stone-600">
-          <span className="font-display text-[20px] font-bold leading-none tabular-nums text-slate-900">
-            {Math.round(precision * 100)} %
-          </span>
-          <span>des gagnants sont dans le top 3 du modèle, sur l&apos;historique vérifié</span>
-        </p>
-      )}
-      {/* La carte est exigée par Stripe (payment_method_collection="always") :
-          écrire « sans CB » ici contredirait le tunnel et la page /tarifs. */}
-      <p className="mt-3 text-[11.5px] text-stone-600">
-        Sans engagement · carte requise, aucun prélèvement avant la fin de l&apos;essai
-      </p>
     </section>
   );
 }
@@ -1475,8 +1466,8 @@ export function PreuvesRecentesCard() {
                 {/* Le NUMÉRO d'abord, en gros : c'est ce qu'on coche sur un ticket
                     et ce qu'annonce le commentaire de course. Le nom sert à
                     reconnaître le cheval, pas à jouer. */}
-                <span className="mt-1.5 flex items-baseline gap-1.5 truncate">
-                  <span className="font-display text-[16px] font-bold leading-none text-slate-900">
+                <span className="mt-1.5 flex min-w-0 items-center gap-1.5">
+                  <span className="shrink-0 font-display text-[16px] font-bold leading-none text-slate-900">
                     <CasaqueNumero numero={c.gagnant_numero} />
                   </span>
                   <span className="truncate text-[12.5px] text-stone-600">

@@ -5,7 +5,7 @@
 "use client";
 
 import { useId, type CSSProperties, type PointerEvent, type ReactNode } from "react";
-import type { LucideIcon } from "lucide-react";
+import { Lock, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export const SG = { fontFamily: "var(--font-space-grotesk), sans-serif" } as const;
@@ -230,5 +230,121 @@ export const INCLINABLE_CLS =
 export function Reflet() {
   return (
     <span aria-hidden="true" className="pointer-events-none absolute inset-0 rounded-[inherit] opacity-0 transition-opacity duration-300 group-hover/reflet:opacity-100 [background:radial-gradient(360px_circle_at_var(--mx,50%)_var(--my,50%),rgba(251,191,36,.16),transparent_50%)]" />
+  );
+}
+
+
+/* ────────────────────────────────────────────────────────────────────────── */
+/*  Vue non abonnée : mêmes cartes que l'abonné, contenu réservé masqué        */
+/* ────────────────────────────────────────────────────────────────────────── */
+/* Règle commune à toutes ces briques : un visiteur voit la MISE EN PAGE exacte
+   de la fiche abonné (mêmes cartes, mêmes jauges, mêmes colonnes), mais jamais
+   une donnée que le serveur ne lui envoie pas. Ce qui est masqué est dessiné
+   en formes neutres — rien à lire sous un flou, rien dans le HTML. */
+
+/** Destination de l'appel à l'abonnement : un visiteur crée d'abord son compte
+ *  (l'essai part de là), un compte gratuit passe directement aux formules. */
+export function lienAbonnement(connecte: boolean, suite?: string) {
+  return connecte
+    ? { href: "/tarifs", libelle: "Passer Standard — 12 €/mois" }
+    : { href: `/inscription${suite ? `?suite=${encodeURIComponent(suite)}` : ""}`, libelle: "Essai gratuit 7 jours" };
+}
+
+/** Bouton doré d'abonnement, identique partout où un contenu est réservé. */
+export function BoutonAbonnement({ connecte, suite, libelle, className, discret }: {
+  connecte: boolean; suite?: string; libelle?: string; className?: string; discret?: boolean;
+}) {
+  const l = lienAbonnement(connecte, suite);
+  return (
+    <a
+      href={l.href}
+      className={cn(
+        "inline-flex min-h-9 items-center justify-center gap-1.5 whitespace-nowrap rounded-xl px-4 text-[12.5px] font-bold transition-[transform,filter] hover:-translate-y-0.5 hover:brightness-105 focus-visible:outline focus-visible:outline-2 focus-visible:outline-amber-700",
+        discret
+          ? "bg-white text-amber-800 ring-1 ring-inset ring-amber-300 shadow-[inset_0_1px_0_#fff,0_1px_2px_rgba(146,64,14,.12)]"
+          : "bg-gradient-to-b from-amber-400 to-amber-500 text-stone-900 ring-1 ring-inset ring-amber-600/30 shadow-[inset_0_1px_0_rgba(255,255,255,.5),0_10px_22px_-12px_rgba(146,64,14,.8)]",
+        className,
+      )}
+    >
+      <Lock className="h-3.5 w-3.5" aria-hidden="true" />
+      {libelle ?? l.libelle}
+    </a>
+  );
+}
+
+/** Pastille « réservé » — même gabarit que les autres pastilles. */
+export function PastilleReserve({ libelle = "Réservé abonnés", className }: { libelle?: string; className?: string }) {
+  return (
+    <Pastille className={cn("bg-amber-50 text-amber-800 ring-amber-200", className)}>
+      <Lock className="h-3 w-3" aria-hidden="true" />{libelle}
+    </Pastille>
+  );
+}
+
+/** Identité masquée : tapis de selle sans numéro et nom en hachures. */
+export function IdentiteMasquee({ largeur = "9rem", className }: { largeur?: string; className?: string }) {
+  return (
+    <span className={cn("flex min-w-0 items-center gap-2", className)} aria-label="Cheval réservé aux abonnés">
+      <span
+        aria-hidden="true"
+        className="inline-flex h-[26px] w-[30px] shrink-0 items-center justify-center rounded-md bg-slate-800 text-[12px] font-extrabold text-white/80"
+      >
+        ?
+      </span>
+      <span
+        aria-hidden="true"
+        className="h-3.5 min-w-0 flex-1 rounded-full"
+        style={{ maxWidth: largeur, backgroundImage: "repeating-linear-gradient(115deg,#E7E1D3 0 6px,#F4EFE4 6px 12px)" }}
+      />
+    </span>
+  );
+}
+
+/** Jauge circulaire verrouillée : même relief que `Anneau`, arc absent. */
+export function AnneauVerrouille({ taille }: { taille: number }) {
+  return (
+    <span
+      className="relative inline-flex shrink-0 items-center justify-center rounded-full bg-gradient-to-b from-white to-stone-100 shadow-[inset_0_1px_0_#fff,0_1px_1px_rgba(17,24,39,.06),0_6px_14px_-8px_rgba(17,24,39,.35)]"
+      style={{ width: taille, height: taille }}
+      role="img"
+      aria-label="Chance de victoire réservée aux abonnés"
+    >
+      <svg width={taille} height={taille} className="absolute inset-0" aria-hidden="true">
+        <circle cx={taille / 2} cy={taille / 2} r={taille / 2 - 4} fill="none" stroke="#EDE7DA" strokeWidth="4" strokeDasharray="3 4" />
+      </svg>
+      <Lock className="relative h-4 w-4 text-amber-700/80" aria-hidden="true" />
+    </span>
+  );
+}
+
+/** Barre de squelette (texte réservé). */
+export function Squelette({ largeur = "100%", className }: { largeur?: string; className?: string }) {
+  return <span aria-hidden="true" className={cn("block h-2.5 rounded-full bg-stone-200/80", className)} style={{ width: largeur }} />;
+}
+
+/** Contenu réservé : un décor flou (formes seulement, jamais la vraie donnée)
+ *  sous un voile qui dit ce qu'il y a derrière et comment l'ouvrir. */
+export function VoileAbonne({ decor, icone: Icone = Lock, titre, texte, action, className }: {
+  decor: ReactNode;
+  icone?: LucideIcon;
+  titre: ReactNode;
+  texte?: ReactNode;
+  action?: ReactNode;
+  className?: string;
+}) {
+  return (
+    <div className={cn("relative min-h-[17rem] overflow-hidden rounded-2xl", className)}>
+      <div aria-hidden="true" className="pointer-events-none select-none blur-[1.5px]">{decor}</div>
+      <div className="absolute inset-0 flex items-center justify-center p-4 [background:radial-gradient(ellipse_at_center,rgba(255,255,255,.94)_0%,rgba(255,255,255,.82)_38%,rgba(255,255,255,.35)_80%)]">
+        <div className="max-w-md text-center">
+          <span className="mx-auto mb-2.5 inline-flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-b from-amber-50 to-amber-100 text-amber-700 ring-1 ring-inset ring-amber-200 shadow-[inset_0_1px_0_#fff,0_6px_14px_-6px_rgba(146,64,14,.45)]">
+            <Icone className="h-[18px] w-[18px]" aria-hidden="true" />
+          </span>
+          <p className="m-0 text-[14.5px] font-bold leading-snug text-stone-900" style={SG}>{titre}</p>
+          {texte && <p className="m-0 mx-auto mt-1 max-w-sm text-[12.5px] leading-5 text-stone-600">{texte}</p>}
+          {action && <div className="mt-3 flex flex-wrap items-center justify-center gap-2">{action}</div>}
+        </div>
+      </div>
+    </div>
   );
 }

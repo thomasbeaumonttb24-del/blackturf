@@ -108,6 +108,10 @@ export interface MisePlan {
 }
 
 
+/** Montants et cotes en écriture française : « 12,50 € », « 4,4 ». */
+const eur2 = (v: number) => v.toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const cote1 = (v: number) => v.toLocaleString("fr-FR", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+
 // Profils de mise (source unique : formulaire + switch rapide dans le plan).
 export const PROFILS_MISE = [
   // `bande` = tranche de gain visée SUR LA MISE TOTALE. Ce sont les bornes réelles
@@ -195,9 +199,9 @@ export function PlanMiseDisplay({ plan, profil, switching, onChangeProfil, onClo
         <div aria-hidden="true" style={{ width: 1, height: 38, marginTop: 2, background: CX.bd3 }} />
         <div style={{ textAlign: "right" }}>
           <div style={{ height: 14, marginBottom: 6, fontSize: 10.5, fontWeight: 600, color: CX.gray500 }}>Total misé</div>
-          <div style={{ fontFamily: CX.sg, fontSize: 25, fontWeight: 700, color: CX.ink, lineHeight: 1, fontVariantNumeric: "tabular-nums" }}>{(plan.montant_joue + (plan.montant_quinte ?? 0)).toFixed(2)}€</div>
+          <div style={{ fontFamily: CX.sg, fontSize: 25, fontWeight: 700, color: CX.ink, lineHeight: 1, fontVariantNumeric: "tabular-nums" }}>{eur2((plan.montant_joue + (plan.montant_quinte ?? 0)))} €</div>
           {plan.montant_reserve > 0 && (
-            <div style={{ marginTop: 5, fontSize: 10.5, color: CX.gray500, fontVariantNumeric: "tabular-nums" }}>{plan.montant_reserve.toFixed(2)}€ gardés de côté</div>
+            <div style={{ marginTop: 5, fontSize: 10.5, color: CX.gray500, fontVariantNumeric: "tabular-nums" }}>{eur2(plan.montant_reserve)} € gardés de côté</div>
           )}
         </div>
       </div>
@@ -234,7 +238,7 @@ export function PlanMiseDisplay({ plan, profil, switching, onChangeProfil, onClo
                 </div>
               </div>
               <span style={{ fontFamily: CX.sg, fontWeight: 700, fontSize: 14, color: ns.color, fontVariantNumeric: "tabular-nums" }}>
-                {niv.montant.toFixed(2)}€
+                {eur2(niv.montant)} €
               </span>
             </div>
             <div style={{ display: "flex", flexDirection: "column" }}>
@@ -259,7 +263,7 @@ export function PlanMiseDisplay({ plan, profil, switching, onChangeProfil, onClo
                               && Math.abs(c.cote_live / c.cote - 1) >= 0.1 ? (
                               <span key={c.numero} style={{ fontSize: 10.5, lineHeight: 1.4, color: CX.gray500, fontVariantNumeric: "tabular-nums", overflowWrap: "anywhere" }}>
                                 <span style={{ fontWeight: 700, color: CX.ink2 }}>n°{c.numero}</span>
-                                {" "}joué à {c.cote.toFixed(1)} · cote actuelle {c.cote_live.toFixed(1)}
+                                {" "}joué à {cote1(c.cote)} · cote actuelle {cote1(c.cote_live)}
                               </span>
                             ) : null
                           ))}
@@ -278,7 +282,7 @@ export function PlanMiseDisplay({ plan, profil, switching, onChangeProfil, onClo
                     </div>
                     <div style={{ textAlign: "right", flexShrink: 0 }}>
                       <div style={{ fontSize: 10, fontWeight: 600, color: CX.gray500 }}>Mise</div>
-                      <div style={{ marginTop: 2, fontFamily: CX.sg, fontSize: 15, fontWeight: 700, color: CX.ink2, fontVariantNumeric: "tabular-nums" }}>{p.mise.toFixed(2)}€</div>
+                      <div style={{ marginTop: 2, fontFamily: CX.sg, fontSize: 15, fontWeight: 700, color: CX.ink2, fontVariantNumeric: "tabular-nums" }}>{eur2(p.mise)} €</div>
                       {/* Un seul chiffre de gain par ticket : ce que ce pari rapporte s'il
                           passe. Le multiplicateur re-tarifé (×10 → ×4) doublait la ligne
                           sans rien apprendre de plus. */}
@@ -354,7 +358,7 @@ export function PlanMiseDisplay({ plan, profil, switching, onChangeProfil, onClo
                     </span>
                   </span>
                   <span style={{ color: CX.gray400, fontFamily: CX.sg, flexShrink: 0 }}>
-                    {e.rapport_estime ? `×${e.rapport_estime.toFixed(1)} · ` : ""}{(e.probabilite * 100).toFixed(0)}%
+                    {e.rapport_estime ? `×${cote1(e.rapport_estime)} · ` : ""}{(e.probabilite * 100).toFixed(0)}%
                   </span>
                 </div>
                 <p style={{ margin: "4px 0 0", fontSize: 10.5, lineHeight: 1.4, color: CX.gray500 }}>{e.motif}</p>

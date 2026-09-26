@@ -20,12 +20,12 @@
  * rapproché de l'arrivée réelle. Jamais une appréciation inventée.
  */
 
-import { Anneau, CARTE_CLS, IconeTuile, SG } from "@/components/courses/course-ui";
+import { Anneau, BoutonAbonnement, CARTE_CLS, IconeTuile, IdentiteMasquee, Pastille, SG } from "@/components/courses/course-ui";
 import { useState } from "react";
 import { Brain, ChevronDown, HelpCircle, Lock, TrendingUp, Clock3, Trophy } from "lucide-react";
 import { CasaqueNumero } from "@/components/courses/identite-cheval";
 import { cn } from "@/lib/utils";
-import type { ApercuAnalyse, ApercuSignal } from "@/components/courses/insights";
+import type { ApercuAnalyse } from "@/components/courses/insights";
 
 export interface ClassementPrediction {
   prediction_id: string;
@@ -133,13 +133,16 @@ function Identite({ numero, nom, taille = "normal", terne }: {
   return (
     <span className="flex min-w-0 items-center gap-1.5">
       <span className={cn(
-        "font-display font-bold tabular-nums",
+        "shrink-0 font-display font-bold tabular-nums",
         taille === "grand" ? "text-[16px]" : "text-[15px]",
         terne ? "text-stone-600" : "text-slate-900",
       )}>
         <CasaqueNumero numero={numero} />
       </span>
-      <span className={cn("truncate", taille === "grand" ? "text-[13px]" : "text-[12.5px]", terne ? "text-stone-600" : "text-stone-700")}>
+      {/* Nom entier, sur deux lignes au besoin : coupé (« JOYEUSE DE LA B… ») il ne
+          servait plus à reconnaître le cheval, et le badge du numéro, non figé,
+          se laissait écraser contre lui. */}
+      <span className={cn("min-w-0 break-words leading-tight", taille === "grand" ? "text-[13px]" : "text-[12.5px]", terne ? "text-stone-600" : "text-stone-700")}>
         {nom}
       </span>
     </span>
@@ -163,52 +166,6 @@ function Rang({ rang, absent }: { rang: number; absent?: boolean }) {
     >
       {rang}
     </span>
-  );
-}
-
-/** Barre de probabilité à échelle ABSOLUE (0–100 %), avec repères à 25/50/75 %.
- *  Une échelle relative au mieux noté donnerait une barre pleine à 22 % — plus
- *  jolie, mais fausse. Les repères suffisent à rendre lisibles les petites
- *  valeurs. La fourchette du modèle est dessinée en surimpression : c'est une
- *  donnée renvoyée par l'API, pas une marge décorative. */
-function BarreProba({
-  p, low, high, ton,
-}: {
-  p: number;
-  low: number | null;
-  high: number | null;
-  ton: "or" | "podium" | "neutre";
-}) {
-  const w = Math.max(1.5, Math.min(100, p * 100));
-  const aFourchette = low != null && high != null && high > low;
-  const l = aFourchette ? Math.max(0, Math.min(100, low! * 100)) : 0;
-  const h = aFourchette ? Math.max(0, Math.min(100, high! * 100)) : 0;
-
-  return (
-    <div className="relative h-2 w-full overflow-hidden rounded-full bg-stone-100">
-      {/* Repères 25 / 50 / 75 % — donnent l'échelle sans axe ni chiffres */}
-      {[25, 50, 75].map((t) => (
-        <span key={t} className="absolute top-0 h-full w-px bg-white/90" style={{ left: `${t}%` }} aria-hidden="true" />
-      ))}
-      {aFourchette && (
-        <span
-          className={cn(
-            "absolute top-0 h-full rounded-full",
-            ton === "or" ? "bg-amber-200" : ton === "podium" ? "bg-slate-300" : "bg-stone-200",
-          )}
-          style={{ left: `${l}%`, width: `${Math.max(0.8, h - l)}%` }}
-          aria-hidden="true"
-        />
-      )}
-      <span
-        className={cn(
-          "absolute top-0 h-full rounded-full",
-          ton === "or" ? "bg-amber-500" : ton === "podium" ? "bg-slate-500" : "bg-stone-400",
-        )}
-        style={{ width: `${w}%` }}
-        aria-hidden="true"
-      />
-    </div>
   );
 }
 
@@ -916,30 +873,6 @@ export function ClassementVerrouille({ titre, texte, action }: { titre: string; 
 /*  Aperçu public                                                             */
 /* ────────────────────────────────────────────────────────────────────────── */
 
-/** Signaux d'une ligne RÉVÉLÉE de l'aperçu.
- *
- *  Même vocabulaire et mêmes couleurs que la table des abonnés (`Signaux`) —
- *  c'est le but : ce que voit ici un prospect sur un cheval écarté est
- *  exactement ce qu'il lira sur les seize autres en s'abonnant. Rien n'est
- *  reconstitué côté client : le serveur ne joint ces signaux qu'aux lignes
- *  qu'il a déjà décidé de nommer. */
-function SignauxApercu({ signaux }: { signaux?: ApercuSignal[] }) {
-  if (!signaux?.length) return null;
-  return (
-    <div className="mt-1.5 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[10.5px] leading-tight text-stone-600">
-      {signaux.map((s, i) => {
-        const st = SENS[s.sens] ?? SENS.neutre;
-        return (
-          <span key={`${s.label}-${i}`} title={s.detail || undefined} className="inline-flex cursor-help items-center gap-1">
-            <span className={cn("text-[7px]", st.fg)} aria-hidden="true">{st.fleche}</span>
-            {nettoie(s.label)}
-          </span>
-        );
-      })}
-    </div>
-  );
-}
-
 /** Aperçu du classement pour un visiteur sans abonnement.
  *
  *  Le problème résolu : à la place de la table, ce visiteur ne voyait qu'un
@@ -960,10 +893,14 @@ function SignauxApercu({ signaux }: { signaux?: ApercuSignal[] }) {
  *  les envoie pas au navigateur (cf. api/routes/predictions.py).
  */
 export function ClassementApercu({
-  apercu, onLegende,
+  apercu, onLegende, connecte = false, marche,
 }: {
   apercu: ApercuAnalyse;
   onLegende?: () => void;
+  /** Compte gratuit (true) ou visiteur (false) : décide de l'appel à l'abonnement. */
+  connecte?: boolean;
+  /** Favori du MARCHÉ (information publique : la plus petite cote du champ). */
+  marche?: { numero: number; cote: number } | null;
 }) {
   const lignes = apercu.classement ?? [];
   if (!lignes.length) return null;
@@ -971,161 +908,342 @@ export function ClassementApercu({
   const revele = apercu.revele;
   const masquees = lignes.filter((l) => !l.revele);
   const nommees = lignes.filter((l) => l.revele);
-  // Avant la course : on n'aligne que le haut du classement (5 lignes suffisent
-  // à montrer la distribution) puis la queue nommée. Après la course, tout est
-  // nommé, donc tout est montré.
+  // Le haut du classement (5 lignes) suffit à montrer la distribution ; le reste
+  // des lignes masquées tient dans une rangée, puis la queue nommée.
   const hautMasque = revele ? [] : masquees.slice(0, 5);
-  const resteMasque = revele ? 0 : masquees.length - hautMasque.length;
+  const resteMasque = revele ? [] : masquees.slice(5);
 
-  const GRILLE = "grid-cols-[36px_minmax(0,1fr)_112px] sm:grid-cols-[36px_minmax(0,1fr)_74px_74px_180px]";
+  // ── Lecture de la course — mêmes tuiles que l'abonné, calculées sur ce que
+  //    l'aperçu envoie déjà (probabilités de chaque rang, agrégats anonymes).
+  const probas = lignes.map((l) => l.proba_top1 ?? 0);
+  const concentration = probas.slice(0, 3).reduce((a, b) => a + b, 0);
+  const nbSerieux = probas.filter((v) => v >= 0.1).length;
+  const physionomie = concentration >= 0.6 ? "course fermée" : concentration >= 0.45 ? "course disputée" : "course ouverte";
+  const sig = apercu.signaux_course;
+  const TEINTE_SEG = ["from-amber-300 to-amber-500", "from-slate-300 to-slate-500", "from-orange-300 to-orange-600"];
+  const TUILE = "flex flex-col rounded-2xl bg-white px-3.5 py-3 ring-1 ring-[#ECE7DC] shadow-[inset_0_1px_0_#fff,0_1px_2px_rgba(17,24,39,.05),0_10px_22px_-18px_rgba(17,24,39,.4)]";
+  const TITRE = "text-[10px] font-bold uppercase tracking-[.1em] text-stone-500";
+  const CHIFFRE = "text-[22px] font-bold leading-none tabular-nums";
+
+  // Colonnes : les mêmes que la table abonné (#, cheval, cote, cote juste,
+  // lecture du prix, victoire · top 3).
+  const GRILLE = "grid-cols-[40px_minmax(0,1fr)_auto] sm:grid-cols-[40px_minmax(0,1fr)_64px_70px_92px_200px]";
+
+  const LigneChiffres = ({ l, podium, terne }: { l: (typeof lignes)[number]; podium: boolean; terne?: boolean }) => (
+    <div className="hidden items-center gap-3 sm:flex">
+      <Anneau v={l.proba_top1 ?? 0} rang={podium ? l.rang : undefined} taille={44} />
+      <div className="min-w-0 flex-1 space-y-1">
+        <p className="flex items-baseline justify-between text-[10px] text-stone-500">
+          <span>Victoire</span><b className="text-[12px] font-bold tabular-nums text-stone-900">{pct(l.proba_top1)}</b>
+        </p>
+        <BarreFine v={l.proba_top1 ?? 0} ton={terne ? "neutre" : l.rang === 1 ? "or" : podium ? "podium" : "neutre"} />
+        <p className="flex items-baseline justify-between text-[10px] text-stone-500">
+          <span>Top 3</span><b className="text-[12px] font-bold tabular-nums text-stone-900">{pct(l.proba_top3)}</b>
+        </p>
+        <BarreFine v={l.proba_top3 ?? 0} ton="place" />
+      </div>
+    </div>
+  );
 
   return (
     <section className={cn("overflow-hidden", CARTE_CLS)}>
-      <header className="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-4 pb-3 pt-4 sm:px-5">
-        <div className="min-w-0">
-          <h3 className="font-display text-[16px] font-bold leading-tight text-slate-900">
-            Le classement de l&apos;algorithme
-          </h3>
-          <p className="mt-0.5 text-[11.5px] text-stone-600">
-            {lignes.length} chevaux notés · ordre du modèle de classement
-            {!revele && apercu.nb_ecartes > 0
-              ? ` · ${apercu.nb_ecartes} écartés sous 3 % de chances`
-              : ""}
-          </p>
+      <header className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 pb-3 pt-4 sm:px-5">
+        <div className="flex min-w-0 items-center gap-2.5">
+          <IconeTuile icone={Brain} />
+          <div className="min-w-0">
+            <h3 className="text-[16px] font-bold leading-tight text-stone-900" style={SG}>
+              Le classement de l&apos;algorithme
+            </h3>
+            <p className="mt-0.5 text-[11.5px] text-stone-500">
+              {lignes.length} chevaux notés · du plus probable au moins probable
+            </p>
+          </div>
         </div>
-        <span className="ml-auto rounded-full bg-amber-50 px-3 py-1 text-[11px] font-semibold text-amber-800 ring-1 ring-amber-200">
-          {revele ? "course courue · classement complet" : "aperçu gratuit"}
-        </span>
+        <div className="ml-auto flex items-center gap-2">
+          <Pastille className={revele ? "bg-emerald-50 text-emerald-800 ring-emerald-200" : "bg-amber-50 text-amber-800 ring-amber-200"}>
+            {revele ? "Course courue · classement ouvert" : <><Lock className="h-3 w-3" aria-hidden="true" />Aperçu gratuit</>}
+          </Pastille>
+          {onLegende && (
+            <button
+              type="button"
+              onClick={onLegende}
+              className="inline-flex min-h-8 items-center gap-1.5 rounded-full bg-white px-3 text-[11.5px] font-semibold text-slate-600 ring-1 ring-stone-200 shadow-[inset_0_1px_0_#fff,0_1px_2px_rgba(17,24,39,.06)] transition-colors hover:bg-amber-50/60 hover:text-amber-900 hover:ring-amber-300"
+            >
+              <HelpCircle className="h-3.5 w-3.5" aria-hidden="true" /> Comment lire
+            </button>
+          )}
+        </div>
       </header>
 
-      {/* En-tête de colonnes — les colonnes RÉELLES de la table des abonnés */}
-      <div className={cn("hidden items-center gap-3 border-b border-stone-200 bg-stone-50/95 px-5 py-2 text-[10px] font-semibold uppercase tracking-wider text-stone-600 sm:grid", GRILLE)}>
-        <span className="text-center">#</span>
-        <span>Cheval</span>
-        <span className="text-right">Cote</span>
-        <span className="text-right" title="Cote à partir de laquelle le pari devient rentable selon le modèle">Cote juste</span>
-        <span className="text-right">Chances de victoire</span>
+      {/* ── Lecture de la course ── */}
+      <div className="px-4 pb-4 sm:px-5">
+        <p className="mb-2.5 text-[10.5px] font-bold uppercase tracking-[.12em] text-amber-700">Lecture de la course</p>
+        <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-4">
+          <div className={TUILE}>
+            <p className={TITRE}>Physionomie</p>
+            <p className="mt-1 flex items-baseline gap-1.5">
+              <span className={cn(CHIFFRE, "text-stone-900")} style={SG}>{pct(concentration)}</span>
+              <span className="text-[11.5px] text-stone-500">{physionomie}</span>
+            </p>
+            <div className="mt-2.5 flex h-2.5 overflow-hidden rounded-full bg-stone-100 shadow-[inset_0_1px_2px_rgba(0,0,0,.08)]" aria-hidden="true">
+              {probas.map((v, i) => (
+                <span
+                  key={i}
+                  className={cn("h-full", i < 3 ? cn("bg-gradient-to-b", TEINTE_SEG[i]) : i % 2 ? "bg-stone-300" : "bg-stone-200", i > 0 && "border-l border-white/80")}
+                  style={{ width: `${Math.max(0.5, v * 100)}%` }}
+                />
+              ))}
+            </div>
+            <p className="mt-1.5 text-[10.5px] leading-snug text-stone-500">
+              chances des 3 premiers · <b className="font-semibold tabular-nums text-stone-700">{nbSerieux}</b> cheva{nbSerieux > 1 ? "ux" : "l"} à 10 % ou plus
+            </p>
+          </div>
+
+          <div className={TUILE}>
+            <p className={TITRE}>Favori : marché et modèle</p>
+            <div className="mt-1.5 space-y-1.5 text-[12px]">
+              <p className="flex min-w-0 items-center justify-between gap-2">
+                <span className="shrink-0 text-stone-500">Marché</span>
+                {marche
+                  ? <span className="min-w-0 truncate font-semibold text-stone-900">N°{marche.numero} <span className="font-normal text-stone-500">à</span> <span className="tabular-nums">{cote(marche.cote)}</span></span>
+                  : <span className="text-stone-400">cotes indisponibles</span>}
+              </p>
+              <p className="flex min-w-0 items-center justify-between gap-2">
+                <span className="shrink-0 text-stone-500">Modèle</span>
+                {revele && nommees[0]?.numero != null
+                  ? <span className="min-w-0 truncate font-semibold text-stone-900">N°{nommees[0].numero} <span className="font-normal text-stone-500">·</span> <span className="tabular-nums text-amber-700">{pct(nommees[0].proba_top1)}</span></span>
+                  : <span className="inline-flex min-w-0 items-center gap-1.5 font-semibold text-stone-900">
+                      <span className="inline-flex items-center gap-1 rounded-md bg-slate-800 px-1.5 py-px text-[10.5px] font-bold text-white/85"><Lock className="h-2.5 w-2.5" aria-hidden="true" />N°?</span>
+                      <span className="tabular-nums text-amber-700">{pct(apercu.proba_top1)}</span>
+                    </span>}
+              </p>
+            </div>
+            {apercu.accord_marche != null && (
+              <span className={cn(
+                "mt-auto inline-flex w-fit items-center rounded-md px-1.5 py-0.5 text-[10.5px] font-semibold ring-1",
+                apercu.accord_marche ? "bg-stone-100 text-stone-600 ring-stone-200" : "bg-amber-50 text-amber-800 ring-amber-200/70",
+              )}>
+                {apercu.accord_marche ? "même favori" : "favoris différents"}
+              </span>
+            )}
+          </div>
+
+          <div className={TUILE}>
+            <p className={TITRE}>Écarts de prix</p>
+            <p className="mt-1 flex items-baseline gap-1.5">
+              <span className={cn(CHIFFRE, apercu.nb_value_bets > 0 ? "text-emerald-700" : "text-stone-900")} style={SG}>{apercu.nb_value_bets}</span>
+              <span className="text-[11.5px] leading-snug text-stone-500">
+                {apercu.nb_value_bets > 1 ? "chevaux payés au-dessus de leur chance" : apercu.nb_value_bets === 1 ? "cheval payé au-dessus de sa chance" : "aucun pari de valeur détecté"}
+              </span>
+            </p>
+            {apercu.nb_value_bets > 0 && (
+              <p className="mt-auto flex flex-wrap items-center gap-1 pt-2">
+                <span className="inline-flex items-center gap-1 rounded-md bg-slate-800 px-1.5 py-0.5 text-[10.5px] font-bold text-white/85">
+                  <Lock className="h-2.5 w-2.5" aria-hidden="true" />N°?
+                </span>
+                {apercu.ev_max_pct != null && (
+                  <span className="inline-flex items-center rounded-md bg-emerald-50 px-1.5 py-0.5 text-[10.5px] font-bold tabular-nums text-emerald-700 ring-1 ring-emerald-200/70">
+                    jusqu&apos;à +{apercu.ev_max_pct} %
+                  </span>
+                )}
+              </p>
+            )}
+          </div>
+
+          <div className={TUILE}>
+            <p className={TITRE}>Signaux du champ</p>
+            <p className="mt-1 flex items-baseline gap-1.5">
+              <span className={cn(CHIFFRE, "text-stone-900")} style={SG}>{sig?.total ?? lignes.length}</span>
+              <span className="text-[11.5px] text-stone-500">{sig?.total ? "signaux retenus" : "chevaux notés"}</span>
+            </p>
+            {sig && sig.total > 0 && (
+              <p className="mt-2 flex flex-wrap gap-1.5 text-[10.5px] font-semibold tabular-nums">
+                <span className={cn("inline-flex items-center gap-1 rounded-full px-2 py-0.5 ring-1 ring-inset", SENS.positif.bg, SENS.positif.fg, SENS.positif.ring)}>
+                  <span className="text-[7px]" aria-hidden="true">▲</span>{sig.pour} atout{sig.pour > 1 ? "s" : ""}
+                </span>
+                <span className={cn("inline-flex items-center gap-1 rounded-full px-2 py-0.5 ring-1 ring-inset", SENS.negatif.bg, SENS.negatif.fg, SENS.negatif.ring)}>
+                  <span className="text-[7px]" aria-hidden="true">▼</span>{sig.contre} réserve{sig.contre > 1 ? "s" : ""}
+                </span>
+              </p>
+            )}
+            {apercu.nb_criteres > 0 && (
+              <p className="mt-auto pt-2 text-[10.5px] text-stone-500">
+                sur <b className="font-semibold tabular-nums text-stone-700">{apercu.nb_criteres}</b> critères par cheval
+              </p>
+            )}
+          </div>
+        </div>
       </div>
 
-      <ol className={cn("divide-y divide-stone-100", revele && "max-h-[36rem] overflow-y-auto")}>
-        {hautMasque.map((l) => (
-          <li key={`m${l.rang}`} className={cn("relative px-4 py-3.5 sm:px-5", l.rang === 1 && "bg-amber-50/50")}>
-            {l.rang <= 3 && (
-              <span className={cn("absolute inset-y-0 left-0 w-[3px]", l.rang === 1 ? "bg-amber-400" : "bg-slate-300")} aria-hidden="true" />
-            )}
-            <div className={cn("grid items-center gap-3", GRILLE)}>
-              <Rang rang={l.rang} />
+      {/* ── Classement ── */}
+      <div className="border-t border-stone-100">
+        <div className={cn("hidden items-end gap-3 border-b border-stone-200/70 bg-[#FCFAF5] px-5 py-2 text-[10px] font-bold uppercase tracking-[.1em] text-stone-500 sm:grid", GRILLE)}>
+          <span className="text-center">#</span>
+          <span>Cheval · signaux</span>
+          <span className="text-right">Cote</span>
+          <span className="text-right leading-tight" title="Cote à partir de laquelle le pari devient rentable selon le modèle">Cote<br />juste</span>
+          <span className="text-right leading-tight" title="Écart entre la cote payée par le marché et la cote juste du modèle">Lecture<br />du prix</span>
+          <span className="text-right">Victoire · Top 3</span>
+        </div>
 
-              <span className="flex min-w-0 items-center gap-2">
-                <span
-                  className="h-5 w-full max-w-[9rem] rounded"
-                  style={{ backgroundImage: "repeating-linear-gradient(115deg,#E7E5E4 0 6px,#F5F5F4 6px 12px)" }}
-                  aria-hidden="true"
-                />
-                <span className="inline-flex flex-shrink-0 items-center gap-1 rounded-md bg-stone-100 px-1.5 py-0.5 text-[10px] font-semibold text-stone-600">
-                  <Lock className="h-3 w-3" aria-hidden="true" /> réservé
-                </span>
-              </span>
-
-              <span className="hidden text-right text-[13px] text-stone-300 sm:block" aria-hidden="true">•••</span>
-              <span className="hidden text-right font-display text-[14px] tabular-nums text-slate-600 sm:block">
-                {l.cote_juste != null ? coteJuste(l.cote_juste) : "—"}
-              </span>
-
-              <div className="flex items-center gap-2.5">
-                <BarreProba
-                  p={l.proba_top1 ?? 0}
-                  low={null}
-                  high={null}
-                  ton={l.rang === 1 ? "or" : l.rang <= 3 ? "podium" : "neutre"}
-                />
-                <span className="w-11 shrink-0 text-right font-display text-[14px] font-bold tabular-nums text-slate-900">
-                  {pct(l.proba_top1)}
-                </span>
-              </div>
-            </div>
-          </li>
-        ))}
-
-        {resteMasque > 0 && (
-          <li className="bg-stone-50/60 px-4 py-3 text-center text-[11.5px] text-stone-600 sm:px-5">
-            + {resteMasque} lignes, avec leurs probabilités, cotes justes et signaux — réservées aux abonnés
-          </li>
-        )}
-
-        {!revele && nommees.length > 0 && (
-          <li className="bg-white px-4 py-2.5 text-[10px] font-semibold uppercase tracking-wider text-stone-600 sm:px-5">
-            Visible gratuitement · le bas du classement
-          </li>
-        )}
-
-        {nommees.map((l) => (
-          <li key={`r${l.rang}`} className={cn("relative px-4 py-3.5 sm:px-5", revele && l.rang === 1 && "bg-amber-50/50")}>
-            {revele && l.rang <= 3 && (
-              <span className={cn("absolute inset-y-0 left-0 w-[3px]", l.rang === 1 ? "bg-amber-400" : "bg-slate-300")} aria-hidden="true" />
-            )}
-            <div className={cn("grid items-center gap-3", GRILLE)}>
-              {revele ? <Rang rang={l.rang} /> : <Rang rang={l.rang} absent />}
-
-              <div className="min-w-0">
-                <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                  {l.numero != null && <Identite numero={l.numero} nom={l.nom ?? ""} terne={!revele} />}
-                  {l.position != null && <BadgeArrivee position={l.position} />}
-                  {!revele && (
-                    <span className="rounded-md bg-stone-100 px-1.5 py-0.5 text-[10px] font-semibold text-stone-600">
-                      écarté par le modèle
+        <ol className={cn("divide-y divide-stone-100", revele && "max-h-[40rem] overflow-y-auto")}>
+          {hautMasque.map((l) => {
+            const podium = l.rang <= 3;
+            return (
+              <li key={`m${l.rang}`} className={cn("relative px-4 py-3 sm:px-5", l.rang === 1 && "bg-amber-50/40")}>
+                {podium && (
+                  <span
+                    className={cn("absolute inset-y-2 left-0 w-1 rounded-r-full bg-gradient-to-b",
+                      l.rang === 1 ? "from-amber-300 to-amber-600" : l.rang === 2 ? "from-slate-300 to-slate-500" : "from-orange-300 to-orange-600")}
+                    aria-hidden="true"
+                  />
+                )}
+                <div className={cn("grid items-center gap-x-3 gap-y-2", GRILLE)}>
+                  {podium ? <span className="flex justify-center"><Piece rang={l.rang as 1 | 2 | 3} taille={30} /></span> : <Rang rang={l.rang} />}
+                  <div className="min-w-0">
+                    <IdentiteMasquee largeur={l.rang === 1 ? "10rem" : "8rem"} />
+                    <p className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                      <span className="inline-flex items-center gap-1 rounded-full bg-stone-50 px-2 py-0.5 text-[10px] font-semibold text-stone-500 ring-1 ring-inset ring-stone-200">
+                        <Lock className="h-2.5 w-2.5" aria-hidden="true" />cheval et signaux réservés
+                      </span>
+                    </p>
+                  </div>
+                  <span className="flex flex-col items-center sm:hidden">
+                    <Anneau v={l.proba_top1 ?? 0} rang={podium ? l.rang : undefined} taille={46} />
+                  </span>
+                  <span className="hidden text-right text-[14px] tracking-widest text-stone-300 sm:block" aria-label="Cote réservée">•••</span>
+                  <span className="hidden text-right text-[14px] tabular-nums text-slate-600 sm:block" style={SG}>
+                    {l.cote_juste != null ? coteJuste(l.cote_juste) : "—"}
+                  </span>
+                  <span className="hidden justify-end sm:flex">
+                    <span className="inline-flex items-center gap-1 rounded-md bg-stone-100 px-1.5 py-0.5 text-[10.5px] font-semibold text-stone-500">
+                      <Lock className="h-2.5 w-2.5" aria-hidden="true" />réservé
                     </span>
-                  )}
+                  </span>
+                  <LigneChiffres l={l} podium={podium} />
+                  {/* Téléphone */}
+                  <dl className="col-span-3 grid grid-cols-3 gap-1.5 text-[11px] tabular-nums sm:hidden">
+                    <div className="rounded-xl bg-[#FCFAF5] px-2.5 py-1.5 ring-1 ring-inset ring-[#EFE8D8]">
+                      <dt className="text-[9.5px] font-semibold uppercase tracking-wide text-stone-500">Cote</dt>
+                      <dd className="text-[13px] font-bold text-stone-300">•••</dd>
+                    </div>
+                    <div className="rounded-xl bg-[#FCFAF5] px-2.5 py-1.5 ring-1 ring-inset ring-[#EFE8D8]">
+                      <dt className="text-[9.5px] font-semibold uppercase tracking-wide text-stone-500">Cote juste</dt>
+                      <dd className="text-[13px] font-semibold text-slate-700" style={SG}>{l.cote_juste != null ? coteJuste(l.cote_juste) : "—"}</dd>
+                    </div>
+                    <div className="rounded-xl bg-[#FCFAF5] px-2.5 py-1.5 ring-1 ring-inset ring-[#EFE8D8]">
+                      <dt className="text-[9.5px] font-semibold uppercase tracking-wide text-stone-500">Top 3</dt>
+                      <dd className="text-[13px] font-bold text-slate-900" style={SG}>{pct(l.proba_top3)}</dd>
+                      <BarreFine v={l.proba_top3 ?? 0} ton="place" />
+                    </div>
+                  </dl>
                 </div>
-                <div className="mt-1.5 flex items-center gap-3 text-[11px] tabular-nums text-stone-600 sm:hidden">
-                  {l.cote != null && <span>Cote {cote(l.cote)}</span>}
-                  {l.cote_juste != null && <span>Juste {coteJuste(l.cote_juste)}</span>}
-                  {l.proba_top3 != null && <span>Top-3 {pct(l.proba_top3)}</span>}
+              </li>
+            );
+          })}
+
+          {/* Le reste des lignes masquées : une rangée de probabilités et l'appel. */}
+          {resteMasque.length > 0 && (
+            <li className="relative overflow-hidden bg-gradient-to-b from-[#FCFAF5] to-white px-4 py-4 sm:px-5">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-4">
+                <div className="min-w-0 sm:flex-1">
+                  <p className="m-0 text-[13px] font-bold text-stone-900" style={SG}>
+                    + {resteMasque.length} partants classés du {resteMasque[0].rang}ᵉ au {resteMasque[resteMasque.length - 1].rang}ᵉ
+                  </p>
+                  <div className="mt-2 flex flex-wrap gap-1.5" aria-label="Chances de victoire des lignes suivantes">
+                    {resteMasque.map((l) => (
+                      <span key={l.rang} className="inline-flex items-center gap-1 rounded-lg bg-white px-2 py-1 text-[11px] ring-1 ring-inset ring-[#ECE7DC]">
+                        <b className="font-bold tabular-nums text-stone-500">{l.rang}</b>
+                        <span className="h-2.5 w-7 rounded-full" style={{ backgroundImage: "repeating-linear-gradient(115deg,#E7E1D3 0 5px,#F4EFE4 5px 10px)" }} aria-hidden="true" />
+                        <b className="font-bold tabular-nums text-stone-900">{pct(l.proba_top1)}</b>
+                      </span>
+                    ))}
+                  </div>
                 </div>
-                <SignauxApercu signaux={l.signaux} />
+                <BoutonAbonnement className="w-full sm:w-auto" connecte={connecte} libelle={connecte ? "Voir le classement nommé" : "Voir le classement — essai 7 jours"} />
               </div>
+            </li>
+          )}
 
-              <span className="hidden text-right font-display text-[14px] font-semibold tabular-nums text-slate-900 sm:block">
-                {l.cote != null ? cote(l.cote) : "—"}
-              </span>
-              <span className="hidden text-right font-display text-[14px] tabular-nums text-slate-600 sm:block">
-                {l.cote_juste != null ? coteJuste(l.cote_juste) : "—"}
-              </span>
+          {!revele && nommees.length > 0 && (
+            <li className="flex items-center gap-2 bg-white px-4 pb-1.5 pt-3 text-[10px] font-bold uppercase tracking-[.1em] text-stone-500 sm:px-5">
+              <span className="h-px flex-1 bg-stone-200" aria-hidden="true" />
+              Visible gratuitement · le bas du classement
+              <span className="h-px flex-1 bg-stone-200" aria-hidden="true" />
+            </li>
+          )}
 
-              <div className="flex items-center gap-2.5">
-                <BarreProba
-                  p={l.proba_top1 ?? 0}
-                  low={null}
-                  high={null}
-                  ton={revele && l.rang === 1 ? "or" : "neutre"}
-                />
-                <span className="w-11 shrink-0 text-right font-display text-[14px] font-bold tabular-nums text-slate-900">
-                  {pct(l.proba_top1)}
-                </span>
-              </div>
-            </div>
-          </li>
-        ))}
-      </ol>
+          {nommees.map((l) => {
+            const podium = revele && l.rang <= 3;
+            return (
+              <li key={`r${l.rang}`} className={cn("relative px-4 py-3 sm:px-5", revele && l.rang === 1 && "bg-amber-50/40")}>
+                {podium && (
+                  <span
+                    className={cn("absolute inset-y-2 left-0 w-1 rounded-r-full bg-gradient-to-b",
+                      l.rang === 1 ? "from-amber-300 to-amber-600" : l.rang === 2 ? "from-slate-300 to-slate-500" : "from-orange-300 to-orange-600")}
+                    aria-hidden="true"
+                  />
+                )}
+                <div className={cn("grid items-center gap-x-3 gap-y-2", GRILLE)}>
+                  {podium ? <span className="flex justify-center"><Piece rang={l.rang as 1 | 2 | 3} taille={30} /></span> : <Rang rang={l.rang} absent={!revele} />}
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                      {l.numero != null && <Identite numero={l.numero} nom={l.nom ?? ""} terne={!revele} />}
+                      {l.position != null && <BadgeArrivee position={l.position} />}
+                      {!revele && (
+                        <span className="rounded-md bg-stone-100 px-1.5 py-0.5 text-[10px] font-semibold text-stone-600">écarté par le modèle</span>
+                      )}
+                    </div>
+                    {l.signaux && l.signaux.length > 0 && (
+                      <div className="mt-1.5">
+                        <PuceSignaux signaux={l.signaux.map((s) => ({ ...s, score: 0 }))} max={3} />
+                      </div>
+                    )}
+                  </div>
+                  <span className="flex flex-col items-center sm:hidden">
+                    <Anneau v={l.proba_top1 ?? 0} rang={podium ? l.rang : undefined} taille={46} />
+                  </span>
+                  <span className="hidden text-right text-[14px] font-semibold tabular-nums text-slate-900 sm:block" style={SG}>
+                    {l.cote != null ? cote(l.cote) : "—"}
+                  </span>
+                  <span className="hidden text-right text-[14px] tabular-nums text-slate-600 sm:block" style={SG}>
+                    {l.cote_juste != null ? coteJuste(l.cote_juste) : "—"}
+                  </span>
+                  <span className="hidden text-right sm:block">
+                    <LecturePrix marche={l.cote ?? null} juste={l.cote_juste ?? null} />
+                  </span>
+                  <LigneChiffres l={l} podium={podium} terne={!revele} />
+                  <dl className="col-span-3 grid grid-cols-3 gap-1.5 text-[11px] tabular-nums sm:hidden">
+                    <div className="rounded-xl bg-[#FCFAF5] px-2.5 py-1.5 ring-1 ring-inset ring-[#EFE8D8]">
+                      <dt className="text-[9.5px] font-semibold uppercase tracking-wide text-stone-500">Cote</dt>
+                      <dd className="text-[13px] font-bold text-slate-900" style={SG}>{l.cote != null ? cote(l.cote) : "—"}</dd>
+                    </div>
+                    <div className="rounded-xl bg-[#FCFAF5] px-2.5 py-1.5 ring-1 ring-inset ring-[#EFE8D8]">
+                      <dt className="text-[9.5px] font-semibold uppercase tracking-wide text-stone-500">Juste · prix</dt>
+                      <dd className="flex flex-wrap items-center gap-1">
+                        <span className="text-[13px] font-semibold text-slate-700" style={SG}>{l.cote_juste != null ? coteJuste(l.cote_juste) : "—"}</span>
+                        <LecturePrix marche={l.cote ?? null} juste={l.cote_juste ?? null} />
+                      </dd>
+                    </div>
+                    <div className="rounded-xl bg-[#FCFAF5] px-2.5 py-1.5 ring-1 ring-inset ring-[#EFE8D8]">
+                      <dt className="text-[9.5px] font-semibold uppercase tracking-wide text-stone-500">Top 3</dt>
+                      <dd className="text-[13px] font-bold text-slate-900" style={SG}>{pct(l.proba_top3)}</dd>
+                      <BarreFine v={l.proba_top3 ?? 0} ton="place" />
+                    </div>
+                  </dl>
+                </div>
+              </li>
+            );
+          })}
+        </ol>
+      </div>
 
-      {/* Le pied ne vend plus : l'unique appel à l'abonnement de l'onglet vit
-          dans son propre bandeau, sous la démonstration. Ici, une phrase — celle
-          qui évite le contresens le plus fréquent sur cette table. */}
-      <footer className="flex flex-col gap-2 border-t border-stone-100 bg-stone-50/60 px-4 py-3 sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-4 sm:px-5">
-        <p className="min-w-0 flex-1 text-[11.5px] leading-5 text-stone-600">
+      <footer className="flex flex-col gap-2 border-t border-stone-100 bg-[#FCFAF5] px-4 py-2.5 sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-4 sm:px-5">
+        <p className="m-0 min-w-0 flex-1 text-[10.5px] text-stone-500">
           {revele
-            ? "Ce classement était établi avant le départ."
-            : "Le rang vient d'un modèle d'ordonnancement dédié : deux chevaux peuvent afficher la même probabilité sans être au même rang."}
+            ? "Ce classement était établi avant le départ. Aide à la décision — aucune garantie de gain."
+            : "Rang, probabilités et cote juste sont ceux de la table abonné ; seuls les noms du haut du classement sont réservés."}
         </p>
-        {onLegende && (
-          <button
-            type="button"
-            onClick={onLegende}
-            className="inline-flex shrink-0 items-center gap-1 text-[12px] font-medium text-stone-600 underline underline-offset-2 hover:text-amber-800"
-          >
-            <HelpCircle className="h-3.5 w-3.5" aria-hidden="true" /> Comment lire ce classement
-          </button>
-        )}
       </footer>
     </section>
   );

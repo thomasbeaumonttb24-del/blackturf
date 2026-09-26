@@ -606,6 +606,20 @@ export interface SeoVerdict {
   favori_nom: string | null;
   favori_cote: number | null;
   favori_position: number | null;
+  /** Les cinq premiers du pronostic figé avant le départ, dans l'ordre du modèle,
+   *  chacun avec sa place réelle (`null` = hors des places publiées). Absent d'un
+   *  payload antérieur à son ajout : la page retombe alors sur la ligne du favori. */
+  top5?: SeoPronoCheval[];
+}
+
+export interface SeoPronoCheval {
+  rang: number;
+  numero: number;
+  nom: string | null;
+  cote: number | null;
+  /** Probabilité de victoire estimée par le modèle, entre 0 et 1. */
+  proba: number | null;
+  position: number | null;
 }
 
 export async function fetchVerdictsDuJour(

@@ -8,14 +8,17 @@
    mise en page propre au téléphone plutôt que des colonnes masquées. */
 import { useEffect, useId, useMemo, useRef, useState, type PointerEvent, type ReactNode } from "react";
 import {
-  Activity, ArrowDownUp, ChevronDown, Crown, Gauge, HelpCircle, MapPin, Trophy,
+  Activity, ArrowDownUp, ChevronDown, Crown, Gauge, HelpCircle, Lock, MapPin, Trophy,
   TrendingDown, TrendingUp, Users,
 } from "lucide-react";
 import { CasaqueNumero } from "@/components/courses/identite-cheval";
 import { MusiqueDisplay, RunningStyleBadge } from "@/components/courses/badges";
 import { formatMontantDevise, cn } from "@/lib/utils";
 import { LecturePrix, formatCoteFr, formatCoteJusteFr } from "@/components/courses/classement";
-import { Anneau, BandeauOnglet, LienOnglet, Pastille, SG, difficulteCourse } from "@/components/courses/course-ui";
+import {
+  Anneau, AnneauVerrouille, BandeauOnglet, BoutonAbonnement, LienOnglet, Pastille, PastilleReserve, SG, difficulteCourse,
+} from "@/components/courses/course-ui";
+import type { ApercuAnalyse } from "@/components/courses/insights";
 export { Anneau };
 
 const formatCote = (c: number | null | undefined) => (c ? formatCoteFr(c) : "—");
@@ -199,9 +202,17 @@ type Tri = "numero" | "ia" | "cote";
 
 type OngletLie = "marche" | "plan";
 
-export function PartantsSection({ partants, predictions, liveCoteMap, confGlobal, chevalOuvert, onAller }: {
+/** Ligne de l'aperçu public NOMMÉE (bas du classement) : ses chiffres sont
+ *  servis à tous, on peut donc les afficher dans la carte du cheval. */
+type LigneApercu = { rang: number; proba_top1: number | null; proba_top3: number | null; cote_juste: number | null };
+
+export function PartantsSection({ partants, predictions, apercu, connecte = false, liveCoteMap, confGlobal, chevalOuvert, onAller }: {
   partants: PartantFiche[];
   predictions: PredictionFiche[] | null | undefined;
+  /** Non-abonné sur une course analysée : mêmes colonnes que l'abonné, le
+   *  pronostic du haut du classement en moins. */
+  apercu?: ApercuAnalyse | null;
+  connecte?: boolean;
   liveCoteMap: Record<number, number | null>;
   confGlobal: number | null;
   /** Numéro du cheval dont la fiche s'ouvre à l'arrivée (lien depuis un autre onglet). */
@@ -210,6 +221,15 @@ export function PartantsSection({ partants, predictions, liveCoteMap, confGlobal
   onAller?: (cle: OngletLie) => void;
 }) {
   const avecPreds = !!predictions && predictions.length > 0;
+  const verrou = !avecPreds && !!apercu?.disponible;
+  const apercuPar = useMemo(() => {
+    const m = new Map<number, LigneApercu>();
+    for (const l of apercu?.classement ?? []) {
+      if (l.numero != null) m.set(l.numero, { rang: l.rang, proba_top1: l.proba_top1, proba_top3: l.proba_top3, cote_juste: l.cote_juste ?? null });
+    }
+    return m;
+  }, [apercu]);
+  const colonnes = avecPreds || verrou;
   const [tri, setTri] = useState<Tri>("numero");
   const [ouvert, setOuvert] = useState<string | null>(
     () => partants.find((p) => chevalOuvert != null && p.numero === chevalOuvert)?.participation_id ?? null,
@@ -297,6 +317,7 @@ export function PartantsSection({ partants, predictions, liveCoteMap, confGlobal
                 {difficulte.txt}
               </Pastille>
             )}
+            {verrou && <PastilleReserve libelle="Pronostic réservé" />}
             {favori && probaFavori != null && (
               <span className="inline-flex items-center gap-2 rounded-lg bg-white px-2.5 py-1 ring-1 ring-inset ring-[#E6DCC6]" title="Le cheval que le modèle voit gagner">
                 <Crown className="h-3.5 w-3.5 text-amber-600" aria-hidden="true" />
@@ -328,20 +349,22 @@ export function PartantsSection({ partants, predictions, liveCoteMap, confGlobal
                 </button>
               ))}
             </div>
-            <Legende avecPreds={avecPreds} />
+            <Legende avecPreds={colonnes} />
           </>
         }
       />
 
+      {verrou && apercu && <PodiumReserve apercu={apercu} connecte={connecte} />}
+
       {/* ── En-tête des colonnes (ordinateur) ── */}
       <div className={cn(
         "hidden items-end gap-4 px-5 pt-1 text-[10.5px] font-bold uppercase tracking-[.1em] text-stone-400 md:grid",
-        avecPreds ? COLS_PREDS : COLS_SANS,
+        colonnes ? COLS_PREDS : COLS_SANS,
       )}>
         <span className="text-center">N°</span>
         <span>Cheval</span>
         <span className="text-right" title="Cote du marché PMU — en direct tant que la course n'est pas partie">Cote</span>
-        {avecPreds && (
+        {colonnes && (
           <>
             <span className="text-right" title="Cote à partir de laquelle le pari devient rentable selon le modèle (1 / probabilité)">Cote juste</span>
             <span className="text-right" title="Probabilité de victoire calculée par le modèle">Victoire</span>
@@ -359,6 +382,8 @@ export function PartantsSection({ partants, predictions, liveCoteMap, confGlobal
             cote={coteDe(p)}
             live={liveCoteMap[p.numero] != null}
             avecPreds={avecPreds}
+            verrou={verrou}
+            apercuLigne={verrou ? apercuPar.get(p.numero) : undefined}
             eloChamp={eloChamp}
             ouvert={ouvert === p.participation_id}
             onToggle={() => setOuvert(ouvert === p.participation_id ? null : p.participation_id)}
@@ -455,12 +480,16 @@ function TicketCote({ cote, live, mv, compact = false }: { cote: number | null; 
   );
 }
 
-function LignePartant({ partant: p, pred, cote, live, avecPreds, eloChamp, ouvert, onToggle, onAller }: {
+function LignePartant({ partant: p, pred, cote, live, avecPreds, verrou = false, apercuLigne, eloChamp, ouvert, onToggle, onAller }: {
   partant: PartantFiche;
   pred: PredictionFiche | undefined;
   cote: number | null;
   live: boolean;
   avecPreds: boolean;
+  /** Pronostic réservé : les colonnes de l'abonné restent, verrouillées. */
+  verrou?: boolean;
+  /** Chiffres publics d'un cheval du bas du classement (aperçu). */
+  apercuLigne?: LigneApercu;
   eloChamp: EloChamp | null;
   ouvert: boolean;
   onToggle: () => void;
@@ -522,6 +551,11 @@ function LignePartant({ partant: p, pred, cote, live, avecPreds, eloChamp, ouver
       )}
       {p.premier_deferre && <Pastille className="bg-amber-50 text-amber-800 ring-amber-200" title="Déferré pour la première fois : souvent un signe d'ambition">1ʳᵉ fois déferré</Pastille>}
       {p.premieres_oeilleres && <Pastille className="hidden bg-amber-50 text-amber-800 ring-amber-200 sm:inline-flex" title="Porte des œillères pour la première fois">1ʳᵉˢ œillères</Pastille>}
+      {verrou && apercuLigne && !np && (
+        <Pastille className="bg-stone-100 text-stone-600 ring-stone-200" title="Cheval du bas du classement : ses chiffres sont visibles gratuitement">
+          {apercuLigne.rang}ᵉ · écarté par le modèle
+        </Pastille>
+      )}
       {!np && p.running_style && <span className="hidden sm:inline-flex"><RunningStyleBadge style={p.running_style} /></span>}
     </>
   );
@@ -576,7 +610,7 @@ function LignePartant({ partant: p, pred, cote, live, avecPreds, eloChamp, ouver
         aria-controls={panneauId}
         className={cn(
           "relative block w-full px-3.5 py-3.5 text-left transition-transform active:scale-[.985] sm:px-5 md:grid md:items-center md:gap-4 md:active:scale-100",
-          avecPreds ? COLS_PREDS : COLS_SANS,
+          avecPreds || verrou ? COLS_PREDS : COLS_SANS,
           "rounded-2xl focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-amber-700",
         )}
       >
@@ -604,6 +638,14 @@ function LignePartant({ partant: p, pred, cote, live, avecPreds, eloChamp, ouver
                   </span>
                 </span>
               )}
+              {verrou && !np && (
+                <span className="flex shrink-0 flex-col items-center md:hidden">
+                  {apercuLigne?.proba_top1 != null
+                    ? <Anneau v={apercuLigne.proba_top1} rang={undefined} taille={50} />
+                    : <AnneauVerrouille taille={50} />}
+                  <span className="mt-1 text-[10px] font-semibold uppercase tracking-wide text-stone-400">Victoire</span>
+                </span>
+              )}
               <ChevronDown
                 aria-hidden="true"
                 className={cn("mt-0.5 h-4 w-4 shrink-0 text-stone-400 transition-transform md:hidden", ouvert && "rotate-180")}
@@ -614,6 +656,17 @@ function LignePartant({ partant: p, pred, cote, live, avecPreds, eloChamp, ouver
             {!np && (
               <div className="mt-2.5 flex flex-wrap items-center gap-2 md:hidden">
                 <TicketCote cote={cote} live={live} mv={p.mouvement_cote_pct} compact />
+                {verrou && !apercuLigne && (
+                  <span className="inline-flex items-center gap-1 text-[11.5px] text-stone-500">
+                    juste <span className="inline-flex items-center gap-1 rounded-md bg-stone-100 px-1.5 py-0.5 text-[10.5px] font-semibold text-stone-500"><Lock className="h-2.5 w-2.5" aria-hidden="true" />réservé</span>
+                  </span>
+                )}
+                {verrou && apercuLigne?.cote_juste != null && (
+                  <span className="inline-flex items-center gap-1 text-[11.5px] text-stone-500">
+                    juste <b className="font-semibold tabular-nums text-stone-700">{formatCoteJuste(apercuLigne.cote_juste)}</b>
+                    <LecturePrix marche={cote} juste={apercuLigne.cote_juste} />
+                  </span>
+                )}
                 {pred?.cote_juste && (
                   <span className="inline-flex items-center gap-1 text-[11.5px] text-stone-500" title="Cote juste du modèle et écart avec la cote du PMU">
                     juste <b className="font-semibold tabular-nums text-stone-700">{formatCoteJuste(pred.cote_juste)}</b>
@@ -673,6 +726,39 @@ function LignePartant({ partant: p, pred, cote, live, avecPreds, eloChamp, ouver
             )}
           </div>
         )}
+        {verrou && (
+          <div className="hidden text-right md:block">
+            {np ? <span className="text-stone-300">—</span> : apercuLigne?.cote_juste != null ? (
+              <>
+                <div className="text-[15px] font-semibold tabular-nums leading-none text-stone-600" style={SG}>{formatCoteJuste(apercuLigne.cote_juste)}</div>
+                <div className="mt-1.5 flex justify-end"><LecturePrix marche={cote} juste={apercuLigne.cote_juste} /></div>
+              </>
+            ) : (
+              <span className="inline-flex items-center gap-1 rounded-md bg-stone-100 px-1.5 py-0.5 text-[10.5px] font-semibold text-stone-500" title="Cote juste réservée aux abonnés">
+                <Lock className="h-2.5 w-2.5" aria-hidden="true" />réservé
+              </span>
+            )}
+          </div>
+        )}
+        {verrou && (
+          <div className="hidden md:flex md:items-center md:justify-end md:gap-3">
+            {np ? <span className="text-stone-300">—</span> : apercuLigne?.proba_top1 != null ? (
+              <>
+                <span className="text-right text-[11px] leading-tight text-stone-500">
+                  Top 3<br /><b className="text-[13px] font-bold tabular-nums text-stone-800" style={SG}>{apercuLigne.proba_top3 != null ? `${Math.round(apercuLigne.proba_top3 * 100)} %` : "—"}</b>
+                </span>
+                <Anneau v={apercuLigne.proba_top1} rang={undefined} taille={56} />
+              </>
+            ) : (
+              <>
+                <span className="text-right text-[11px] leading-tight text-stone-400">
+                  Top 3<br /><b className="text-[13px] font-bold tracking-widest text-stone-300">••</b>
+                </span>
+                <AnneauVerrouille taille={56} />
+              </>
+            )}
+          </div>
+        )}
         <ChevronDown
           aria-hidden="true"
           className={cn("hidden h-5 w-5 text-stone-400 transition-transform group-hover/carte:text-stone-600 md:block", ouvert && "rotate-180")}
@@ -694,6 +780,44 @@ function LignePartant({ partant: p, pred, cote, live, avecPreds, eloChamp, ouver
         )}
       </div>
     </li>
+  );
+}
+
+/** Bandeau non abonné : le podium du pronostic, médailles en place et noms
+ *  masqués, avec les chances de victoire que l'aperçu public donne déjà. */
+function PodiumReserve({ apercu, connecte }: { apercu: ApercuAnalyse; connecte: boolean }) {
+  const podium = (apercu.classement ?? []).filter((l) => l.rang <= 3).sort((a, b) => a.rang - b.rang);
+  const nbNommes = apercu.nb_lignes_revelees;
+  return (
+    <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-amber-50 via-white to-white p-4 ring-1 ring-[#EADFC6] shadow-[inset_0_1px_0_#fff,0_1px_2px_rgba(17,24,39,.05),0_16px_32px_-24px_rgba(146,64,14,.5)] sm:p-5">
+      <div className="flex flex-wrap items-center gap-x-5 gap-y-4">
+        <div className="flex items-end gap-2" aria-label="Podium du pronostic, noms réservés">
+          {podium.map((l) => (
+            <div key={l.rang} className={cn("flex min-w-[62px] flex-col items-center gap-1.5 rounded-xl bg-white px-3 pb-2 pt-2.5 ring-1 ring-inset ring-[#ECE7DC] shadow-[inset_0_1px_0_#fff,0_6px_14px_-10px_rgba(17,24,39,.35)]", l.rang === 1 && "-translate-y-1.5")}>
+              <span
+                aria-hidden="true"
+                className="inline-flex h-7 w-7 items-center justify-center rounded-full text-[12px] font-extrabold text-white shadow-[inset_0_-2px_2px_rgba(0,0,0,.25),inset_0_2px_2px_rgba(255,255,255,.7),0_4px_10px_-3px_rgba(0,0,0,.35)] [text-shadow:0_1px_1px_rgba(0,0,0,.35)]"
+                style={{ background: PODIUM[l.rang].piece }}
+              >
+                {l.rang}
+              </span>
+              <span className="inline-flex h-[22px] min-w-[28px] items-center justify-center rounded-md bg-slate-800 px-1 text-[11px] font-extrabold text-white/80">?</span>
+              <span className="text-[12px] font-bold tabular-nums text-stone-900" style={SG}>
+                {l.proba_top1 != null ? `${Math.round(l.proba_top1 * 100)} %` : "—"}
+              </span>
+            </div>
+          ))}
+        </div>
+        <div className="min-w-[14rem] flex-1">
+          <p className="m-0 text-[15px] font-bold leading-snug text-stone-900" style={SG}>Le podium du pronostic est prêt</p>
+          <p className="m-0 mt-1 text-[12.5px] leading-5 text-stone-600">
+            Médaille, cote juste et chance de victoire de chaque partant : réservés aux abonnés.
+            {nbNommes > 0 ? ` Les ${nbNommes} derniers du classement restent visibles ci-dessous.` : ""}
+          </p>
+        </div>
+        <BoutonAbonnement connecte={connecte} libelle={connecte ? "Voir le podium — 12 €/mois" : "Voir le podium — essai 7 jours"} />
+      </div>
+    </div>
   );
 }
 
