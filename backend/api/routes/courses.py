@@ -666,6 +666,17 @@ async def get_seo_arrivees(
     return result
 
 
+def _json_list(v) -> list:
+    """Un `jsonb_agg` brut : asyncpg le rend en texte, d'autres pilotes déjà décodé."""
+    import json
+
+    if v is None:
+        return []
+    if isinstance(v, (str, bytes)):
+        v = json.loads(v)
+    return v if isinstance(v, list) else []
+
+
 @router.get("/seo/verdicts")
 async def get_seo_verdicts(
     jour: date = Query(...),
@@ -687,7 +698,9 @@ async def get_seo_verdicts(
     """
     import json
 
-    cache_key = f"seo:verdicts:{jour.isoformat()}"
+    # v2 : ajout du `top5`. Changer la clé évite de servir six heures durant un
+    # payload d'ancienne forme, sans le classement que la page attend désormais.
+    cache_key = f"seo:verdicts:v2:{jour.isoformat()}"
     try:
         redis = await get_redis()
         cached = await redis.get(cache_key)
@@ -720,7 +733,8 @@ async def get_seo_verdicts(
                (SELECT (e->>'position')::int
                   FROM resultats rr, jsonb_array_elements(rr.classement::jsonb) e
                  WHERE rr.course_id = k.course_id
-                   AND (e->>'numero')::int = p1.numero LIMIT 1) AS favori_position
+                   AND (e->>'numero')::int = p1.numero LIMIT 1) AS favori_position,
+               t5.top5
           FROM courues k
           -- rang que le modèle donnait au vainqueur réel
           LEFT JOIN LATERAL (
@@ -743,6 +757,26 @@ async def get_seo_verdicts(
                LIMIT 1
           ) p1 ON TRUE
           LEFT JOIN chevaux ch1 ON ch1.cheval_id = p1.cheval_id
+          -- les cinq premiers du modèle, avec leur place réelle à l'arrivée
+          LEFT JOIN LATERAL (
+              SELECT jsonb_agg(jsonb_build_object(
+                         'rang', pr.rang_predit,
+                         'numero', pa.numero,
+                         'nom', ch.nom,
+                         'cote', pr.cote_figee,
+                         'proba', pr.proba_top1,
+                         'position', (SELECT (e->>'position')::int
+                                        FROM resultats rr, jsonb_array_elements(rr.classement::jsonb) e
+                                       WHERE rr.course_id = k.course_id
+                                         AND (e->>'numero')::int = pa.numero LIMIT 1)
+                     ) ORDER BY pr.rang_predit) AS top5
+                FROM predictions pr
+                JOIN participations pa ON pa.participation_id = pr.participation_id
+                LEFT JOIN chevaux ch ON ch.cheval_id = pa.cheval_id
+               WHERE pr.course_id = k.course_id
+                 AND pr.rang_predit BETWEEN 1 AND 5
+                 AND pr.created_at < k.date_heure
+          ) t5 ON TRUE
          WHERE pg.rang_predit IS NOT NULL
     """), {"jour": jour})).mappings().all()
 
@@ -759,6 +793,17 @@ async def get_seo_verdicts(
             "favori_nom": r["favori_nom"],
             "favori_cote": float(r["favori_cote"]) if r["favori_cote"] is not None else None,
             "favori_position": r["favori_position"],
+            "top5": [
+                {
+                    "rang": h["rang"],
+                    "numero": h["numero"],
+                    "nom": h["nom"],
+                    "cote": float(h["cote"]) if h.get("cote") is not None else None,
+                    "proba": float(h["proba"]) if h.get("proba") is not None else None,
+                    "position": h.get("position"),
+                }
+                for h in _json_list(r["top5"])
+            ],
         }
 
     result = {"jour": jour.isoformat(), "verdicts": verdicts}
