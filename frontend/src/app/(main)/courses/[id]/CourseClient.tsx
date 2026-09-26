@@ -510,7 +510,7 @@ function PronosticsPresse({ pronostics }: {
               ))}
             </div>
             {p.commentaire && (
-              <p className="line-clamp-2" style={{ margin: "7px 0 0", fontSize: 11, lineHeight: 1.4, color: CX.gray400 }}>{p.commentaire}</p>
+              <p style={{ margin: "7px 0 0", fontSize: 11, lineHeight: 1.4, color: CX.gray400 }}>{p.commentaire}</p>
             )}
           </div>
         ))}
@@ -1197,7 +1197,7 @@ function ResultatsSection({ resultats, partants }: {
                   return (
                     <div key={k} className="flex items-center gap-2 rounded-lg border border-border bg-white px-2 py-1.5">
                       <span className="flex h-6 min-w-[1.75rem] flex-shrink-0 items-center justify-center rounded px-1 text-[10px] font-bold tracking-tight text-white" style={{ background: color }}>{abbr}</span>
-                      <span className="flex-1 truncate text-xs text-muted-foreground capitalize">{label}</span>
+                      <span className="min-w-0 flex-1 break-words text-xs leading-tight text-muted-foreground capitalize">{label}</span>
                       <span className="font-bold tabular-nums text-brand-emerald-dark">{euros2(Number(v))} €</span>
                     </div>
                   );
@@ -1314,7 +1314,7 @@ function PronosticVerdictSection({ predictions, classement }: {
             )}>
               {favPos != null ? ord(favPos) : "—"}
             </div>
-            <div className="mt-1 hidden truncate text-[11px] text-stone-600 sm:block">
+            <div className="mt-1 hidden text-[11px] text-stone-600 sm:block">
               {favPos == null
                 ? "non classé à l'arrivée"
                 : favoriIA ? <IdentiteCheval numero={favoriIA.numero} nom={favoriIA.nom_cheval} /> : ""}
@@ -2167,7 +2167,7 @@ function MarcheCotes({ courseId, partants, statut, connecte, authLoading }: { co
               <div key={r.num} style={{ borderRadius: 14, border: `1px dashed ${CX.bd3}`, background: CX.surf2, padding: "11px 13px" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
 
-                  <span style={{ flex: 1, fontSize: 12.5, fontWeight: 600, color: CX.gray400, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}><IdentiteCheval numero={r.num} nom={r.nom} /></span>
+                  <span style={{ flex: 1, minWidth: 0, fontSize: 12.5, fontWeight: 600, color: CX.gray400 }}><IdentiteCheval numero={r.num} nom={r.nom} /></span>
                 </div>
                 <div style={{ marginTop: 12, height: 34, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10.5, color: CX.muted }}>
                   Cote non publiée
@@ -2190,7 +2190,7 @@ function MarcheCotes({ courseId, partants, statut, connecte, authLoading }: { co
             <div key={r.num} className="hover:-translate-y-0.5" style={{ position: "relative", overflow: "hidden", borderRadius: 14, border: `1px solid ${isFav ? CX.goldBd : CX.bd1}`, background: isFav ? "#FFFCF4" : "#FFFFFF", padding: "11px 13px 0", boxShadow: "0 1px 2px rgba(0,0,0,.03)", transition: "transform .18s,box-shadow .18s" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
 
-                <span style={{ flex: 1, fontSize: 12.5, fontWeight: 600, color: CX.gray700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}><IdentiteCheval numero={r.num} nom={r.nom} /></span>
+                <span style={{ flex: 1, minWidth: 0, fontSize: 12.5, fontWeight: 600, color: CX.gray700 }}><IdentiteCheval numero={r.num} nom={r.nom} /></span>
               </div>
               <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", marginTop: 9 }}>
                 <div style={{ display: "flex", alignItems: "baseline", gap: 5 }}>
@@ -2851,7 +2851,7 @@ export default function CoursePage({
               {/* Favori algo — même jauge que dans l'onglet Partants */}
               <button type="button" onClick={() => allerA("partants", fav.numero)} title="Ouvrir sa fiche dans Partants" className={cn(CARTE_CLS, "cx-fade block w-full bg-gradient-to-br from-amber-50/80 via-white to-white p-3.5 text-left transition-transform active:scale-[.985] sm:p-4 hover:-translate-y-0.5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-amber-700")} style={{ animationDelay: ".04s" }}>
                 <p className="m-0 text-[10.5px] font-bold uppercase tracking-[.1em] text-amber-700">Favori algo</p>
-                <div className="mt-2 truncate text-[13.5px] font-bold text-stone-900"><IdentiteCheval numero={fav.numero} nom={fav.nom_cheval} /></div>
+                <div className="mt-2 text-[13.5px] font-bold text-stone-900"><IdentiteCheval numero={fav.numero} nom={fav.nom_cheval} /></div>
                 <div className="mt-2.5 flex items-center gap-2.5">
                   <Anneau v={fav.proba_top1} rang={1} taille={48} />
                   <span className="text-[11.5px] leading-snug text-stone-500">
@@ -2874,7 +2874,7 @@ export default function CoursePage({
                 <p className={cn("m-0 text-[10.5px] font-bold uppercase tracking-[.1em]", topVB ? "text-emerald-700" : "text-stone-500")}>Pari de valeur</p>
                 {topVB ? (
                   <>
-                    <div className="mt-2 truncate text-[13.5px] font-bold text-stone-900"><IdentiteCheval numero={topVB.numero} nom={topVB.nom_cheval} /></div>
+                    <div className="mt-2 text-[13.5px] font-bold text-stone-900"><IdentiteCheval numero={topVB.numero} nom={topVB.nom_cheval} /></div>
                     <div className="mt-2 flex flex-wrap items-baseline gap-x-1.5">
                       <span className="text-[26px] font-bold leading-none text-emerald-700" style={{ fontFamily: CX.sg }}>+{Math.round(topVB.value_bet!.ev_max * 100)}%</span>
                       <span className="text-[11px] text-stone-500">espérance · {etoiles(topVB.value_bet!.niveau)}</span>
@@ -3352,9 +3352,9 @@ export default function CoursePage({
                   const hasDetail = !!(c.justification || (c.facteurs_positifs && c.facteurs_positifs.length > 0) || (c.points_vigilance && c.points_vigilance.length > 0));
                   return (
                   <div key={c.numero} style={{ borderRadius: 12, border: `1px solid ${CX.bd1}`, background: "rgba(255,255,255,.75)", padding: "13px 14px" }} className="space-y-1.5">
-                    <div className="flex items-center justify-between">
-                      <span style={{ fontSize: 13.5, fontWeight: 700, color: CX.ink2 }}><IdentiteCheval numero={c.numero} nom={c.nom} /></span>
-                      <span style={{ fontFamily: CX.sg, fontSize: 12, fontWeight: 700, color: CX.gray500 }}>cote {c.cote}</span>
+                    <div className="flex items-center justify-between gap-2">
+                      <span style={{ minWidth: 0, fontSize: 13.5, fontWeight: 700, color: CX.ink2 }}><IdentiteCheval numero={c.numero} nom={c.nom} /></span>
+                      <span style={{ flexShrink: 0, whiteSpace: "nowrap", fontFamily: CX.sg, fontSize: 12, fontWeight: 700, color: CX.gray500 }}>cote {c.cote}</span>
                     </div>
                     {/* Chiffres clés : valeur modèle vs marché */}
                     <div className="flex flex-wrap gap-1 text-[10px]">

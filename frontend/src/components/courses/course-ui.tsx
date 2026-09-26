@@ -259,7 +259,7 @@ export function BoutonAbonnement({ connecte, suite, libelle, className, discret 
     <a
       href={l.href}
       className={cn(
-        "inline-flex min-h-9 items-center justify-center gap-1.5 whitespace-nowrap rounded-xl px-4 text-[12.5px] font-bold transition-[transform,filter] hover:-translate-y-0.5 hover:brightness-105 focus-visible:outline focus-visible:outline-2 focus-visible:outline-amber-700",
+        "inline-flex min-h-9 items-center justify-center gap-1.5 rounded-xl px-4 py-1.5 text-center text-[12.5px] leading-tight font-bold transition-[transform,filter] hover:-translate-y-0.5 hover:brightness-105 focus-visible:outline focus-visible:outline-2 focus-visible:outline-amber-700",
         discret
           ? "bg-white text-amber-800 ring-1 ring-inset ring-amber-300 shadow-[inset_0_1px_0_#fff,0_1px_2px_rgba(146,64,14,.12)]"
           : "bg-gradient-to-b from-amber-400 to-amber-500 text-stone-900 ring-1 ring-inset ring-amber-600/30 shadow-[inset_0_1px_0_rgba(255,255,255,.5),0_10px_22px_-12px_rgba(146,64,14,.8)]",

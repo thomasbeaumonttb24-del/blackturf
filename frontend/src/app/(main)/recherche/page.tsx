@@ -114,14 +114,14 @@ function RechercheContent() {
                       </div>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
-                          <span className="font-semibold text-gray-900 truncate">{r.label}</span>
+                          <span className="font-semibold text-gray-900 break-words">{r.label}</span>
                           {r.running_style && RUNNING_STYLE_EMOJIS[r.running_style] && (
                             <span title={r.running_style} className="text-sm">
                               {RUNNING_STYLE_EMOJIS[r.running_style]}
                             </span>
                           )}
                         </div>
-                        <p className="text-xs text-gray-600 truncate mt-0.5">{r.sub}</p>
+                        <p className="text-xs text-gray-600 break-words mt-0.5">{r.sub}</p>
                       </div>
                       <ArrowRight className="h-4 w-4 text-gray-300 opacity-0 group-hover:opacity-100 flex-shrink-0 transition-opacity" />
                     </Link>

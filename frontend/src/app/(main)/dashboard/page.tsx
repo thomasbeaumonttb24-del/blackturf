@@ -128,17 +128,19 @@ function PariDuJourCarte({ p }: { p: PariDuJour }) {
         <div className="p-5 sm:p-7">
           <div className="flex items-center justify-between gap-3 text-[11px]">
             <span className="font-medium uppercase tracking-[0.2em] text-amber-800">Pari du jour</span>
-            <span className="truncate text-stone-500">
+            <span className="min-w-0 break-words text-right text-stone-500">
               {[p.code, titleCase(p.hippodrome), p.date_heure && heureParis(p.date_heure)].filter(Boolean).join(" · ")}
             </span>
           </div>
 
-          <div className="mt-6 flex items-center gap-5">
+          {/* Sur téléphone, l'anneau passe au-dessus : à côté, il ne laissait
+              qu'une colonne étroite où nom et chiffres se cassaient lettre à lettre. */}
+          <div className="mt-6 flex flex-col items-start gap-4 min-[420px]:flex-row min-[420px]:items-center min-[420px]:gap-5">
             <Anneau pct={proba} taille={96} epaisseur={5} couleur={["#B45309", "#F59E0B"]} fond="rgba(120,113,108,.14)">
               <span className="font-display text-2xl font-medium leading-none text-stone-900">{proba}<span className="text-sm text-stone-500"> %</span></span>
               <span className="mt-1 text-[9px] font-medium uppercase tracking-wider text-stone-500">victoire</span>
             </Anneau>
-            <div className="min-w-0 flex-1">
+            <div className="w-full min-w-0 flex-1">
               <div className="text-lg font-semibold text-stone-900">
                 <IdentiteCheval numero={p.numero} nom={p.nom_cheval} courseId={p.course_id} />
               </div>
@@ -147,9 +149,9 @@ function PariDuJourCarte({ p }: { p: PariDuJour }) {
                 {p.cote_pmu ? (<><dt className="text-stone-500">Cote PMU</dt><dd className="text-right font-semibold tabular-nums text-stone-900">{p.cote_pmu}</dd></>) : null}
                 {p.cote_pmu ? (<><dt className="text-stone-500">Cote juste</dt><dd className="text-right font-semibold tabular-nums text-stone-900">{p.proba_top1 ? nf(1 / p.proba_top1, 1) : "—"}</dd></>) : null}
                 <dt className="text-stone-500">EV</dt>
-                <dd className={cn("text-right font-semibold tabular-nums", ev > 0 ? "text-emerald-700" : "text-stone-900")}>{ev > 0 ? "+" : ""}{ev} %</dd>
-                {p.proba_top1_low != null && p.proba_top1_high != null && (<><dt className="text-stone-500">Fourchette</dt><dd className="text-right tabular-nums text-stone-700">{Math.round(p.proba_top1_low * 100)} – {Math.round(p.proba_top1_high * 100)} %</dd></>)}
-                {p.confidence != null && (<><dt className="text-stone-500">Accord des modèles</dt><dd className="text-right tabular-nums text-stone-700">{p.confidence} %</dd></>)}
+                <dd className={cn("whitespace-nowrap text-right font-semibold tabular-nums", ev > 0 ? "text-emerald-700" : "text-stone-900")}>{ev > 0 ? "+" : ""}{ev} %</dd>
+                {p.proba_top1_low != null && p.proba_top1_high != null && (<><dt className="text-stone-500">Fourchette</dt><dd className="whitespace-nowrap text-right tabular-nums text-stone-700">{Math.round(p.proba_top1_low * 100)} – {Math.round(p.proba_top1_high * 100)} %</dd></>)}
+                {p.confidence != null && (<><dt className="text-stone-500">Accord des modèles</dt><dd className="whitespace-nowrap text-right tabular-nums text-stone-700">{p.confidence} %</dd></>)}
                 <dt className="text-stone-500">Niveau</dt>
                 <dd className="text-right"><Niveau n={p.niveau} /></dd>
               </dl>
@@ -164,7 +166,7 @@ function PariDuJourCarte({ p }: { p: PariDuJour }) {
             </div>
           </div>
 
-          {p.raison && <p className="mt-5 line-clamp-2 border-l-2 border-amber-200 pl-3 text-[13px] leading-relaxed text-stone-600">{p.raison}</p>}
+          {p.raison && <p className="mt-5 border-l-2 border-amber-200 pl-3 text-[13px] leading-relaxed text-stone-600">{p.raison}</p>}
 
           <div className="mt-6 flex items-center justify-between border-t border-stone-100 pt-4 text-sm font-medium text-stone-900">
             Voir l&apos;analyse de la course
@@ -412,7 +414,7 @@ function CarteProfil({ p, i }: { p: PariProfil; i: number }) {
             <span className={cn("absolute inset-x-0 top-0 h-[3px]", t.filet)} aria-hidden="true" />
             <div className="flex items-center justify-between gap-2">
               <span className={cn("text-[11px] font-semibold uppercase tracking-[0.16em]", t.texte)}>{p.profil_label}</span>
-              <span className="truncate text-[11px] text-stone-400">
+              <span className="min-w-0 break-words text-right text-[11px] text-stone-400">
                 {[p.code, titleCase(p.hippodrome), heureDe(p.date_heure)].filter(Boolean).join(" · ")}
               </span>
             </div>
@@ -450,7 +452,7 @@ function CarteProfil({ p, i }: { p: PariProfil; i: number }) {
             <div className={cn("mt-2 text-right text-[11px] font-medium", p.ev > 0 ? "text-emerald-700" : "text-stone-500")}>
               EV {p.ev > 0 ? "+" : ""}{Math.round((p.ev ?? 0) * 100)} %
             </div>
-            {p.raisons?.[0] && <p className="mt-3 line-clamp-2 text-xs leading-relaxed text-stone-500">{p.raisons[0]}</p>}
+            {p.raisons?.[0] && <p className="mt-3 text-xs leading-relaxed text-stone-500">{p.raisons[0]}</p>}
           </div>
         </Tilt>
       </Link>
@@ -571,7 +573,7 @@ function Outils({ modele }: { modele?: EtatModele }) {
               </span>
               <span className="min-w-0 flex-1">
                 <span className="block text-sm font-medium text-stone-900">{r.label}</span>
-                <span className="block truncate text-xs text-stone-500">{r.description}</span>
+                <span className="block break-words text-xs text-stone-500">{r.description}</span>
               </span>
               <ArrowRight className="h-4 w-4 shrink-0 text-stone-300 transition-all group-hover:translate-x-0.5 group-hover:text-stone-900" aria-hidden="true" />
             </Link>
@@ -678,7 +680,7 @@ function ParisDeValeur({ vbs, isPaid }: { vbs: ValueBet[]; isPaid: boolean }) {
             </div>
             <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-stone-500">
               {vb.code && <span className="font-medium text-stone-600">{vb.code}</span>}
-              <span className="truncate">{titleCase(vb.hippodrome)}</span>
+              <span className="min-w-0 break-words">{titleCase(vb.hippodrome)}</span>
               {heureDe(vb.date_heure, vb.heure) && <span className="inline-flex items-center gap-0.5"><Clock className="h-3 w-3" aria-hidden="true" />{heureDe(vb.date_heure, vb.heure)}</span>}
               {vb.discipline && <span>{disciplineLabel(vb.discipline)}</span>}
               <Niveau n={vb.niveau} />
@@ -729,9 +731,9 @@ function ProchainesCourses({ courses }: { courses: CourseJour[] }) {
               </span>
               <span className={cn("h-8 w-px shrink-0", direct ? "bg-emerald-500" : "bg-stone-200")} aria-hidden="true" />
               <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-x-2">
                   {c.numero_reunion ? <span className="shrink-0 text-[11px] font-medium text-stone-500">R{c.numero_reunion}C{c.numero}</span> : null}
-                  <span className={cn("truncate text-sm font-medium", finie ? "text-stone-400" : "text-stone-900")}>
+                  <span className={cn("min-w-0 break-words text-sm font-medium", finie ? "text-stone-400" : "text-stone-900")}>
                     {titleCase(c.hippodrome_nom) || titleCase(c.nom) || "—"}
                   </span>
                   {(c.est_quinte || c.est_quarte || c.est_tierce) && (
@@ -740,8 +742,8 @@ function ProchainesCourses({ courses }: { courses: CourseJour[] }) {
                     </span>
                   )}
                 </div>
-                {c.nom && <div className="truncate text-[11px] text-stone-600">{titleCase(c.nom)}</div>}
-                <div className="mt-0.5 truncate text-[11px] text-stone-500">
+                {c.nom && <div className="break-words text-[11px] text-stone-600">{titleCase(c.nom)}</div>}
+                <div className="mt-0.5 break-words text-[11px] text-stone-500">
                   {[
                     disciplineLabel(c.discipline),
                     c.distance ? `${nf(c.distance)} m` : null,

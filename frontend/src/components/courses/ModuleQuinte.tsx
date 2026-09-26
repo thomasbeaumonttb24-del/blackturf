@@ -158,7 +158,7 @@ export function ModuleQuinte({ module, montantTotal }: { module: ModuleQuinteDat
           <ul style={{ margin: 0, padding: 0, listStyle: "none", display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(190px,1fr))", gap: 6 }}>
             {chevaux.map((c) => (
               <li key={c.numero} style={{ minWidth: 0, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6, borderRadius: 9, border: `1px solid ${CX.bd2}`, padding: "5px 8px", fontSize: 12, color: CX.ink2 }}>
-                <span style={{ minWidth: 0, overflow: "hidden" }}><IdentiteCheval numero={c.numero} nom={c.nom} /></span>
+                <span style={{ minWidth: 0 }}><IdentiteCheval numero={c.numero} nom={c.nom} /></span>
                 {c.rang != null && (
                   <span style={{ flexShrink: 0, fontSize: 10, color: CX.gray500, fontVariantNumeric: "tabular-nums" }}>
                     {c.rang}{c.rang === 1 ? "er" : "e"} IA

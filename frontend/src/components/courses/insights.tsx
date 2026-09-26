@@ -550,7 +550,7 @@ export function EnjeuxParChevalVue({ data, poolTotalEur }: { data: EnjeuxResp; p
             <li key={l.numero} className="-mx-1.5 rounded-xl px-1.5 py-3 transition-colors hover:bg-stone-50/70">
               <div className="flex items-center gap-2.5">
                 <CasaqueNumero numero={l.numero} />
-                <span className="min-w-0 flex-1 truncate text-[13px] font-semibold tracking-tight text-slate-800">
+                <span className="min-w-0 flex-1 break-words text-[13px] font-semibold leading-tight tracking-tight text-slate-800">
                   {l.nom ? titre(l.nom) : "—"}
                 </span>
 
@@ -1087,12 +1087,12 @@ export function ApercuAnalyseCard({
                     place ? "border-emerald-200 bg-emerald-50/50" : "border-stone-100 bg-stone-50/60",
                   )}
                 >
-                  <span className="w-5 text-center font-display text-sm font-bold text-stone-600">{p.rang}</span>
-                  <span className="font-display text-[15px] font-bold tabular-nums text-slate-900"><CasaqueNumero numero={p.numero} /></span>
-                  <span className="min-w-0 flex-1 truncate text-[13px] text-stone-600">{p.nom}</span>
+                  <span className="w-5 shrink-0 text-center font-display text-sm font-bold text-stone-600">{p.rang}</span>
+                  <span className="shrink-0 font-display text-[15px] font-bold tabular-nums text-slate-900"><CasaqueNumero numero={p.numero} /></span>
+                  <span className="min-w-0 flex-1 break-words text-[13px] leading-tight text-stone-600">{p.nom}</span>
                   {place != null && (
-                    <span className="rounded-full bg-emerald-600/10 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">
-                      {place === 1 ? "1ᵉʳ" : `${place}ᵉ`} à l&apos;arrivée
+                    <span className="shrink-0 whitespace-nowrap rounded-full bg-emerald-600/10 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">
+                      {place === 1 ? "1ᵉʳ" : `${place}ᵉ`}<span className="hidden sm:inline"> à l&apos;arrivée</span>
                     </span>
                   )}
                   {p.proba_top1 != null && (
@@ -1450,7 +1450,7 @@ export function PreuvesRecentesCard() {
               >
                 <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
                   <span className="font-mono">{codeCourse(c.course_id)}</span>
-                  <span className="truncate">{titre(c.hippodrome)}</span>
+                  <span className="min-w-0 break-words">{titre(c.hippodrome)}</span>
                   {c.est_quinte && (
                     <span className="ml-auto rounded-full bg-amber-500 px-1.5 py-0.5 text-[9.5px] font-bold text-brand-dark">Q+</span>
                   )}
@@ -1470,7 +1470,7 @@ export function PreuvesRecentesCard() {
                   <span className="shrink-0 font-display text-[16px] font-bold leading-none text-slate-900">
                     <CasaqueNumero numero={c.gagnant_numero} />
                   </span>
-                  <span className="truncate text-[12.5px] text-stone-600">
+                  <span className="min-w-0 break-words text-[12.5px] leading-tight text-stone-600">
                     {c.gagnant_nom ? titre(c.gagnant_nom) : "—"}
                   </span>
                 </span>
