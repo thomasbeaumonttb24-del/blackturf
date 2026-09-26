@@ -121,7 +121,7 @@ function Hero({ mois, enCours, setMois, regles, classement }: {
             <div className="min-w-0">
               <div className="text-[11px] font-semibold uppercase tracking-[0.1em] text-slate-500">{r.rang}{r.rang === 1 ? "er" : "e"} du mois</div>
               <div className="text-[15px] font-bold text-slate-900">{r.jours} jours {planLabel(r.plan)}</div>
-              <div className="text-[11px] text-slate-500">offerts au gagnant</div>
+              <div className="text-[11px] text-slate-500">{classement?.essai ? `en jeu dès le ${dateLancement(regles.premier_mois)}` : "offerts au gagnant"}</div>
             </div>
           </li>
         ))}
@@ -312,8 +312,8 @@ export default function DefiPage() {
           pointsMax={regles.points_max}
           prix={regles.recompenses[0]}
         />
-        <div className="mt-3 flex items-start gap-3 rounded-2xl bg-amber-50/70 px-4 py-3 text-[12.5px] leading-relaxed text-slate-700 ring-1 ring-inset ring-amber-200">
-          <span className="font-display text-[15px] font-bold text-amber-700">Ex.</span>
+        <div className="mt-3 flex flex-col items-start gap-2 rounded-2xl bg-amber-50/70 px-4 py-3 text-[12.5px] leading-relaxed text-slate-700 ring-1 ring-inset ring-amber-200 sm:flex-row sm:gap-3">
+          <span className="shrink-0 rounded-lg bg-white px-2 py-0.5 text-[10.5px] font-bold uppercase tracking-[0.12em] text-amber-800 ring-1 ring-inset ring-amber-200">Exemple</span>
           <p>
             50 points sur un cheval gagnant rapporté 4,20 € au PMU : 50 × 4,20 = <b className="text-slate-900">210 points</b> reviennent
             dans votre solde, soit +160 points. Un pari perdu retire sa mise. Il faut {regles.min_paris_classement} paris dans le mois
@@ -383,7 +383,7 @@ export default function DefiPage() {
                 <div className="flex items-start justify-between gap-2">
                   <Link href={`/courses/${p.course_id}#defi`} className="min-w-0 hover:underline">
                     <div className="text-[13px] font-bold text-slate-900">{p.type_pari} {chevauxLisibles(p.type_pari, p.chevaux)}</div>
-                    <div className="truncate text-[11.5px] text-slate-500">
+                    <div className="break-words text-[11.5px] text-slate-500">
                       {p.course_label}{p.date_heure && <> · {new Date(p.date_heure).toLocaleString("fr-FR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}</>}
                     </div>
                   </Link>
@@ -410,7 +410,7 @@ export default function DefiPage() {
                     <li key={g.rang} className="flex items-center gap-2.5 text-[12.5px]">
                       <span className="w-6 text-center font-display font-bold text-slate-500">{g.rang}</span>
                       <Avatar nom={g.nom} taille={26} className="ring-stone-100" />
-                      <span className="min-w-0 flex-1 truncate font-semibold text-slate-800">{g.nom}</span>
+                      <span className="min-w-0 flex-1 break-words font-semibold text-slate-800">{g.nom}</span>
                       <span className="tabular-nums text-slate-500">{formatPts(g.solde)}</span>
                     </li>
                   ))}

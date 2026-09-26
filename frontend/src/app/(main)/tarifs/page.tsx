@@ -132,7 +132,7 @@ export default function TarifsPage() {
               <span className="text-muted-foreground">/mois</span>
             </div>
             <ul className="space-y-3 mb-8">
-              {["Programme PMU du jour", "Marché des cotes en direct", "Classement IA : 1 course/jour", "1 alerte par jour"].map((f) => (
+              {["Programme PMU du jour", "Marché des cotes en direct", "Classement IA : 1 course/jour", "1 alerte par jour", "Défi du mois : un abonnement à gagner"].map((f) => (
                 <li key={f} className="flex items-center gap-2 text-sm">
                   <Check className="h-4 w-4 text-muted-foreground flex-shrink-0" />
                   {f}
@@ -160,7 +160,6 @@ export default function TarifsPage() {
                 { label: "Paris de valeur illimités (délai 15 min)", icon: null },
                 { label: "Calculateur de mise", icon: <Calculator className="h-3 w-3" /> },
                 { label: "Alertes e-mail + notifications", icon: null },
-                { label: "Défi du mois (concours en points)", icon: null },
                 { label: "Historique 6 mois", icon: null },
               ].map((f) => (
                 <li key={f.label} className="flex items-center gap-2 text-sm">

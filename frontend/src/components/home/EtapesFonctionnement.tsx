@@ -301,7 +301,7 @@ export function EtapesFonctionnement() {
         <Etape
           n={3}
           titre="Pariez où vous voulez"
-          desc="Vous jouez chez votre opérateur habituel, et vous enregistrez vos paris au Défi du mois : réglés au rapport PMU officiel, ils vous rapportent des points et vous font grimper au classement."
+          desc="Vous jouez chez votre opérateur habituel. Et sur BlackTurf, vous misez vos 1 000 points du mois au Défi : chaque pari est réglé au rapport PMU officiel et vous fait grimper au classement, avec un abonnement à gagner."
           points={["Pronostic figé avant le départ", "Règlement au rapport officiel", "Classement du Défi du mois"]}
         >
           <Scene

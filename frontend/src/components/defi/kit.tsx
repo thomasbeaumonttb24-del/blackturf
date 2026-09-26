@@ -91,7 +91,7 @@ export function BandeauEssai({ premierMois, className }: { premierMois?: string;
       </span>
       <span>
         <b>Mois d&apos;essai.</b> Le Défi démarre officiellement le <b>{dateLancement(premierMois)}</b> :
-        d&apos;ici là, jouez pour découvrir, sans récompense à la clé. Tout le monde repartira de zéro au lancement.
+        d&apos;ici là, jouez pour découvrir, sans récompense à la clé. Au lancement, tout le monde repart avec 1&nbsp;000 points.
       </span>
     </div>
   );
@@ -207,10 +207,14 @@ export function joursRestants(mois: string): number {
 /** Compte à rebours de fin de mois, en pastille. */
 export function CompteRebours({ mois }: { mois: string; sombre?: boolean }) {
   const j = joursRestants(mois);
+  // Course du mois suivant (vue la veille d'un changement de mois) : le pari compte
+  // pour ce mois-là, pas de compte à rebours qui n'aurait pas de sens.
+  const [a, m] = mois.split("-").map(Number);
+  const aVenir = Boolean(a && m) && Date.UTC(a, m - 1, 1) > Date.now();
   return (
     <span className="inline-flex items-center gap-1.5 rounded-full bg-white/90 px-2 py-0.5 text-[10.5px] font-semibold tabular-nums text-amber-900 shadow-sm ring-1 ring-inset ring-amber-200">
       <Timer className="h-3 w-3 text-amber-600" aria-hidden="true" />
-      {j <= 1 ? "Dernier jour" : `J-${j}`}
+      {aVenir ? `Compte pour ${moisLabel(mois).split(" ")[0].toLowerCase()}` : j <= 1 ? "Dernier jour" : `J-${j}`}
     </span>
   );
 }
@@ -293,8 +297,8 @@ export function Podium({ lignes, compact = false }: { lignes: LignePodium[]; com
                   {rang === 1 && <Crown className="absolute -top-4 left-1/2 h-4 w-4 -translate-x-1/2 fill-amber-400 text-amber-600" aria-hidden="true" />}
                   <Avatar nom={l.nom} taille={tailleAvatar} className={cn("relative ring-[3px]", m.bague)} />
                 </span>
-                <span className={cn("mt-2 w-full truncate text-[12.5px] font-bold", l.moi ? "text-amber-800" : "text-slate-900")}>
-                  {l.nom}{l.moi && <span className="font-semibold"> (vous)</span>}
+                <span className={cn("mt-2 w-full break-words text-center text-[12.5px] font-bold leading-tight", l.moi ? "text-amber-800" : "text-slate-900")}>
+                  {l.nom}{l.moi && <span className="block text-[10.5px] font-semibold uppercase tracking-[0.08em]">vous</span>}
                 </span>
                 <span className="font-display text-[13px] font-bold tabular-nums text-amber-800">{formatPts(l.solde)}</span>
               </>
@@ -342,7 +346,7 @@ export function LigneClassement({ rang, nom, solde, nbParis, moi, max, detail }:
       <Avatar nom={nom} taille={32} />
       <div className="min-w-0 flex-1">
         <div className="flex items-baseline justify-between gap-2">
-          <span className="truncate text-[13px] font-semibold text-slate-900">
+          <span className="min-w-0 break-words text-[13px] font-semibold text-slate-900">
             {nom}{moi && <span className="ml-1 text-[11px] font-semibold text-amber-700">(vous)</span>}
           </span>
           <span className="shrink-0 font-display text-[13.5px] font-bold tabular-nums text-slate-900">{formatPts(solde)}</span>

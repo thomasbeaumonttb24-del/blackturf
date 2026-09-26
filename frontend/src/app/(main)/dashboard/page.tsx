@@ -24,7 +24,6 @@ import { Anneau, Compteur, Etoiles, Plan3D, SectionTitre, nf } from "@/component
 import { useRequireAuth } from "@/hooks/useAuth";
 import { defiApi, predictionsApi, coursesApi, statsApi, type DefiMoi } from "@/lib/api";
 import { BOUTON_OR, CompteRebours, DEFI_CARTE, DefiEntete, ResultatPari, formatPts, moisLabel, chevauxLisibles } from "@/components/defi/kit";
-import { DefiClassementLive } from "@/components/defi/DefiClassementLive";
 import { RUBRIQUES } from "@/lib/navigation";
 import { cn, planLabel } from "@/lib/utils";
 import { disciplineLabel, heureParis, titleCase } from "@/lib/seo";
@@ -523,7 +522,6 @@ function Outils({ modele }: { modele?: EtatModele }) {
         <span className="h-px w-5 bg-amber-600/70" aria-hidden="true" /> Accès rapide
       </span>
       <h2 className="mt-3 font-display text-xl font-medium tracking-tight text-stone-900 sm:text-[1.65rem]">Vos outils</h2>
-      <DefiClassementLive top={3} className="mt-5" />
       <ul className="mt-5 divide-y divide-stone-100">
         {OUTILS.map(({ r, icone: Icone }) => (
           <li key={r.href}>

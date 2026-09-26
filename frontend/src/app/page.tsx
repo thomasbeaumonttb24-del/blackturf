@@ -87,10 +87,10 @@ const FEATURES = [
 
 const PLANS = [
   { name: "Découverte", price: "0€", period: "/mois", desc: "Découvrez la plateforme",
-    features: ["Programme du jour", "Marché des cotes en direct", "1 pronostic/jour", "Statistiques publiques vérifiées"],
+    features: ["Programme du jour", "Marché des cotes en direct", "1 pronostic/jour", "Défi du mois : un abonnement à gagner", "Statistiques publiques vérifiées"],
     cta: "Commencer gratuitement", href: "/inscription", popular: false },
   { name: "Standard", price: "12€", period: "/mois", desc: "L'essentiel pour parier mieux",
-    features: ["5 pronostics/jour", "Top 3 paris de valeur (délai 15 min)", "Calculateur de mise", "Défi du mois (concours en points)", "Alertes push & e-mail", "Historique des résultats"],
+    features: ["5 pronostics/jour", "Top 3 paris de valeur (délai 15 min)", "Calculateur de mise", "Alertes push & e-mail", "Historique des résultats"],
     cta: "Essayer 7 jours gratuit", href: "/inscription?plan=standard", popular: false },
   // Expert = plan mis en avant (aligné sur /tarifs, qui le marque « Recommandé »).
   // CTA « Essayer 7 jours gratuit » comme Standard : depuis le 2026-08-17 l'essai de

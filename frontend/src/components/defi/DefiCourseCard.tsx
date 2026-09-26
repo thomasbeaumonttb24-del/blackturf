@@ -237,7 +237,7 @@ export function DefiCourseCard({ courseId, partants, connecte, prefill, voirPlan
       <DefiEntete
         surtitre={mois ? `Défi du mois · ${mois}` : "Défi du mois"}
         titre="Pariez vos points sur cette course"
-        sousTitre={data?.essai ? <>Points × rapport PMU officiel. Mois d&apos;essai : récompenses dès le {dateLancement(regles.premier_mois)}.</>
+        sousTitre={(data?.essai ?? regles.essai) ? <>Points × rapport PMU officiel. Mois d&apos;essai : récompenses dès le {dateLancement(regles.premier_mois)}.</>
           : prix && <>Points × rapport PMU officiel. Le 1<sup>er</sup> du mois gagne {prix.jours} jours {planLabel(prix.plan)}.</>}
         droite={connecte && solde != null ? (
           <div className="rounded-2xl bg-white/90 px-3 py-1.5 text-right shadow-sm ring-1 ring-inset ring-amber-200">
@@ -253,7 +253,7 @@ export function DefiCourseCard({ courseId, partants, connecte, prefill, voirPlan
             titre="Jouez le Défi du mois"
             texte={`${formatNombre(regles.capital_mensuel, 2)} points offerts chaque mois pour parier sur les courses. Le meilleur solde remporte un abonnement offert.`}
             avantages={[
-              `${formatNombre(regles.capital_mensuel, 2)} points remis à zéro chaque 1er du mois`,
+              `${formatNombre(regles.capital_mensuel, 2)} points renouvelés chaque 1er du mois`,
               "Vos propres chevaux, ou ceux du plan de mise",
               "Classement en direct après chaque arrivée",
               "Aucun argent réel en jeu",
@@ -356,7 +356,7 @@ export function DefiCourseCard({ courseId, partants, connecte, prefill, voirPlan
                           actif ? "bg-amber-50 ring-2 ring-amber-500" : "bg-white ring-stone-200 hover:bg-stone-50")}>
                         <CasaqueNumero numero={p.numero} />
                         <span className="min-w-0 flex-1">
-                          <span className="block truncate text-[12px] font-semibold text-slate-800">{p.nom_cheval}</span>
+                          <span className="block break-words text-[12px] font-semibold leading-tight text-slate-800">{p.nom_cheval}</span>
                           {p.cote_pmu != null && <span className="block text-[10.5px] tabular-nums text-slate-500">cote {formatNombre(p.cote_pmu, 2)}</span>}
                         </span>
                         {actif && max > 1 && (
@@ -427,7 +427,7 @@ export function DefiCourseCard({ courseId, partants, connecte, prefill, voirPlan
                       : `Valider mon pari · ${pointsJoues} pts`}
                   </button>
                   <div className="mt-2 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-[11px] text-slate-500">
-                    <span>Clôture à {new Date(data.limite).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}</span>
+                    <span>Fermeture à {new Date(data.limite).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}, heure de départ annoncée</span>
                     <span aria-hidden="true">·</span>
                     <span>{restants} pari{restants > 1 ? "s" : ""} restant{restants > 1 ? "s" : ""} sur cette course</span>
                   </div>
@@ -440,7 +440,7 @@ export function DefiCourseCard({ courseId, partants, connecte, prefill, voirPlan
                 <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white ring-1 ring-stone-200">
                   <Lock className="h-4 w-4 text-slate-500" aria-hidden="true" />
                 </span>
-                {!data.ouvert ? "Paris fermés : le départ est donné ou imminent. Retrouvez le résultat de vos paris ci-dessous."
+                {!data.ouvert ? "Paris fermés : l'heure de départ annoncée est passée. Le résultat de vos paris s'affiche ici après l'arrivée."
                   : restants <= 0 ? `Vous avez joué vos ${regles.max_paris_par_course} paris sur cette course.`
                   : "Solde insuffisant pour ce mois. Nouvelle cagnotte le 1er du mois prochain !"}
               </div>
