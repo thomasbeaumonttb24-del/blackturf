@@ -424,3 +424,23 @@ async def test_un_impaye_ne_retrograde_pas_un_compte_qui_a_un_autre_abonnement(d
 
     await db.refresh(user)
     assert user.plan == "expert"
+
+
+@pytest.mark.asyncio
+async def test_paiement_arrive_avant_l_abonnement_est_quand_meme_journalise(db, monkeypatch):
+    """Stripe ne garantit pas l'ordre des webhooks. Une facture payée reçue avant
+    `customer.subscription.created` ne doit plus disparaître du journal : c'était
+    l'argent encaissé mais invisible sur l'écran Revenus (2026-09-25)."""
+    _stripe_muet(monkeypatch)
+    user = await _user(db, plan="free")
+
+    await sr._handle_payment_succeeded(_facture("sub_pas_encore_la", paye=1200), db)
+
+    evt = (await db.execute(select(SubscriptionEvent).where(
+        SubscriptionEvent.type == "paiement_recu"))).scalar_one()
+    assert evt.montant_cents == 1200
+    assert evt.user_id == user.user_id
+    assert evt.stripe_subscription_id == "sub_pas_encore_la"
+    assert evt.detail["abonnement_pas_encore_connu"] is True
+    await db.refresh(user)
+    assert user.plan == "free"  # aucun accès ouvert sans abonnement connu

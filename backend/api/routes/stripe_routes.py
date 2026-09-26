@@ -1024,16 +1024,32 @@ async def _handle_payment_succeeded(invoice: dict, db: AsyncSession):
     montant = invoice.get("amount_paid") or 0
     log.info("stripe.payment_succeeded", invoice_id=invoice.get("id"),
              sub=sub_id, montant_cents=montant)
-    if not sub_id or montant <= 0:
+    if montant <= 0:
         return
 
     user = await _find_user_by_customer(invoice.get("customer"), db)
-    if not user:
-        return
-    sub = (await db.execute(
-        select(Subscription).where(Subscription.stripe_subscription_id == sub_id)
-    )).scalar_one_or_none()
-    if sub is None:
+    sub = None
+    if sub_id:
+        sub = (await db.execute(
+            select(Subscription).where(Subscription.stripe_subscription_id == sub_id)
+        )).scalar_one_or_none()
+    if user is None or sub is None:
+        # Stripe ne garantit pas l'ORDRE des webhooks : une facture payée peut
+        # arriver avant `customer.subscription.created`. L'ancien code repartait
+        # sans rien écrire — l'argent était encaissé mais absent du journal (écart
+        # constaté le 2026-09-25 sur l'écran Revenus). On ne touche à aucun accès
+        # ici (l'abonnement le fera en arrivant), mais l'encaissement est journalisé.
+        await journaliser(db, "paiement_recu", user, None,
+                          stripe_subscription_id=sub_id,
+                          montant_cents=montant,
+                          detail={"facture": invoice.get("id"),
+                                  "motif": invoice.get("billing_reason"),
+                                  "client_stripe": invoice.get("customer"),
+                                  "abonnement_pas_encore_connu": sub is None,
+                                  "compte_inconnu": user is None})
+        await db.commit()
+        log.warning("stripe.paiement_journalise_sans_abonnement",
+                    invoice_id=invoice.get("id"), sub=sub_id, montant_cents=montant)
         return
 
     reprise = sub.statut not in STATUTS_ACCES
