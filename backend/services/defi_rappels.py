@@ -27,7 +27,7 @@ from sqlalchemy import select
 from db.models import AlerteLog, DefiPari, User
 from services.defi import (
     CAPITAL_MENSUEL, MIN_PARIS_CLASSEMENT, PARIS_TZ, _utc, classement, formater_points,
-    mois_courant,
+    mois_courant, mois_essai,
 )
 
 log = structlog.get_logger()
@@ -144,6 +144,8 @@ async def envoyer_rappels(session, now: Optional[datetime] = None) -> int:
     """Passage quotidien des rappels du défi. Idempotent (clé par mois et palier)."""
     now = now or datetime.now(timezone.utc)
     mois = mois_courant(now)
+    if mois_essai(mois):
+        return 0  # mois d'essai : on laisse découvrir, on ne relance personne
     jr = _jours_restants(now)
     jour = _utc(now).astimezone(PARIS_TZ).day
     lignes = await classement(session, mois)
@@ -162,8 +164,16 @@ async def envoyer_rappels(session, now: Optional[datetime] = None) -> int:
     if jour <= 3:
         prec = _mois_precedent(mois)
         anciens = await classement(session, prec)
+        lancement = mois_essai(prec)
         for l in anciens:
             if l["user_id"] in par_user or l["hors_concours"]:
+                continue
+            if lancement:
+                # Premier mois officiel : les joueurs de l'essai sont les premiers prévenus.
+                envois.append((l["user_id"], f"{mois}:nouveau",
+                               "Le Défi du mois est lancé : les récompenses sont en jeu",
+                               f"{formater_points(CAPITAL_MENSUEL)} pour tout le monde, le 1er du "
+                               f"mois gagne un abonnement Expert offert."))
                 continue
             bilan = (f"Vous avez fini {_rang(l['rang'])} en {MOIS_FR[int(prec[5:]) - 1]}. "
                      if l["rang"] else "")

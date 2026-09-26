@@ -17,6 +17,7 @@ Ce qui rend le classement non trichable :
 from __future__ import annotations
 
 import hashlib
+import os
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -47,6 +48,10 @@ VERROU_AVANT_DEPART = timedelta(minutes=2)
 # course est remboursé : sans cela il resterait « en attente » à vie et bloquerait
 # la remise des récompenses du mois (qui exige zéro pari en attente).
 DELAI_RAPPORT_MAX = timedelta(hours=72)
+
+# Premier mois OFFICIEL du défi. Avant, le défi est jouable en « mois d'essai » :
+# mêmes règles, classement affiché, mais aucune récompense ni rappel quotidien.
+PREMIER_MOIS = os.getenv("DEFI_PREMIER_MOIS", "2026-10")
 
 # Rang → (plan offert, durée). Remis par l'admin après vérification du compte.
 RECOMPENSES: dict[int, tuple[str, int]] = {
@@ -626,6 +631,11 @@ async def tendance_course(session, course_id: str, depot_ouvert_: bool) -> dict:
     }
 
 
+def mois_essai(mois: str) -> bool:
+    """Mois d'avant le lancement officiel : on joue pour découvrir, sans lot."""
+    return mois < PREMIER_MOIS
+
+
 def mois_termine(mois: str, now: Optional[datetime] = None) -> bool:
     return mois < mois_courant(now)
 
@@ -658,6 +668,8 @@ async def attribuer_recompense(session, mois: str, rang: int,
     now = now or datetime.now(timezone.utc)
     if rang not in RECOMPENSES:
         raise DefiErreur("Aucune récompense pour ce rang.")
+    if mois_essai(mois):
+        raise DefiErreur("Mois d'essai : aucune récompense avant le lancement officiel.")
     if not mois_termine(mois, now):
         raise DefiErreur("Le mois n'est pas terminé : le classement peut encore bouger.")
     await regler_en_attente(session)
@@ -737,6 +749,62 @@ async def palmares(session, limite: int = 24) -> list[dict]:
     )).scalars().all()
     return [{"mois": r.mois, "rang": r.rang, "nom": r.nom_public, "solde": r.solde,
              "plan_offert": r.plan_offert} for r in rows]
+
+
+# ─── Contrôle des comptes multiples (clôture du mois) ───────────────────────
+# Tricher au défi, c'est surtout ouvrir plusieurs comptes et couvrir les issues
+# d'une même course : un des comptes finit forcément devant. Deux signaux, à
+# vérifier par l'admin avant toute récompense (jamais une exclusion automatique).
+DELAI_JUMEAUX = timedelta(minutes=15)
+MIN_COURSES_JUMELLES = 5
+_DOMAINES_GMAIL = {"gmail.com", "googlemail.com"}
+
+
+def email_canonique(email: str) -> str:
+    """« Jean.Dupont+defi@gmail.com » → « jeandupont@gmail.com » : même boîte."""
+    local, _, domaine = (email or "").strip().lower().partition("@")
+    local = local.split("+", 1)[0]
+    if domaine in _DOMAINES_GMAIL:
+        local, domaine = local.replace(".", ""), "gmail.com"
+    return f"{local}@{domaine}"
+
+
+async def signaux_multicompte(session, mois: str, user_ids: list[str]) -> dict[str, list[str]]:
+    """Pour chaque compte de ``user_ids`` : autres comptes du mois qui partagent la
+    même boîte e-mail, ou qui jouent les mêmes courses au même moment."""
+    paris = (await session.execute(
+        select(DefiPari.user_id, DefiPari.course_id, DefiPari.engage_at)
+        .where(DefiPari.mois == mois))).all()
+    joueurs = {uid for uid, _, _ in paris} | set(user_ids)
+    users = {u.user_id: u for u in (await session.execute(
+        select(User).where(User.user_id.in_(joueurs)))).scalars().all()}
+    par_boite: dict[str, list[str]] = {}
+    for u in users.values():
+        par_boite.setdefault(email_canonique(u.email), []).append(u.user_id)
+    moments: dict[str, dict[str, list[datetime]]] = {}
+    for uid, cid, t in paris:
+        moments.setdefault(uid, {}).setdefault(cid, []).append(_utc(t))
+
+    out: dict[str, list[str]] = {}
+    for uid in user_ids:
+        u = users.get(uid)
+        if u is None:
+            continue
+        signaux = []
+        memes = [users[x] for x in par_boite.get(email_canonique(u.email), []) if x != uid]
+        if memes:
+            signaux.append("Même boîte e-mail que " + ", ".join(nom_public(x) for x in memes))
+        mes = moments.get(uid, {})
+        for autre, siens in moments.items():
+            if autre == uid:
+                continue
+            communes = sum(1 for cid, ts in mes.items() if cid in siens and any(
+                abs(a - b) <= DELAI_JUMEAUX for a in ts for b in siens[cid]))
+            if communes >= MIN_COURSES_JUMELLES and autre in users:
+                signaux.append(f"Joue les mêmes courses que {nom_public(users[autre])} "
+                               f"au même moment ({communes} courses)")
+        out[uid] = signaux
+    return out
 
 
 async def resume_admin(session, user_ids: list[str], mois: str) -> dict[str, dict]:

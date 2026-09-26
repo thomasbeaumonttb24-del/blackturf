@@ -14,7 +14,7 @@ import { DefiConcept } from "@/components/defi/DefiConcept";
 import { DecorRayons, TropheeSvg } from "@/components/defi/illustrations";
 import {
   Avatar, CompteRebours, DEFI_CARTE, DEFI_FOND, DEFI_REGLES_DEFAUT, DefiEntete, LigneClassement,
-  OriginePari, PastilleDirect, Podium, ResultatPari, StatutPari, formatPts, joursRestants, moisLabel, planLabel, formatNombre, chevauxLisibles } from "@/components/defi/kit";
+  BandeauEssai, dateLancement, OriginePari, PastilleDirect, Podium, ResultatPari, StatutPari, formatPts, joursRestants, moisLabel, planLabel, formatNombre, chevauxLisibles } from "@/components/defi/kit";
 import { cn } from "@/lib/utils";
 
 const CARTE = DEFI_CARTE;
@@ -243,6 +243,7 @@ function Reglement({ regles }: { regles: DefiRegles }) {
         <li>Le pari porte l&apos;étiquette « Plan BlackTurf » quand il reprend un pari du plan de mise que vous avez consulté sur la course, « Perso » sinon. L&apos;étiquette n&apos;a pas d&apos;effet sur le classement.</li>
         <li>Sont classés les joueurs ayant engagé au moins <b>{regles.min_paris_classement} paris</b> dans le mois, par solde décroissant ; à égalité, le plus grand nombre de paris gagnants puis le premier pari le plus ancien l&apos;emportent.</li>
         <li>Récompenses : {lots}. Elles sont remises après la clôture du mois, une fois tous les paris réglés et les comptes vérifiés. Un abonné payant reçoit l&apos;équivalent en déduction de son abonnement. Les récompenses sont nominatives et ne s&apos;échangent pas contre de l&apos;argent.</li>
+        <li>Lancement officiel le <b>{dateLancement(regles.premier_mois)}</b>. Les mois précédents sont des mois d&apos;essai : on y joue avec les mêmes règles, sans récompense.</li>
         <li><b>Un seul compte par personne.</b> BlackTurf peut vérifier l&apos;identité des gagnants et exclure du défi, sans récompense, tout compte multiple, automatisé ou ayant contourné les règles.</li>
         <li>Les comptes de l&apos;équipe BlackTurf jouent hors concours. BlackTurf peut modifier ou arrêter le défi ; un mois commencé se termine avec les règles en vigueur à son début.</li>
       </ol>
@@ -280,6 +281,7 @@ export default function DefiPage() {
 
   return (
     <div className="mx-auto flex max-w-4xl flex-col gap-8 px-4 py-6 sm:px-6 sm:py-8">
+      {classement?.essai && <BandeauEssai premierMois={regles.premier_mois} />}
       <Hero mois={mois} enCours={enCours} setMois={setMois} regles={regles} classement={classement} />
 
       {user ? (

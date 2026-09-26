@@ -19,8 +19,8 @@ import { defiApi, type DefiCourse, type DefiPlanPari, type DefiRegles, type Defi
 import { CompteGratuitCta } from "@/components/billing/CompteGratuitCta";
 import { CasaqueNumero } from "@/components/courses/identite-cheval";
 import {
-  CompteRebours, DEFI_CARTE, DEFI_REGLES_DEFAUT, DefiEntete, OriginePari, ResultatPari, StatutPari, chevauxLisibles, combinaisons, estAOrdre,
-  formatPts, moisLabel, planLabel, formatNombre } from "@/components/defi/kit";
+  BandeauEssai, CompteRebours, DEFI_CARTE, DEFI_REGLES_DEFAUT, DefiEntete, OriginePari, ResultatPari, StatutPari, chevauxLisibles, combinaisons, estAOrdre,
+  dateLancement, formatPts, moisLabel, planLabel, formatNombre } from "@/components/defi/kit";
 import { cn } from "@/lib/utils";
 
 export type DefiPrefill = { type: DefiTypePari; chevaux: number[]; cle: number };
@@ -237,7 +237,8 @@ export function DefiCourseCard({ courseId, partants, connecte, prefill, voirPlan
       <DefiEntete
         surtitre={mois ? `Défi du mois · ${mois}` : "Défi du mois"}
         titre="Pariez vos points sur cette course"
-        sousTitre={prix && <>Points × rapport PMU officiel. Le 1<sup>er</sup> du mois gagne {prix.jours} jours {planLabel(prix.plan)}.</>}
+        sousTitre={data?.essai ? <>Points × rapport PMU officiel. Mois d&apos;essai : récompenses dès le {dateLancement(regles.premier_mois)}.</>
+          : prix && <>Points × rapport PMU officiel. Le 1<sup>er</sup> du mois gagne {prix.jours} jours {planLabel(prix.plan)}.</>}
         droite={connecte && solde != null ? (
           <div className="rounded-2xl bg-white/90 px-3 py-1.5 text-right shadow-sm ring-1 ring-inset ring-amber-200">
             <div className="text-[9.5px] font-bold uppercase tracking-[0.14em] text-amber-700">Mon solde</div>
@@ -264,6 +265,7 @@ export function DefiCourseCard({ courseId, partants, connecte, prefill, voirPlan
         <div className="flex justify-center py-10"><Loader2 className="h-5 w-5 animate-spin text-slate-400" /></div>
       ) : (
         <>
+          {data.essai && <BandeauEssai premierMois={regles.premier_mois} className="mx-5 mt-4" />}
           {data.ouvert && restants > 0 && pointsMax >= regles.points_min ? (
             <>
               {planConsulte.length > 0 ? (

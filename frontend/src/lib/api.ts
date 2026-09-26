@@ -186,6 +186,10 @@ export type DefiRegles = {
   recompenses: { rang: number; plan: string; jours: number }[];
   types: DefiTypeInfo[];
   mois: string;
+  /** Premier mois officiel (AAAA-MM) ; avant, le défi se joue en mois d'essai. */
+  premier_mois?: string;
+  /** Le mois en cours est un mois d'essai (aucune récompense). */
+  essai?: boolean;
 };
 
 export type DefiPari = {
@@ -222,6 +226,7 @@ export type DefiLigne = DefiStats & {
 
 export type DefiClassement = {
   mois: string;
+  essai?: boolean;
   nb_joueurs: number;
   nb_classes: number;
   lignes: DefiLigne[];
@@ -242,6 +247,7 @@ export type DefiMoi = DefiStats & {
 export type DefiCourse = {
   /** Mois du défi auquel la course appartient (calendrier de Paris). */
   mois: string;
+  essai?: boolean;
   /** Paris ouverts par le PMU sur cette course. */
   types: DefiTypeInfo[];
   ouvert: boolean;

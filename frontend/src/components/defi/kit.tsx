@@ -1,7 +1,7 @@
 /**
  * Briques partagées du Défi du mois (page /defi, carte de la page course, admin).
  */
-import { CheckCircle2, Clock, Crown, RotateCcw, Sparkles, Timer, User, XCircle } from "lucide-react";
+import { CheckCircle2, Clock, Crown, FlaskConical, RotateCcw, Sparkles, Timer, User, XCircle } from "lucide-react";
 import { DecorRayons, LaurierSvg, MedailleSvg } from "@/components/defi/illustrations";
 import type { DefiPari } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -69,6 +69,32 @@ export function formatPts(v: number | null | undefined, signe = false): string {
   const n = Math.round(v * 10) / 10;
   const txt = formatNombre(n);
   return `${signe && n > 0 ? "+" : ""}${txt} pts`;
+}
+
+/** « 1er octobre » : date du lancement officiel, depuis « 2026-10 ». */
+export function dateLancement(premierMois?: string): string {
+  const m = Number(premierMois?.split("-")[1]);
+  if (!m) return "lancement officiel";
+  const nom = new Date(Date.UTC(2000, m - 1, 15)).toLocaleDateString("fr-FR", { month: "long", timeZone: "UTC" });
+  return `1er ${nom}`;
+}
+
+/**
+ * Mois d'essai (avant le lancement officiel) : on joue pour découvrir, mais aucun
+ * lot n'est en jeu. Affiché partout où l'on parie ou regarde le classement.
+ */
+export function BandeauEssai({ premierMois, className }: { premierMois?: string; className?: string }) {
+  return (
+    <div role="note" className={cn("flex items-start gap-2.5 rounded-2xl bg-sky-50 px-3.5 py-2.5 text-[12.5px] leading-snug text-sky-950 ring-1 ring-inset ring-sky-200", className)}>
+      <span className="mt-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-white text-sky-700 ring-1 ring-inset ring-sky-200">
+        <FlaskConical className="h-3.5 w-3.5" aria-hidden="true" />
+      </span>
+      <span>
+        <b>Mois d&apos;essai.</b> Le Défi démarre officiellement le <b>{dateLancement(premierMois)}</b> :
+        d&apos;ici là, jouez pour découvrir, sans récompense à la clé. Tout le monde repartira de zéro au lancement.
+      </span>
+    </div>
+  );
 }
 
 export function moisLabel(mois: string): string {

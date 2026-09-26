@@ -100,6 +100,9 @@ async def regles():
                         for r, (p, j) in sorted(defi.RECOMPENSES.items())],
         "types": [{k: v for k, v in t.items() if k != "drapeau"} for t in defi.CATALOGUE_DEFI],
         "mois": defi.mois_courant(),
+        # Lancement officiel : avant ce mois, le défi se joue « pour essayer ».
+        "premier_mois": defi.PREMIER_MOIS,
+        "essai": defi.mois_essai(defi.mois_courant()),
     }
 
 
@@ -125,6 +128,7 @@ async def get_classement(
     affichees = [l for l in lignes if l["classe"]][:top] if top else lignes
     return {
         "mois": m,
+        "essai": defi.mois_essai(m),
         "nb_joueurs": len(lignes),
         "nb_classes": sum(1 for l in lignes if l["classe"]),
         "lignes": [_ligne_publique(l, moi) for l in affichees],
@@ -151,6 +155,7 @@ async def get_moi(
     paris = resume.pop("paris")
     return {
         "mois": m,
+        "essai": defi.mois_essai(m),
         "nom": defi.nom_public(user),
         "rang": ma_ligne["rang"] if ma_ligne else None,
         "nb_classes": sum(1 for l in lignes if l["classe"]),
@@ -180,6 +185,7 @@ async def get_course(
         solde = await defi.solde(db, user.user_id, defi.mois_de(course.date_heure))
     return {
         "mois": defi.mois_de(course.date_heure),
+        "essai": defi.mois_essai(defi.mois_de(course.date_heure)),
         # Les paris que le PMU ouvre sur CETTE course, dans l'ordre du catalogue.
         "types": defi.types_disponibles(course),
         "ouvert": defi.depot_ouvert(course),
@@ -229,6 +235,7 @@ async def admin_cloture(
     )).scalars().all()} if lignes else {}
     deja = {r.rang: r for r in (await db.execute(
         select(DefiRecompense).where(DefiRecompense.mois == m))).scalars().all()}
+    signaux = await defi.signaux_multicompte(db, m, [l["user_id"] for l in lignes])
     debut_mois = datetime.strptime(m + "-01", "%Y-%m-%d").replace(tzinfo=defi.PARIS_TZ)
     out = []
     for l in lignes:
@@ -239,6 +246,7 @@ async def admin_cloture(
             alertes.append("Compte créé pendant le mois du défi")
         if not u.email_verified:
             alertes.append("Adresse e-mail non confirmée")
+        alertes += signaux.get(u.user_id, [])
         r = deja.get(l["rang"])
         out.append({
             **{k: v for k, v in l.items() if k != "premier_pari_at"},
@@ -250,6 +258,7 @@ async def admin_cloture(
     en_attente = sum(l["nb_en_attente"] for l in await defi.classement(db, m))
     return {
         "mois": m,
+        "essai": defi.mois_essai(m),
         "mois_termine": defi.mois_termine(m),
         "paris_en_attente": en_attente,
         "recompenses": [{"rang": r, "plan": p, "jours": j}

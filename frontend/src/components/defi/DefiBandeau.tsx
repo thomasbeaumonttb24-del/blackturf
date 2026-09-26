@@ -19,7 +19,7 @@ import { X } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { peutDemarrerEssai } from "@/lib/auth";
 import { defiApi } from "@/lib/api";
-import { DEFI_FOND, DefiEmbleme, formatPts, planLabel, formatNombre } from "@/components/defi/kit";
+import { DEFI_FOND, DefiEmbleme, dateLancement, formatPts, planLabel, formatNombre } from "@/components/defi/kit";
 import { cn } from "@/lib/utils";
 
 const PAGES_SANS_BANDEAU = ["/defi", "/tarifs", "/abonnement"];
@@ -72,11 +72,13 @@ export function DefiBandeau() {
         <p className="min-w-0 flex-1 leading-snug text-slate-700">
           <span className="font-bold text-slate-900">Défi du mois</span>
           <span className="hidden sm:inline"> · {formatNombre(regles.capital_mensuel, 2)} points offerts pour parier sur les courses</span>
-          {" "}· le 1<sup>er</sup> gagne <span className="font-semibold text-amber-800">{prix.jours} j {planLabel(prix.plan)}</span>
+          {regles.essai
+            ? <>{" "}· lancement le <span className="font-semibold text-amber-800">{dateLancement(regles.premier_mois)}</span>, essayez dès maintenant</>
+            : <>{" "}· le 1<sup>er</sup> gagne <span className="font-semibold text-amber-800">{prix.jours} j {planLabel(prix.plan)}</span></>}
           {leader && <span className="hidden md:inline"> · en tête : <b className="text-slate-900">{leader.nom}</b> ({formatPts(leader.solde)})</span>}
         </p>
         <Link href="/defi" className="shrink-0 rounded-lg bg-gradient-to-b from-amber-500 to-amber-700 px-3 py-1.5 text-[12px] font-bold text-white shadow-[inset_0_1px_0_rgba(255,255,255,.35)]">
-          {user ? "Jouer" : "Participer"}
+          {regles.essai ? "Essayer" : user ? "Jouer" : "Participer"}
         </Link>
         <button onClick={fermer} className="shrink-0 text-slate-400 hover:text-slate-800" aria-label="Masquer le bandeau du défi pour ce mois">
           <X className="h-4 w-4" />

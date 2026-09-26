@@ -17,7 +17,9 @@ MAINTENANT = datetime.now(timezone.utc)
 
 
 @pytest.fixture(autouse=True)
-def _cache_classement_vide():
+def _cache_classement_vide(monkeypatch):
+    # Hors tests du mois d'essai : le défi est réputé lancé depuis longtemps.
+    monkeypatch.setattr(defi, "PREMIER_MOIS", "2000-01")
     """Le cache du classement vit dans le processus : chaque test part d'une base neuve."""
     defi.invalider_classement()
     yield
@@ -610,3 +612,29 @@ async def test_plan_consulte_propose_a_cote_de_la_carte(db):
     assert proposes[0]["niveau_label"] == "Sécurité"
     # Un joueur qui n'a pas consulté le plan ne le voit pas ici.
     assert await defi.paris_du_plan(db, autre.user_id, course, []) == []
+
+
+async def test_email_canonique_regroupe_les_alias():
+    assert defi.email_canonique("Jean.Dupont+defi@GoogleMail.com") == "jeandupont@gmail.com"
+    assert defi.email_canonique("jean.dupont+2@orange.fr") == "jean.dupont@orange.fr"
+
+
+async def test_cloture_signale_les_comptes_multiples(client, db, admin_headers):
+    mois = defi.mois_courant()
+    vrai = await _user(db, email="jean.dupont@gmail.com", pseudo="Jean")
+    alias = await _user(db, email="jeandupont+2@gmail.com", pseudo="Jeannot")
+    jumeau = await _user(db, email="complice@orange.fr", pseudo="Complice")
+    honnete = await _user(db, email="honnete@free.fr", pseudo="Honnete")
+    for i in range(10):
+        for u, decalage in ((vrai, 0), (jumeau, 4), (honnete, 90)):
+            db.add(DefiPari(user_id=u.user_id, mois=mois, course_id=f"J{i}", type_pari="Simple Gagnant",
+                            chevaux=[1], points=10, origine="perso", statut="perd", points_retour=0.0,
+                            engage_at=MAINTENANT - timedelta(hours=i, minutes=-decalage)))
+    db.add(DefiPari(user_id=alias.user_id, mois=mois, course_id="X", type_pari="Simple Gagnant",
+                    chevaux=[1], points=10, origine="perso", statut="en_attente", engage_at=MAINTENANT))
+    await db.commit()
+
+    lignes = {l["nom"]: l for l in (await client.get("/admin/api/defi/cloture", headers=admin_headers)).json()["lignes"]}
+    assert "Même boîte e-mail que Jeannot" in lignes["Jean"]["alertes"]
+    assert "Joue les mêmes courses que Complice au même moment (10 courses)" in lignes["Jean"]["alertes"]
+    assert not any("mêmes courses" in a or "boîte" in a for a in lignes["Honnete"]["alertes"])

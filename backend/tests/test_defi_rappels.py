@@ -12,7 +12,9 @@ from tests.test_defi import _arrivee, _course, _user
 
 
 @pytest.fixture(autouse=True)
-def _cache_classement_vide():
+def _cache_classement_vide(monkeypatch):
+    # Hors tests du mois d'essai : le défi est réputé lancé depuis longtemps.
+    monkeypatch.setattr(defi, "PREMIER_MOIS", "2000-01")
     defi.invalider_classement()
     yield
     defi.invalider_classement()
@@ -182,3 +184,34 @@ async def test_api_notification_porte_le_lien_du_defi(client, db, auth_headers):
     par_type = {i["type_alerte"]: i for i in items}
     assert (par_type["defi_rappel"]["lien"], par_type["defi_rappel"]["categorie"]) == ("/defi", "systeme")
     assert (par_type["defi_rang"]["lien"], par_type["defi_rang"]["categorie"]) == (None, "resultat")
+
+
+# ─── Mois d'essai (avant le lancement officiel) ─────────────────────────────
+
+@pytest.mark.asyncio
+async def test_mois_d_essai_sans_recompense_ni_rappel_puis_annonce_du_lancement(db, monkeypatch):
+    monkeypatch.setattr(defi, "PREMIER_MOIS", "2026-10")
+    testeur = await _user(db, email="testeur@x.fr")
+    await _paris(db, testeur, 3, mois=SEPT, engage_at=datetime(2026, 9, 26, 9, tzinfo=timezone.utc))
+    await _paris(db, testeur, 7, mois=SEPT, engage_at=datetime(2026, 9, 27, 9, tzinfo=timezone.utc),
+                 gagnant=True)
+
+    # Septembre = essai : aucun rappel quotidien, aucune récompense possible.
+    assert await defi_rappels.envoyer_rappels(db, datetime(2026, 9, 28, 9, tzinfo=timezone.utc)) == 0
+    with pytest.raises(defi.DefiErreur, match="Mois d'essai"):
+        await defi.attribuer_recompense(db, SEPT, 1, now=datetime(2026, 10, 2, tzinfo=timezone.utc))
+
+    # 1er octobre : les joueurs de l'essai apprennent que le vrai défi commence.
+    assert await defi_rappels.envoyer_rappels(db, datetime(2026, 10, 1, 9, tzinfo=timezone.utc)) == 1
+    [r] = await _alertes(db, testeur, defi_rappels.TYPE_RAPPEL)
+    assert r.payload["titre"] == "Le Défi du mois est lancé : les récompenses sont en jeu"
+
+
+@pytest.mark.asyncio
+async def test_api_signale_le_mois_d_essai(client, monkeypatch):
+    monkeypatch.setattr(defi, "PREMIER_MOIS", "2999-01")
+    r = (await client.get("/api/v1/defi/regles")).json()
+    assert (r["essai"], r["premier_mois"]) == (True, "2999-01")
+    assert (await client.get("/api/v1/defi/classement")).json()["essai"] is True
+    monkeypatch.setattr(defi, "PREMIER_MOIS", "2000-01")
+    assert (await client.get("/api/v1/defi/regles")).json()["essai"] is False

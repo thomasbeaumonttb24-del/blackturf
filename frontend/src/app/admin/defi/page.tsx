@@ -37,6 +37,8 @@ interface LigneCloture {
 
 interface Cloture {
   mois: string;
+  /** Mois d'avant le lancement officiel : aucune récompense. */
+  essai?: boolean;
   mois_termine: boolean;
   paris_en_attente: number;
   recompenses: { rang: number; plan: string; jours: number }[];
@@ -109,7 +111,12 @@ export default function AdminDefiPage() {
         }
       />
 
-      {data && !data.mois_termine && (
+      {data?.essai && (
+        <Encart ton="attention" icone={<AlertTriangle className="h-4 w-4" />}>
+          Mois d&apos;essai, avant le lancement officiel : le classement s&apos;affiche mais aucune récompense n&apos;est remise.
+        </Encart>
+      )}
+      {data && !data.essai && !data.mois_termine && (
         <Encart ton="attention" icone={<AlertTriangle className="h-4 w-4" />}>
           Mois en cours : le classement bouge encore, aucune récompense ne peut être remise.
         </Encart>
@@ -145,7 +152,7 @@ export default function AdminDefiPage() {
                       {st && <Puce ton={st.ton}>{st.txt}</Puce>}
                     </div>
                   </div>
-                  {lot && !l.recompense && (
+                  {lot && !l.recompense && !data.essai && (
                     <button type="button" onClick={() => recompenser(l)}
                       disabled={!data.mois_termine || data.paris_en_attente > 0 || envoi !== null}
                       className="inline-flex min-h-[2.75rem] shrink-0 items-center justify-center gap-2 rounded-xl bg-brand-gold px-4 text-[13px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40">

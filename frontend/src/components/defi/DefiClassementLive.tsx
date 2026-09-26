@@ -13,7 +13,7 @@ import { ArrowRight, Crown, Loader2 } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { defiApi, type DefiClassement } from "@/lib/api";
 import {
-  BOUTON_OR, CompteRebours, DEFI_CARTE, DefiEntete, LigneClassement, PastilleDirect, Podium, moisLabel, planLabel, formatNombre } from "@/components/defi/kit";
+  BOUTON_OR, CompteRebours, DEFI_CARTE, DefiEntete, LigneClassement, PastilleDirect, Podium, dateLancement, moisLabel, planLabel, formatNombre } from "@/components/defi/kit";
 import { cn } from "@/lib/utils";
 
 export function DefiClassementLive({ top = 5, className, titre = "Défi du mois", ctaCourse }: {
@@ -47,7 +47,8 @@ export function DefiClassementLive({ top = 5, className, titre = "Défi du mois"
       <DefiEntete
         surtitre={data ? `${moisLabel(data.mois)} · ${data.nb_joueurs} joueur${data.nb_joueurs > 1 ? "s" : ""}` : "Classement"}
         titre={titre}
-        sousTitre={prix && <>1<sup>er</sup> du mois : {prix.jours} jours {planLabel(prix.plan)} offerts</>}
+        sousTitre={data?.essai ? <>Mois d&apos;essai · récompenses dès le {dateLancement(regles?.premier_mois)}</>
+          : prix && <>1<sup>er</sup> du mois : {prix.jours} jours {planLabel(prix.plan)} offerts</>}
         droite={<>
           <PastilleDirect />
           {data && <CompteRebours mois={data.mois} />}
