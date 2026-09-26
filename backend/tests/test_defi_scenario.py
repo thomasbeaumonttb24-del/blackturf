@@ -61,9 +61,13 @@ async def _parier(client, headers, course_id, type_pari, chevaux, points):
 
 
 async def _fermer(db, course_id):
-    """Le départ est donné : l'heure prévue est passée."""
+    """Le temps passe jusqu'au départ : les paris déjà engagés l'ont été 30 min
+    plus tôt, le départ prévu est passé de 5 min."""
+    maintenant = datetime.now(timezone.utc)
+    for p in (await db.execute(select(DefiPari).where(DefiPari.course_id == course_id))).scalars():
+        p.engage_at = maintenant - timedelta(minutes=30)
     c = await db.get(Course, course_id)
-    c.date_heure = datetime.now(timezone.utc) - timedelta(minutes=5)
+    c.date_heure = maintenant - timedelta(minutes=5)
     await db.commit()
     return c
 

@@ -414,6 +414,10 @@ async def delete_user(
     # base refuse la suppression et la transaction entière repart en arrière.
     supprime["paris"] = (await db.execute(
         delete(BankrollEntry).where(BankrollEntry.user_id == user_id))).rowcount or 0
+    # Les paris du défi sont immuables en base (trigger 0055) : seule une
+    # suppression de compte, déclarée pour cette transaction, peut les effacer.
+    if db.get_bind().dialect.name == "postgresql":
+        await db.execute(text("SELECT set_config('blackturf.suppression_compte', 'on', true)"))
     supprime["defi_paris"] = (await db.execute(
         delete(DefiPari).where(DefiPari.user_id == user_id))).rowcount or 0
     supprime["defi_recompenses"] = (await db.execute(

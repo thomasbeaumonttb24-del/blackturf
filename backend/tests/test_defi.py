@@ -638,3 +638,21 @@ async def test_cloture_signale_les_comptes_multiples(client, db, admin_headers):
     assert "Même boîte e-mail que Jeannot" in lignes["Jean"]["alertes"]
     assert "Joue les mêmes courses que Complice au même moment (10 courses)" in lignes["Jean"]["alertes"]
     assert not any("mêmes courses" in a or "boîte" in a for a in lignes["Honnete"]["alertes"])
+
+
+async def test_pari_engage_apres_le_depart_definitif_est_rembourse(db):
+    """Course avancée après le dernier rafraîchissement du programme : un pari passé
+    dans ce trou est remboursé au règlement, jamais payé."""
+    u = await _user(db)
+    c = await _course(db)
+    a_temps = await defi.engager_pari(db, u, "C1", "Simple Gagnant", [3], 10)
+    a_temps.engage_at = MAINTENANT - timedelta(minutes=30)
+    trop_tard = await defi.engager_pari(db, u, "C1", "Simple Gagnant", [3], 20)
+    c.date_heure = MAINTENANT - timedelta(minutes=5)   # le PMU corrige : départ réel plus tôt
+    await db.commit()
+    await _arrivee(db, c)
+    await defi.regler_course(db, "C1")
+    await db.refresh(a_temps)
+    await db.refresh(trop_tard)
+    assert (a_temps.statut, a_temps.points_retour) == ("gagne", 42.0)
+    assert (trop_tard.statut, trop_tard.points_retour) == ("rembourse", 20.0)

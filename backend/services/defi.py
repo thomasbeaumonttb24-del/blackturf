@@ -441,8 +441,20 @@ async def regler_course(session, course_id: str) -> int:
     )).scalars().all())
     nb_part = course.nb_partants or len(res.classement)
 
+    # Contrôle a posteriori : l'heure de départ est celle du PMU au moment du
+    # règlement, donc corrigée si la course a été avancée après le dernier
+    # rafraîchissement du programme. Un pari validé après cette limite n'aurait
+    # jamais dû passer : il est remboursé, jamais payé.
+    limite = limite_depot(course)
+
     n = 0
     for p in paris:
+        if _utc(p.engage_at) >= limite:
+            log.warning("defi.pari_apres_depart", pari_id=p.pari_id, course_id=course_id,
+                        engage_at=str(p.engage_at), limite=str(limite))
+            p.statut, p.rapport, p.points_retour, p.regle_at = "rembourse", 1.0, float(p.points), now
+            n += 1
+            continue
         r = regler_ticket(p.type_pari, list(p.chevaux), res.classement, res.rapports, nb_part,
                           res.rapports_detail, non_partants)
         if r.get("rembourse"):
