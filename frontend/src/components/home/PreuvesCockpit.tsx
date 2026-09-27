@@ -52,7 +52,7 @@ function useCompteur(cible: number | null, hidden: boolean, duree = 1500) {
     let raf = 0;
     const t0 = performance.now();
     const pas = (t: number) => {
-      const p = Math.min(1, (t - t0) / duree);
+      const p = Math.min(1, Math.max(0, (t - t0) / duree));
       setV(cible * (1 - Math.pow(1 - p, 3)));
       if (p < 1) raf = requestAnimationFrame(pas);
     };

@@ -140,7 +140,7 @@ function useCompteur(cible: number, dureeMs = 900): number {
     const t0 = performance.now();
     setV(0);
     const pas = (t: number) => {
-      const k = Math.min(1, (t - t0) / dureeMs);
+      const k = Math.min(1, Math.max(0, (t - t0) / dureeMs));
       setV(Math.round(cible * (1 - Math.pow(1 - k, 3))));
       if (k < 1) raf = requestAnimationFrame(pas);
     };
