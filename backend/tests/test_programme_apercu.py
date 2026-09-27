@@ -28,7 +28,7 @@ def _apres_midi() -> datetime:
     return datetime.combine(jour_courses(), dtime(14, 0), tzinfo=PARIS).astimezone(timezone.utc)
 
 
-async def _course_du_jour(db: AsyncSession, course_id: str, *, accord: bool) -> None:
+async def _course_du_jour(db: AsyncSession, course_id: str, *, accord: bool, exchange: dict[int, float] | None = None) -> None:
     """Course notée du jour. `accord=False` → le n°1 du modèle n'est PAS le favori
     des cotes, le cas que la pastille met en avant."""
     hippo = Hippodrome(hippodrome_id=str(uuid.uuid4()), nom="Test Prog", code="TPG")
@@ -54,6 +54,7 @@ async def _course_du_jour(db: AsyncSession, course_id: str, *, accord: bool) -> 
         db.add(Participation(
             participation_id=part_id, course_id=course_id, cheval_id=cheval_id,
             numero=numero, cote_pmu=cote, non_partant=False,
+            cote_betfair_exchange=(exchange or {}).get(numero),
         ))
         db.add(Prediction(
             prediction_id=str(uuid.uuid4()), participation_id=part_id, course_id=course_id,
@@ -105,3 +106,19 @@ async def test_apercu_programme_ignore_les_courses_non_analysees(client: AsyncCl
 
     data = (await client.get("/api/v1/programme/apercu")).json()
     assert "PRG3C1" not in data["courses"]
+
+
+async def test_apercu_programme_compte_les_ecarts_de_prix(client: AsyncClient, db: AsyncSession):
+    """Écart de prix = cote PMU > exchange × 1,10, la règle de la comparaison des
+    cotes. L'aperçu n'en donne que le NOMBRE : aucun numéro ne doit en sortir."""
+    # n°4 : 9,0 contre 7,5 → écart (+20 %) ; n°9 : 2,2 contre 2,1 → dans la marge ;
+    # n°2 : pas de cote d'échange → ignoré.
+    await _course_du_jour(db, "PRG4C1", accord=False, exchange={4: 7.5, 9: 2.1})
+    data = (await client.get("/api/v1/programme/apercu")).json()
+    assert data["courses"]["PRG4C1"]["nb_ecarts_prix"] == 1
+
+
+async def test_apercu_programme_sans_exchange_aucun_ecart(client: AsyncClient, db: AsyncSession):
+    await _course_du_jour(db, "PRG5C1", accord=True)
+    data = (await client.get("/api/v1/programme/apercu")).json()
+    assert data["courses"]["PRG5C1"]["nb_ecarts_prix"] == 0

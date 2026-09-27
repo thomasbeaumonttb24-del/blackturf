@@ -192,7 +192,7 @@ export function Navbar() {
         <div className="flex h-16 items-center justify-between">
 
           {/* Logo */}
-          <Link href="/" className="flex items-center gap-2 flex-shrink-0" aria-label="BlackTurf — Accueil">
+          <Link href="/" className="flex min-w-0 items-center gap-1.5 flex-shrink-0 sm:gap-2" aria-label="BlackTurf — Accueil">
             {/* `alt` vide, volontairement : le lien porte déjà `aria-label` ET le nom
                 écrit à côté. Un alt qui le répète fait annoncer « BlackTurf » deux
                 fois de plus (règle axe « image-redundant-alt »).
@@ -203,10 +203,12 @@ export function Navbar() {
               alt=""
               width={256}
               height={251}
-              className="h-10 w-auto sm:h-11 object-contain"
+              className="h-9 w-auto sm:h-11 object-contain"
               priority
             />
-            <span className="text-xl font-bold tracking-tight text-[#17231f]">
+            {/* Sous 380 px, le nom écrit passait sous les boutons de droite : le logo,
+                qui porte déjà « BLACKTURF », suffit. */}
+            <span className="hidden text-lg font-bold tracking-tight text-[#17231f] min-[380px]:inline sm:text-xl">
               Black<span className="text-[#876438]">Turf</span>
             </span>
           </Link>
@@ -244,12 +246,12 @@ export function Navbar() {
           </div>
 
           {/* Right side */}
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-0.5 sm:gap-1.5">
             {/* Search button (tous) */}
             <Button
               variant="ghost"
               size="icon"
-              className="text-gray-600 hover:text-gray-800 hover:bg-gray-100"
+              className="h-9 w-9 text-gray-600 hover:text-gray-800 hover:bg-gray-100 sm:h-10 sm:w-10"
               onClick={() => setSearchOpen(true)}
               aria-label="Rechercher (⌘K)"
             >
@@ -273,7 +275,9 @@ export function Navbar() {
                     : "Communauté"}
                   title="Communauté"
                   className={cn(
-                    "relative inline-flex h-10 w-10 items-center justify-center rounded-md transition-colors",
+                    // Sous 400 px l'icône cède la place : « Communauté » reste dans le
+                    // menu du compte, avec son compteur de messages non lus.
+                    "relative hidden h-9 w-9 items-center justify-center rounded-md transition-colors min-[400px]:inline-flex sm:h-10 sm:w-10",
                     surChat
                       ? "bg-brand-gold-tint text-brand-gold-dark"
                       : "text-gray-600 hover:bg-gray-100 hover:text-gray-800"
@@ -305,7 +309,7 @@ export function Navbar() {
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="relative text-gray-600 hover:text-gray-800 hover:bg-gray-100"
+                  className="relative h-9 w-9 text-gray-600 hover:text-gray-800 hover:bg-gray-100 sm:h-10 sm:w-10"
                   aria-label="Notifications"
                   onClick={() => router.push("/notifications")}
                 >
@@ -321,7 +325,7 @@ export function Navbar() {
                 <div className="relative">
                   <button
                     onClick={() => setUserMenuOpen(!userMenuOpen)}
-                    className="flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 py-1.5 text-sm hover:border-brand-gold/40 hover:bg-brand-gold-tint/50 transition-all"
+                    className="flex items-center gap-1 rounded-xl border border-gray-200 bg-white px-2 py-1.5 text-sm hover:border-brand-gold/40 sm:gap-2 sm:px-3 hover:bg-brand-gold-tint/50 transition-all"
                     aria-expanded={userMenuOpen}
                     aria-haspopup="true"
                   >
@@ -456,7 +460,7 @@ export function Navbar() {
                 aria-label="Communauté"
                 title="Communauté"
                 className={cn(
-                  "inline-flex h-10 w-10 items-center justify-center rounded-md transition-colors",
+                  "inline-flex h-9 w-9 items-center justify-center rounded-md transition-colors sm:h-10 sm:w-10",
                   surChat
                     ? "bg-brand-gold-tint text-brand-gold-dark"
                     : "text-gray-600 hover:bg-gray-100 hover:text-gray-800"
@@ -488,7 +492,7 @@ export function Navbar() {
             <Button
               variant="ghost"
               size="icon"
-              className="lg:hidden text-gray-600 hover:bg-gray-100"
+              className="h-9 w-9 text-gray-600 hover:bg-gray-100 sm:h-10 sm:w-10 lg:hidden"
               onClick={() => setMenuOpen(!menuOpen)}
               aria-label={menuOpen ? "Fermer le menu" : "Ouvrir le menu"}
             >
