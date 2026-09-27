@@ -108,6 +108,11 @@ jobs:
 
             attendre_api || { echo "::error::L'API ne répond plus après les migrations."; $DC logs --tail 80 api; exit 1; }
 
+            # Webhook Stripe abonné aux événements traités (parrainage : remboursements
+            # et contestations). N'ajoute que les manquants ; jamais bloquant.
+            $DC exec -T api python scripts/stripe_webhook_evenements.py \
+              || echo "::warning::Synchronisation des événements du webhook Stripe non effectuée."
+
             # Nettoyage images orphelines
             docker image prune -f
 

@@ -71,10 +71,12 @@ adresses réelles peut se parrainer une fois ; elle paie malgré tout son abonne
 
 1. **Migration** : `alembic upgrade head` (révision `0054` : colonnes `users.code_parrain`,
    `users.parraine_par_id`, table `parrainages`).
-2. **Stripe → Développeurs → Webhooks** : ajouter au point de terminaison existant les événements
-   `charge.refunded` et `charge.dispute.created` (les autres sont déjà abonnés).
+2. **Webhook Stripe** : rien à faire à la main. Chaque déploiement lance
+   `scripts/stripe_webhook_evenements.py`, qui ajoute au point de terminaison `/api/v1/stripe/webhook`
+   les événements manquants (dont `charge.refunded` et `charge.dispute.created`) sans rien retirer.
+   Vérification seule : `python scripts/stripe_webhook_evenements.py --verifier`.
 3. Rien à créer dans Stripe : le coupon se crée seul au premier checkout d'un filleul.
-4. CGV : ajouter un paragraphe « Programme de parrainage » reprenant les règles ci-dessus.
+4. CGV : section 8 « Programme de parrainage » (`/cgv#parrainage`).
 
 ## Tests
 
