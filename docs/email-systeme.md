@@ -8,6 +8,7 @@ Le compte de contrôle `thomas.beaumont.tb24@gmail.com` reçoit **un exemplaire 
 | --- | --- | --- | --- |
 | Valeurs du jour | Tous les jours à 10 h Paris, reprises à 10 h 15/30/45 si nécessaire | Comptes Starter, Standard, Expert éligibles et opt-in | Activé en production ; aperçu `docs/email-previews/quotidien.html` |
 | Lettre hebdomadaire | Lundi et mardi, 9 h–20 h Paris, toutes les 30 minutes jusqu'au bilan complet | Inscrits confirmés et comptes actifs éligibles, sans doublon | Activé en production ; aperçu `docs/email-previews/hebdomadaire.html` |
+| Alerte de stratégie | Toutes les 10 min (h+5), si un pari visible remplit les critères d'une stratégie à alerte cochée | Comptes Expert actifs, adresse utilisable, sans opposition marketing | Même interrupteur `EMAIL_EDITORIAL_ENABLED` ; au plus 1 e-mail / 4 h, jamais deux fois le même signal |
 | Confirmation de newsletter | Demande d'inscription | Adresse demandant l'inscription | Transactionnel immédiat |
 | Vérification d'adresse et mot de passe | Inscription, renvoi ou demande de réinitialisation | Compte concerné | Transactionnel immédiat, jeton secret |
 | Pronostic d'une course | Demande explicite sur la fiche course | Adresse demandant ce pronostic | Transactionnel immédiat, une fois par adresse et course |
@@ -21,6 +22,8 @@ Le compte de contrôle `thomas.beaumont.tb24@gmail.com` reçoit **un exemplaire 
 - La lettre va aux inscrits **confirmés** et aux comptes actifs à adresse utilisable qui n'ont pas désactivé l'hebdomadaire. Une adresse présente dans les deux listes ne reçoit qu'un seul exemplaire. Le désabonnement newsletter et l'opposition marketing d'un compte restent prioritaires.
 
 Le top et le bilan proviennent de la même règle que les visuels publics : dernier plan du site émis avant le départ, dernier règlement définitif de ce plan, jamais un plan personnel. `mise`, `retour` (mise incluse) et `net` sont contrôlés entre la table de règlement et son bilan JSON avant de figer une édition dans `email_editions`. Les chiffres figés sont publics sur `/api/v1/newsletter/bilans/AAAA-MM-JJ` et ne contiennent ni adresse ni jeton personnel.
+
+- **Alertes de stratégie** (`backend/services/alertes_strategies.py`) : à chaque passage, relit tous les paris visibles pour un Expert dont le départ est à venir, les confronte aux critères de chaque stratégie à alerte cochée (discipline, hippodrome, niveau, terrain, Quinté+, distance et partants min/max ; EV du pari, étoiles, proba top 3, confiance, ELO) et envoie UN récapitulatif par utilisateur. Les signaux envoyés sont journalisés (`alertes_log`, type `strategie_email`) : jamais renvoyés, et ceux apparus pendant le délai de 4 h partent au passage suivant. Un échec d'envoi ne consomme ni signal ni délai.
 
 ## Présentation et aperçu
 

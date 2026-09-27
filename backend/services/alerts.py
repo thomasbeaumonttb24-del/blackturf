@@ -300,6 +300,7 @@ async def _log_alerte(
     payload: dict,
     envoye: bool,
     erreur: Optional[str] = None,
+    quand: Optional[datetime] = None,
 ):
     entry = AlerteLog(
         alerte_id=str(uuid.uuid4()),
@@ -311,7 +312,7 @@ async def _log_alerte(
         # la colonne est un vrai `boolean` Postgres, asyncpg refuse tout autre type.
         envoye=bool(envoye),
         erreur=erreur,
-        created_at=datetime.now(timezone.utc),
+        created_at=quand or datetime.now(timezone.utc),
     )
     session.add(entry)
 
