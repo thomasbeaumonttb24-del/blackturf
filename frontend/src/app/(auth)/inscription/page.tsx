@@ -1,7 +1,7 @@
 "use client";
 export const dynamic = "force-dynamic";
 
-import { useState, Suspense } from "react";
+import { useEffect, useState, Suspense } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useForm } from "react-hook-form";
@@ -9,11 +9,12 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { toast } from "sonner";
 import Image from "next/image";
-import { Loader2, Check, MailCheck } from "lucide-react";
+import { Loader2, Check, MailCheck, Gift } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/useAuth";
 import { champMotDePasse, MOT_DE_PASSE_AIDE, messageErreurApi } from "@/lib/motdepasse";
-import { authApi } from "@/lib/api";
+import { authApi, parrainageApi } from "@/lib/api";
+import { euros, lireCodeParrain, memoriserCodeParrain, normaliserCode, oublierCodeParrain } from "@/lib/parrainage";
 import { cheminInterne, memoriserIntention, planEssai } from "@/lib/intentionEssai";
 import { AVANTAGES_COMPTE_GRATUIT } from "@/components/billing/CompteGratuitCta";
 
@@ -41,6 +42,28 @@ function InscriptionContent() {
   // depuis un appel à créer un compte. Mémorisée pour l'écran de confirmation d'adresse.
   const plan = planEssai(params.get("plan"));
   const suite = cheminInterne(params.get("suite"));
+  // Lien de parrainage : `?parrain=CODE`, ou le code mémorisé d'une visite précédente.
+  const codeUrl = normaliserCode(params.get("parrain"));
+  const [parrain, setParrain] = useState<{ code: string; prenom: string | null; remise: number } | null>(null);
+
+  useEffect(() => {
+    const code = codeUrl || lireCodeParrain();
+    if (!code) return;
+    let actif = true;
+    parrainageApi.verifier(code)
+      .then(({ data }) => {
+        if (!actif) return;
+        if (data.valide) {
+          memoriserCodeParrain(data.code);
+          setParrain({ code: data.code, prenom: data.prenom, remise: data.remise_cents });
+        } else {
+          oublierCodeParrain();
+          if (codeUrl) toast.error("Ce lien de parrainage n'est plus valable.");
+        }
+      })
+      .catch(() => { /* API injoignable : inscription sans parrainage */ });
+    return () => { actif = false; };
+  }, [codeUrl]);
 
   const {
     register,
@@ -51,7 +74,8 @@ function InscriptionContent() {
   async function onSubmit(data: FormData) {
     setLoading(true);
     try {
-      const res = await registerAuth(data);
+      const res = await registerAuth({ ...data, code_parrain: parrain?.code });
+      if (parrain) oublierCodeParrain();
       memoriserIntention({ plan, suite });
       setEnAttente(res.email);
     } catch (e: unknown) {
@@ -95,8 +119,9 @@ function InscriptionContent() {
           Rien reçu au bout de deux minutes ? Regardez dans les indésirables.
         </p>
         <p className="text-xs text-muted-foreground mt-3">
-          Dès la confirmation, votre essai {plan === "expert" ? "Expert" : "Standard"} de
-          7 jours vous sera proposé.
+          {parrain
+            ? `Dès la confirmation, vos ${euros(parrain.remise)} de remise de parrainage vous attendent sur votre premier abonnement.`
+            : `Dès la confirmation, votre essai ${plan === "expert" ? "Expert" : "Standard"} de 7 jours vous sera proposé.`}
         </p>
 
         <Button variant="outline" className="w-full mt-6" onClick={renvoyerLien} disabled={renvoi}>
@@ -119,6 +144,18 @@ function InscriptionContent() {
   return (
     <div>
           <div className="rounded-2xl border border-border bg-card p-8 shadow-2xl">
+            {parrain && (
+              <div className="mb-5 flex items-start gap-3 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900">
+                <Gift className="h-5 w-5 flex-shrink-0 text-emerald-700 mt-0.5" aria-hidden />
+                <p>
+                  <span className="font-semibold">
+                    {parrain.prenom ? `${parrain.prenom} vous invite` : "Vous êtes invité"} :{" "}
+                    {euros(parrain.remise)} offerts
+                  </span>{" "}
+                  sur votre premier abonnement Standard ou Expert, mensuel ou annuel.
+                </p>
+              </div>
+            )}
             <h2 className="text-xl font-bold mb-1">Créer un compte</h2>
             <p className="text-sm text-muted-foreground mb-6">
               Déjà inscrit ?{" "}

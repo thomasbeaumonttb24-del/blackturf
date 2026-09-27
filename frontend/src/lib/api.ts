@@ -96,7 +96,7 @@ export type InscriptionEnAttente = {
 
 export const authApi = {
   // L'inscription n'ouvre plus de session : elle envoie un lien de confirmation.
-  register: (data: { email: string; password: string; nom?: string; prenom?: string }) =>
+  register: (data: { email: string; password: string; nom?: string; prenom?: string; code_parrain?: string }) =>
     api.post<InscriptionEnAttente>("/auth/register", data),
   // Renvoi du lien SANS session : celui dont le lien a expiré ne peut plus se
   // connecter, donc plus rien demander depuis son profil.
@@ -111,6 +111,39 @@ export const authApi = {
   logout: () => api.post("/auth/logout"),
   updateMe: (data: Record<string, unknown>) => api.patch("/auth/me", data),
   savePushSub: (sub: object) => api.put("/auth/push-subscription", sub),
+};
+
+export type ResumeParrainage = {
+  code: string;
+  lien: string;
+  remise_cents: number;
+  filleuls: {
+    prenom: string;
+    statut: "en_attente" | "valide" | "refuse" | "annule";
+    // Étape fine du suivi, et son libellé prêt à afficher.
+    etape: "email_a_confirmer" | "attente_paiement" | "paiement_en_cours" | "verification"
+      | "credite" | "refuse" | "parrain_inactif" | "annule";
+    etape_libelle: string;
+    depuis: string;
+    credite_le: string | null;
+  }[];
+  en_attente: number;
+  annules: number;
+  valides: number;
+  gagne_cents: number;
+  // null : solde Stripe momentanément illisible.
+  credit_disponible_cents: number | null;
+  remise_filleul_disponible: boolean;
+};
+
+export type CodeParrain =
+  | { valide: false }
+  | { valide: true; code: string; prenom: string | null; remise_cents: number };
+
+export const parrainageApi = {
+  moi: () => api.get<ResumeParrainage>("/parrainage"),
+  verifier: (code: string) =>
+    api.get<CodeParrain>(`/parrainage/code/${encodeURIComponent(code)}`, { tolere401: true }),
 };
 
 export const coursesApi = {
