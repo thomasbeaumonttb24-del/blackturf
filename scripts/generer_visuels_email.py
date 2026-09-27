@@ -113,49 +113,28 @@ def banniere(source: str, nom: str, focale_y: float = 0.5) -> None:
     im.convert("RGB").save(SORTIE / f"hero-{nom}.jpg", quality=80, optimize=True, progressive=True)
 
 
-def logo() -> None:
-    im = Image.open(RACINE / "logo-blackturf.png").convert("RGBA")
-    fond = Image.new("RGBA", im.size, (255, 255, 255, 255))
-    diff = Image.eval(Image.alpha_composite(fond, im).convert("L"), lambda v: 255 if v < 235 else 0)
-    im = im.crop(diff.getbbox())
-    im = im.resize((360, round(im.height * 360 / im.width)), Image.LANCZOS)
-    # Fond blanc opaque + palette : 15 Ko au lieu de 140, rendu identique sur le
-    # bandeau blanc qui le porte.
-    fond = Image.new("RGB", im.size, (255, 255, 255))
-    fond.paste(im, mask=im.getchannel("A"))
-    fond.quantize(colors=96, method=Image.MEDIANCUT).save(SORTIE / "logo-blackturf.png", optimize=True)
 
 
-def logo_nuit() -> None:
-    """Logo pour fond sombre, fond transparent : le cheval noir devient crème,
-    l'anneau et le nom restent or. Un fond sombre n'est jamais modifié par les
-    modes sombres des clients mail, contrairement à un bandeau blanc."""
-    im = Image.open(RACINE / "logo-blackturf.png").convert("RGBA")
-    fond = Image.new("RGBA", im.size, (255, 255, 255, 255))
-    plat = Image.alpha_composite(fond, im).convert("RGB")
-    masque = Image.eval(plat.convert("L"), lambda v: 255 if v < 235 else 0)
-    boite = masque.getbbox()
-    plat = plat.crop(boite)
-    out = Image.new("RGBA", plat.size, (0, 0, 0, 0))
-    src, dst = plat.load(), out.load()
-    creme, clair = _rgb("#F3E3B5"), _rgb("#FFF8E6")
-    for y in range(plat.height):
-        for x in range(plat.width):
-            r, g, b = src[x, y]
-            mx, mn = max(r, g, b), min(r, g, b)
-            sat = (mx - mn) / (mx or 1)
-            lum = (r + g + b) / 765
-            if lum < 0.42:                         # corps du cheval (noir bruité) → crème plein
-                dst[x, y] = (*creme, 255)
-            elif sat > 0.25 and lum < 0.9:        # or : conservé, un peu éclairci
-                a = 255 if lum < 0.8 else round(255 * (0.9 - lum) / 0.1)
-                dst[x, y] = (min(255, int(r * 1.12)), min(255, int(g * 1.12)), min(255, int(b * 1.1)), max(0, a))
-            elif lum < 0.85:                       # noir du cheval → crème, reflets plus clairs
-                t = lum / 0.85
-                a = 255 if lum < 0.7 else round(255 * (0.85 - lum) / 0.15)
-                dst[x, y] = (*(round(creme[i] + (clair[i] - creme[i]) * t) for i in range(3)), a)
-    out = out.resize((240, round(out.height * 240 / out.width)), Image.LANCZOS)
-    out.quantize(colors=128, method=Image.FASTOCTREE).save(SORTIE / "logo-nuit.png", optimize=True)
+def logo_medaillon(taille: int = 176) -> None:
+    """Le VRAI logo du site (frontend/public/logo-transparent.png, celui de la
+    barre de navigation), sans aucune retouche, posé sur un médaillon blanc rond.
+    Le médaillon fait partie de l'image : aucun mode sombre ne le recolore, et le
+    cheval noir reste lisible sur le fond nuit des mails."""
+    s = taille * 4
+    im = Image.new("RGBA", (s, s), (0, 0, 0, 0))
+    ombre = Image.new("RGBA", (s, s), (0, 0, 0, 0))
+    ImageDraw.Draw(ombre).ellipse((s * .05, s * .07, s * .95, s * .97), fill=(0, 0, 0, 120))
+    im.alpha_composite(ombre.filter(ImageFilter.GaussianBlur(s * .025)))
+    d = ImageDraw.Draw(im)
+    d.ellipse((s * .04, s * .04, s * .96, s * .96), fill=(255, 255, 255, 255), outline=(*_rgb("#C99A3C"), 255), width=int(s * .012))
+    logo = Image.open(RACINE.parent / "logo-transparent.png").convert("RGBA")
+    cote = int(s * .80)
+    k = cote / max(logo.size)
+    logo = logo.resize((round(logo.width * k), round(logo.height * k)), Image.LANCZOS)
+    im.alpha_composite(logo, ((s - logo.width) // 2, (s - logo.height) // 2))
+    im.resize((taille, taille), Image.LANCZOS).save(SORTIE / "logo-medaillon.png", optimize=True)
+
+
 
 
 def disciplines() -> None:
@@ -237,20 +216,6 @@ def dessiner_casaque(corps: str, manches: str, motif: Optional[str] = None, tail
     return im.resize((taille, taille), Image.LANCZOS)
 
 
-def cheval_or() -> None:
-    """Silhouette du logo en or pour le pied de mail, sur fond sombre : les
-    zones noires deviennent or, les reflets blancs or clair."""
-    im = Image.open(RACINE / "logo-horse.png").convert("RGBA")
-    px = im.load()
-    fonce, clair = _rgb("#C99A3C"), _rgb("#F3E3B5")
-    for y in range(im.height):
-        for x in range(im.width):
-            r, g, b, a = px[x, y]
-            if a:
-                t = (r + g + b) / 765
-                px[x, y] = (*(round(fonce[i] + (clair[i] - fonce[i]) * t) for i in range(3)), a)
-    im.thumbnail((160, 160), Image.LANCZOS)
-    im.save(SORTIE / "cheval-or.png", optimize=True)
 
 
 if __name__ == "__main__":
@@ -259,15 +224,13 @@ if __name__ == "__main__":
         medaille(r)
     banniere("galop-lutte.jpg", "galop", focale_y=0.62)
     banniere("attele-action.jpg", "trot", focale_y=0.55)
-    logo()
-    logo_nuit()
+    logo_medaillon()
     disciplines()
     banniere("galop-vitesse.jpg", "valeurs", focale_y=0.45)
     banniere("galop-foule.jpg", "bilan", focale_y=0.40)
     banniere("galop-stalles.jpg", "bienvenue", focale_y=0.55)
     tuile("IA", "ia")
-    for texte, nom in (("★", "etoile"), ("€", "euro"), ("✉", "lettre"), ("✓", "valide"), ("cadenas", "cle"), ("%", "pourcent")):
+    for texte, nom in (("★", "etoile"), ("€", "euro"), ("✓", "valide"), ("cadenas", "cle"), ("%", "pourcent")):
         tuile(texte, nom, echelle=.44)
-    cheval_or()
     dessiner_casaque("#E7E5E4", "#D6D3D1").save(SORTIE / "casaque-neutre.png", optimize=True)
     print("Visuels écrits dans", SORTIE)

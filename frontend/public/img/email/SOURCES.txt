@@ -1,0 +1,2 @@
+logo-medaillon.png : logo officiel du site (frontend/public/logo-transparent.png), non retouché, sur médaillon blanc. Utilisé par tous les mails.
+logo-nuit.png, cheval-or.png : anciennes versions recolorées du logo (septembre 2026). Plus générées ni utilisées par les nouveaux mails ; conservées car les mails déjà envoyés les chargent depuis blackturf.fr.
