@@ -73,7 +73,7 @@ export function Reveal({ children, className, delay = 0, as: Tag = "div" }: {
 }
 
 /**
- * Carte qui s'incline vers le pointeur, avec un reflet qui le suit.
+ * Carte qui s'incline vers le pointeur (sans reflet lumineux : retiré à la demande).
  * Uniquement à la souris : au doigt, l'inclinaison gênerait le défilement.
  */
 export function Tilt({ children, className, max = 7, style }: {
@@ -94,8 +94,6 @@ export function Tilt({ children, className, max = 7, style }: {
     el.classList.add("tr-tilting");
     el.style.setProperty("--ry", `${((x - 0.5) * 2 * max).toFixed(2)}deg`);
     el.style.setProperty("--rx", `${((0.5 - y) * 2 * max).toFixed(2)}deg`);
-    el.style.setProperty("--mx", `${(x * 100).toFixed(1)}%`);
-    el.style.setProperty("--my", `${(y * 100).toFixed(1)}%`);
   };
   const onLeave = () => {
     const el = ref.current;
@@ -108,7 +106,6 @@ export function Tilt({ children, className, max = 7, style }: {
   return (
     <div ref={ref} onPointerMove={onMove} onPointerLeave={onLeave} className={cn("tr-tilt relative", className)} style={style}>
       {children}
-      <span className="tr-glare" aria-hidden="true" />
     </div>
   );
 }

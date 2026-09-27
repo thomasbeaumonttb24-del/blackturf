@@ -517,8 +517,6 @@ function LignePartant({ partant: p, pred, cote, live, avecPreds, verrou = false,
     const x = (e.clientX - r.left) / r.width, y = (e.clientY - r.top) / r.height;
     el.style.setProperty("--rx", `${((0.5 - y) * 3).toFixed(2)}deg`);
     el.style.setProperty("--ry", `${((x - 0.5) * 2.4).toFixed(2)}deg`);
-    el.style.setProperty("--mx", `${(x * 100).toFixed(1)}%`);
-    el.style.setProperty("--my", `${(y * 100).toFixed(1)}%`);
     el.style.setProperty("--lift", "-3px");
   };
   const redresser = () => {
@@ -599,8 +597,6 @@ function LignePartant({ partant: p, pred, cote, live, avecPreds, verrou = false,
         np && "opacity-60 saturate-50",
       )}
     >
-      {/* Reflet qui suit la souris */}
-      <span aria-hidden="true" className="pointer-events-none absolute inset-0 opacity-0 transition-opacity duration-300 group-hover/carte:opacity-100 [background:radial-gradient(420px_circle_at_var(--mx,50%)_var(--my,50%),rgba(251,191,36,.10),transparent_45%)]" />
       {podium && <span aria-hidden="true" className={cn("absolute inset-y-3 left-0 w-1 rounded-r-full bg-gradient-to-b", podium.barre)} />}
 
       <button
