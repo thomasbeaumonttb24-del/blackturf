@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { CheckoutButton } from "@/components/billing/CheckoutButton";
+import { MentionPaiement } from "@/components/billing/MentionPaiement";
 
 export const metadata: Metadata = {
   // Le corps de la page employait déjà trente et une fois le vocabulaire de l'IA sans
@@ -182,9 +183,7 @@ export default function TarifsPage() {
                 est exigée depuis la mise en place de l'essai unique par compte. La FAQ de
                 l'accueil disait déjà l'inverse de cette ligne. Ce qui est vrai, et qui est le
                 vrai argument, c'est qu'aucun prélèvement n'a lieu avant le terme. */}
-            <p className="text-center text-xs text-muted-foreground mt-2">
-              Carte requise, aucun prélèvement avant la fin de l&apos;essai
-            </p>
+            <MentionPaiement />
           </CardContent>
         </Card>
 
@@ -228,9 +227,7 @@ export default function TarifsPage() {
                 est exigée depuis la mise en place de l'essai unique par compte. La FAQ de
                 l'accueil disait déjà l'inverse de cette ligne. Ce qui est vrai, et qui est le
                 vrai argument, c'est qu'aucun prélèvement n'a lieu avant le terme. */}
-            <p className="text-center text-xs text-muted-foreground mt-2">
-              Carte requise, aucun prélèvement avant la fin de l&apos;essai
-            </p>
+            <MentionPaiement />
           </CardContent>
         </Card>
       </div>

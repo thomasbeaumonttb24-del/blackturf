@@ -156,3 +156,76 @@ def resiliation(via_stripe: bool) -> tuple[str, str]:
         f"Une question : contact@blackturf.fr\n\n{D.RESPONSABLE}"
     )
     return D.document("Résiliation enregistrée", "Votre demande de résiliation est bien prise en compte.", rangees), texte
+
+
+# Où tombera le crédit, selon la situation du parrain (cf. services/parrainage.situation_credit).
+_OU_VA_LE_CREDIT = {
+    "facture": "ils seront déduits automatiquement de votre prochaine facture.",
+    "abonne": "ils seront déduits automatiquement de votre prochaine facture.",
+    "offert": "votre abonnement vous étant offert, ils restent en réserve et seront déduits "
+              "dès que vous aurez une facture à régler.",
+    "resilie": "votre abonnement s’arrêtant à l’échéance, ils restent en réserve et seront "
+               "déduits de votre prochain abonnement.",
+    "sans_abonnement": "ils seront déduits automatiquement de l’abonnement que vous prendrez.",
+    "reporte": "vous avez atteint le plafond de ce mois (votre mensualité est déjà entièrement "
+               "couverte) : ils sont mis de côté et seront déduits de la facture du mois suivant. "
+               "Rien n’est perdu.",
+}
+
+
+def parrainage_credite(prenom: Optional[str], prenom_filleul: Optional[str], lien: str,
+                       situation: str = "facture") -> tuple[str, str]:
+    ami = (prenom_filleul or "").split(" ")[0] or "Votre filleul"
+    detail = (f"{ami} vient de régler son premier abonnement. 5 € de crédit sont posés sur "
+              f"votre compte : {_OU_VA_LE_CREDIT.get(situation, _OU_VA_LE_CREDIT['facture'])}")
+    carte = (
+        D.surtitre("Comment ça marche ?")
+        + f'<div style="font-size:14px;line-height:22px;color:{C["slate7"]}">{e(detail)}</div>'
+        + f'<div style="margin-top:14px;font-size:14px;line-height:22px;color:{C["slate7"]}">'
+          "Vos crédits se cumulent d’un filleul à l’autre. Au plus une mensualité est offerte "
+          "par facture : le reste est reporté sur les suivantes.</div>"
+    )
+    rangees = (
+        D.barre_logo("Parrainage")
+        + D.entete(None, "Merci !", f"{e(prenom)}, vous avez gagné 5 €" if prenom else "Vous avez gagné 5 €",
+                   "Grâce à votre parrainage.", icone="euro")
+        + _carte_claire(carte)
+        + D.appel("Continuez à parrainer", "Chaque ami qui s’abonne vous offre 5 € de plus.",
+                  "Mon lien de parrainage", lien)
+        + D.bloc_instagram()
+        + D.pied("Message lié à votre compte blackturf.fr.")
+    )
+    texte = (
+        f"Bonjour {prenom or ''},\n\n{detail.replace('’', chr(39))}\n\n"
+        f"Votre lien de parrainage : {lien}\n\n{D.RESPONSABLE}"
+    )
+    return D.document("5 € offerts grâce à votre parrainage",
+                      "Votre filleul s'est abonné : 5 € de crédit sur votre compte.", rangees), texte
+
+
+def parrainage_inscrit(prenom: Optional[str], prenom_filleul: Optional[str], lien: str) -> tuple[str, str]:
+    ami = (prenom_filleul or "").split(" ")[0] or "Un ami"
+    detail = (f"{ami} vient de créer son compte avec votre lien. Dès qu’il réglera son premier "
+              "abonnement (avec 5 € de remise), 5 € seront déduits automatiquement de votre "
+              "prochaine mensualité. Vous serez prévenu par e-mail.")
+    carte = (
+        D.surtitre("Où en est-il ?")
+        + f'<div style="font-size:14px;line-height:22px;color:{C["slate7"]}">{e(detail)}</div>'
+        + f'<div style="margin-top:14px;font-size:14px;line-height:22px;color:{C["slate7"]}">'
+          "Suivez chacun de vos filleuls, étape par étape, depuis l’onglet Parrainage de votre profil.</div>"
+    )
+    rangees = (
+        D.barre_logo("Parrainage")
+        + D.entete(None, "Bonne nouvelle", f"{e(ami)} a rejoint BlackTurf",
+                   "Grâce à votre lien de parrainage.", icone="valide")
+        + _carte_claire(carte)
+        + D.appel("Suivre mes parrainages", "Inscrits, abonnés, crédits gagnés : tout est au même endroit.",
+                  "Voir mon suivi", lien)
+        + D.bloc_instagram()
+        + D.pied("Message lié à votre compte blackturf.fr.")
+    )
+    texte = (
+        f"Bonjour {prenom or ''},\n\n{detail.replace('’', chr(39))}\n\n"
+        f"Votre suivi : {lien}\n\n{D.RESPONSABLE}"
+    )
+    return D.document(f"{ami} a rejoint BlackTurf", "Un ami s'est inscrit avec votre lien de parrainage.", rangees), texte

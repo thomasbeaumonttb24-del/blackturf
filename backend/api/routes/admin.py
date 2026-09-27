@@ -557,6 +557,14 @@ async def delete_user(
     supprime["abonnements"] = (await db.execute(
         delete(Subscription).where(Subscription.user_id == user_id))).rowcount or 0
 
+    # Parrainage : le compte disparaît, le lien reste (historique du parrain),
+    # sans pointer sur lui — sinon la clé étrangère bloquerait la suppression.
+    from db.models import Parrainage
+    supprime["parrainages_detaches"] = (await db.execute(
+        update(Parrainage).where(Parrainage.filleul_id == user_id).values(filleul_id=None))).rowcount or 0
+    await db.execute(update(Parrainage).where(Parrainage.parrain_id == user_id).values(parrain_id=None))
+    await db.execute(update(User).where(User.parraine_par_id == user_id).values(parraine_par_id=None))
+
     await db.delete(user)
     await db.commit()
 

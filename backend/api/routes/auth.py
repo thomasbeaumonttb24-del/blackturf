@@ -127,6 +127,9 @@ class RegisterRequest(BaseModel):
     password: str = Field(min_length=10, max_length=128)
     nom: Optional[str] = None
     prenom: Optional[str] = None
+    # Code du lien de parrainage (`/inscription?parrain=…`). Pris en compte à la
+    # création du compte SEULEMENT.
+    code_parrain: Optional[str] = Field(default=None, max_length=20)
 
     @field_validator("password")
     @classmethod
@@ -170,6 +173,7 @@ class RefreshRequest(BaseModel):
 class GoogleCallbackRequest(BaseModel):
     code: str
     redirect_uri: str
+    code_parrain: Optional[str] = Field(default=None, max_length=20)
 
 
 class UserMeResponse(BaseModel):
@@ -207,6 +211,8 @@ class UserMeResponse(BaseModel):
     # 2 seulement ont jamais ouvert l'essai. Le contrôle de carte déjà vue reste au
     # checkout — la carte n'est pas connue avant.
     essai_disponible: bool = False
+    # Filleul pas encore abonné : pas d'essai, 5 € de remise au premier paiement.
+    remise_parrainage: bool = False
 
 
 # ─────────────────────────────────────────────
@@ -385,6 +391,7 @@ async def register(body: RegisterRequest,
         existant.hashed_password = _hash(body.password)
         existant.nom = body.nom or existant.nom
         existant.prenom = body.prenom or existant.prenom
+        await _rattacher_parrain(existant, body.code_parrain, db)
         await db.commit()
         await _envoyer_lien_verification(existant)
         log.info("auth.register.reprise_non_confirme", user_id=existant.user_id)
@@ -399,12 +406,26 @@ async def register(body: RegisterRequest,
         plan="free",
     )
     db.add(user)
+    await db.flush()
+    await _rattacher_parrain(user, body.code_parrain, db)
     await db.commit()
     await db.refresh(user)
     log.info("auth.register", user_id=user.user_id, email=user.email)
 
     await _envoyer_lien_verification(user)
     return _reponse_verification(email)
+
+
+async def _rattacher_parrain(user: User, code: Optional[str], db: AsyncSession) -> None:
+    """Rattache le compte en cours de création à son parrain. Un code invalide
+    bloque l'inscription avec un message clair plutôt que de priver en silence
+    le filleul de sa remise."""
+    from services.parrainage import CodeInvalide, rattacher_filleul
+    try:
+        await rattacher_filleul(user, code, db)
+    except CodeInvalide as refus:
+        await db.rollback()
+        raise HTTPException(status_code=422, detail=str(refus))
 
 
 def _reponse_verification(email: str) -> RegisterResponse:
@@ -587,6 +608,8 @@ async def google_oauth(body: GoogleCallbackRequest, response: Response,
                 plan="free",
             )
             db.add(user)
+            await db.flush()
+            await _rattacher_parrain(user, body.code_parrain, db)
 
     user.last_login_at = datetime.now(timezone.utc)
     await db.commit()
@@ -635,6 +658,9 @@ async def me(user: User = Depends(get_current_user), db: AsyncSession = Depends(
                   for s in vivants)
     en_echec = any(s.statut == "past_due" for s in vivants)
 
+    from services.parrainage import remise_filleul_due
+    remise_parrainage = await remise_filleul_due(user, db)
+
     return UserMeResponse(
         user_id=user.user_id,
         email=user.email,
@@ -650,7 +676,10 @@ async def me(user: User = Depends(get_current_user), db: AsyncSession = Depends(
         essai_fin=bloque.essai_fin if bloque else None,
         abonnement_gerable=gerable,
         paiement_en_echec=en_echec,
-        essai_disponible=user.essai_utilise_at is None and not vivants,
+        # Un filleul n'a pas d'essai : sa remise de 5 € en tient lieu.
+        essai_disponible=(user.essai_utilise_at is None and not vivants
+                          and not user.parraine_par_id),
+        remise_parrainage=remise_parrainage is not None and not vivants,
     )
 
 
@@ -764,10 +793,14 @@ async def verify_email(token: str, response: Response, db: AsyncSession = Depend
     if not user:
         raise HTTPException(status_code=404, detail="Utilisateur introuvable")
 
+    deja_confirme = bool(user.email_verified)
     user.email_verified = True
     user.last_login_at = datetime.now(timezone.utc)
     await db.commit()
     log.info("auth.email_verified", user_id=user.user_id)
+    if not deja_confirme:
+        from services.parrainage import filleul_confirme
+        await filleul_confirme(user, db)
     if user.is_active:
         _set_auth_cookies(response, create_tokens(user.user_id, user.plan))
     return {"ok": True, "message": "Adresse e-mail confirmée"}

@@ -43,6 +43,9 @@ LIBELLES = {
     "impaye_perdu": "Impayé après 2 relances — abonnement clos, compte perdu",
     "essai_refuse_carte_reutilisee": "Essai refusé — carte déjà vue sur un autre compte",
     "carte_refusee_autre_compte": "Abonnement refusé — carte rattachée à un autre compte",
+    "parrainage_valide": "Parrainage validé — 5 € de crédit au parrain",
+    "parrainage_refuse": "Parrainage refusé — carte du filleul déjà vue ailleurs",
+    "parrainage_annule": "Parrainage annulé — paiement du filleul remboursé ou contesté",
 
     # Statuts Stripe bruts. `_handle_subscription_updated` journalise le STATUT
     # lui-même quand il change sans correspondre à un mouvement métier nommé :
@@ -70,6 +73,7 @@ TYPES_NOTIFIES = {
     "resiliation_demandee", "resiliation_annulee", "resilie", "paiement_echoue", "paiement_recu",
     "essai_refuse_carte_reutilisee", "carte_refusee_autre_compte",
     "unpaid", "impaye_perdu",
+    "parrainage_valide", "parrainage_refuse", "parrainage_annule",
 }
 
 

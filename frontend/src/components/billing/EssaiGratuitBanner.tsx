@@ -5,7 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Gift, X } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
-import { peutDemarrerEssai } from "@/lib/auth";
+import { peutDemarrerEssai, peutProfiterRemise } from "@/lib/auth";
 import { CheckoutButton } from "@/components/billing/CheckoutButton";
 
 /**
@@ -42,7 +42,9 @@ export function EssaiGratuitBanner() {
     }
   }, []);
 
-  if (loading || masque || !peutDemarrerEssai(user)) return null;
+  // Filleul : pas d'essai, mais 5 € de remise qui l'attendent — même bandeau, autre offre.
+  const remise = peutProfiterRemise(user);
+  if (loading || masque || !(remise || peutDemarrerEssai(user))) return null;
   if (PAGES_SANS_BANDEAU.some((p) => pathname?.startsWith(p))) return null;
 
   const fermer = () => {
@@ -58,16 +60,24 @@ export function EssaiGratuitBanner() {
     <div className="border-b border-emerald-200 bg-gradient-to-r from-emerald-50 via-white to-amber-50">
       <div className="mx-auto flex max-w-5xl flex-wrap items-center gap-x-4 gap-y-2 px-4 py-2.5 text-sm text-slate-800">
         <Gift className="h-4 w-4 shrink-0 text-emerald-700" aria-hidden />
-        <p className="min-w-0 flex-1">
-          <span className="font-semibold">{user?.prenom ? `${user.prenom}, v` : "V"}otre essai Standard de 7 jours est offert</span>
-          {" "}: pronostics complets, paris de valeur et plans de mise.{" "}
-          <span className="text-slate-600">Carte demandée, 0 € prélevé avant la fin de l&apos;essai, résiliable en un clic.</span>
-        </p>
+        {remise ? (
+          <p className="min-w-0 flex-1">
+            <span className="font-semibold">{user?.prenom ? `${user.prenom}, v` : "V"}os 5 € de parrainage vous attendent</span>
+            {" "}: déduits automatiquement de votre premier abonnement.{" "}
+            <span className="text-slate-600">Sans engagement, résiliable en un clic.</span>
+          </p>
+        ) : (
+          <p className="min-w-0 flex-1">
+            <span className="font-semibold">{user?.prenom ? `${user.prenom}, v` : "V"}otre essai Standard de 7 jours est offert</span>
+            {" "}: pronostics complets, paris de valeur et plans de mise.{" "}
+            <span className="text-slate-600">Carte demandée, 0 € prélevé avant la fin de l&apos;essai, résiliable en un clic.</span>
+          </p>
+        )}
         <div className="flex items-center gap-3">
           <CheckoutButton
             plan="standard"
             periodicite="monthly"
-            label="Démarrer mon essai gratuit"
+            label={remise ? "M'abonner avec −5 €" : "Démarrer mon essai gratuit"}
             size="default"
             className="h-8 px-3 text-[13px]"
           />
