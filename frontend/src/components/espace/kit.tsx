@@ -38,7 +38,7 @@ function useCompteur(valeur: number, duree = 1300) {
     let raf = 0;
     const t0 = performance.now();
     const tick = (now: number) => {
-      const p = Math.min((now - t0) / duree, 1);
+      const p = Math.min(Math.max((now - t0) / duree, 0), 1);
       const e = 1 - Math.pow(1 - p, 3);
       setVal(de + (valeur - de) * e);
       if (p < 1) raf = requestAnimationFrame(tick);

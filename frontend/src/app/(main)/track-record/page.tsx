@@ -114,66 +114,16 @@ interface TrackRecord {
 
 const nf = (n: number, d = 0) =>
   n.toLocaleString("fr-FR", { minimumFractionDigits: d, maximumFractionDigits: d });
-// ─── Compteur animé (count-up) — déclenché quand l'élément entre à l'écran ───
 /**
- * Compteur animé (count-up) déclenché à l'entrée dans le viewport.
- *
- * L'état initial est la VRAIE valeur, jamais 0 : l'animation est un bonus, pas la
- * source de vérité. Un rendu serveur, un IntersectionObserver absent, un onglet en
- * arrière-plan ou une capture automatisée doivent afficher « 3 630 courses
- * analysées », jamais « 0 courses analysées » — un titre à zéro détruirait la
- * crédibilité de la page. Un filet de sécurité repose la valeur exacte si
- * l'animation n'a pas abouti dans le temps imparti.
+ * Chiffre affiché TEL QUEL, sans compteur animé. L'animation (0 → valeur) montrait
+ * pendant ~1,5 s des chiffres faux, et pouvait rester figée sur une valeur
+ * intermédiaire — voire négative (« −74 courses analysées ») — quand les données
+ * s'actualisaient pendant qu'elle tournait. La valeur exacte, dès le premier rendu.
  */
-function useCountUp(target: number, duration = 1400) {
-  const [val, setVal] = useState(target);
-  const ref = useRef<HTMLSpanElement>(null);
-  const started = useRef(false);
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    if (typeof IntersectionObserver === "undefined"
-        || window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-      setVal(target);
-      return;
-    }
-    let raf = 0;
-    let garde: ReturnType<typeof setTimeout> | undefined;
-    let fini = false;
-    const run = () => {
-      if (started.current) return;
-      started.current = true;
-      const t0 = performance.now();
-      setVal(0);
-      const tick = (now: number) => {
-        const p = Math.min((now - t0) / duration, 1);
-        const eased = 1 - Math.pow(1 - p, 3); // easeOutCubic
-        setVal(target * eased);
-        if (p < 1) raf = requestAnimationFrame(tick);
-        else { fini = true; setVal(target); }
-      };
-      raf = requestAnimationFrame(tick);
-      garde = setTimeout(() => { if (!fini) { cancelAnimationFrame(raf); setVal(target); } }, duration + 800);
-    };
-    const io = new IntersectionObserver(
-      (entries) => entries.forEach((e) => e.isIntersecting && run()),
-      { threshold: 0.3 },
-    );
-    io.observe(el);
-    return () => {
-      io.disconnect();
-      cancelAnimationFrame(raf);
-      if (garde) clearTimeout(garde);
-    };
-  }, [target, duration]);
-  return { val, ref };
-}
-
 function CountUp({ value, decimals = 0, suffix = "", prefix = "", className }: {
   value: number; decimals?: number; suffix?: string; prefix?: string; className?: string;
 }) {
-  const { val, ref } = useCountUp(value);
-  return <span ref={ref} className={className}>{prefix}{nf(val, decimals)}{suffix}</span>;
+  return <span className={className}>{prefix}{nf(value, decimals)}{suffix}</span>;
 }
 
 function CountUpEuro({ value, className, decimals = 0, prefix = "" }: { value: number; className?: string; decimals?: number; prefix?: string }) {

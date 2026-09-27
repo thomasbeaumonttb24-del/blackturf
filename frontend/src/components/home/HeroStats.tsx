@@ -63,7 +63,7 @@ function useCountUp(target: number, duration = 1400) {
       }
       const t0 = performance.now();
       const tick = (now: number) => {
-        const p = Math.min((now - t0) / duration, 1);
+        const p = Math.min(Math.max((now - t0) / duration, 0), 1);
         const eased = 1 - Math.pow(1 - p, 3); // easeOutCubic
         setVal(start + (target - start) * eased);
         if (p < 1) rafRef.current = requestAnimationFrame(tick);
