@@ -1147,8 +1147,8 @@ async def get_programme_apercu(
     pour l'apprendre — donc savoir que ça valait la peine de cliquer.
 
     Ce qui est exposé, par course et RIEN de plus : le nombre de chevaux notés,
-    la confiance du modèle sur son n°1, et s'il place le favori des parieurs en
-    tête. Aucun numéro, aucun nom, aucune probabilité individuelle — exactement
+    la confiance du modèle sur son n°1, s'il place le favori des parieurs en
+    tête, et le NOMBRE d'écarts de prix (cote PMU au-dessus de l'exchange). Aucun numéro, aucun nom, aucune probabilité individuelle — exactement
     la même règle que `/courses/{id}/apercu`, dont ceci est la version en lot.
     Une requête unique agrégée : 40 appels séparés sur une page de programme
     coûteraient plus cher que la page elle-même.
@@ -1174,6 +1174,7 @@ async def get_programme_apercu(
         SELECT pr.course_id      AS course_id,
                pa.numero         AS numero,
                pa.cote_pmu       AS cote_pmu,
+               pa.cote_betfair_exchange AS cote_exchange,
                pr.rang_predit    AS rang_predit,
                pr.proba_top1     AS proba_top1,
                pr.confidence_score AS confiance
@@ -1199,7 +1200,7 @@ async def get_programme_apercu(
     par_course: dict[str, dict] = {}
     for r in rows:
         agg = par_course.setdefault(r["course_id"], {
-            "nb_notes": 0, "nb_ecartes": 0, "confiance": None,
+            "nb_notes": 0, "nb_ecartes": 0, "nb_ecarts_prix": 0, "confiance": None,
             "numero_top1": None, "cote_top1": None,
             "numero_favori": None, "cote_favori": None,
         })
@@ -1210,6 +1211,11 @@ async def get_programme_apercu(
             agg["numero_top1"] = r["numero"]
             agg["confiance"] = r["confiance"]
         cote = r["cote_pmu"]
+        # Écart de prix : même règle que `/courses/{id}/comparaison-cotes` (`is_value`),
+        # le PMU paie plus de 10 % au-dessus du marché d'échange. Seul le COMPTE sort.
+        exch = r["cote_exchange"]
+        if cote and exch and cote > exch * 1.10:
+            agg["nb_ecarts_prix"] += 1
         if cote and cote > 1 and (agg["cote_favori"] is None or cote < agg["cote_favori"]):
             agg["cote_favori"] = cote
             agg["numero_favori"] = r["numero"]
@@ -1225,6 +1231,7 @@ async def get_programme_apercu(
             "analysee": True,
             "nb_notes": agg["nb_notes"],
             "nb_ecartes": agg["nb_ecartes"],
+            "nb_ecarts_prix": agg["nb_ecarts_prix"],
             # Même définition que la fiche course (`services.confiance_course`).
             "confiance": _confiance_course(agg["confiance"]),
             "accord_marche": (bool(fav == top1) if (fav is not None and top1 is not None) else None),

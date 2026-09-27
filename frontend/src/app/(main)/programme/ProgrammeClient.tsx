@@ -21,7 +21,7 @@ import { format, addDays, differenceInMinutes, differenceInSeconds } from "date-
 import { fr } from "date-fns/locale";
 import {
   ChevronRight, Trophy, Loader2, Zap, Search, X, Radio, Filter, Timer, CalendarClock,
-  Sparkles, Users, Calculator,
+  Sparkles, Users, Calculator, ArrowLeftRight,
 } from "lucide-react";
 import Link from "next/link";
 import { TrendingUp as IconeMarcheDirect } from "lucide-react";
@@ -563,6 +563,9 @@ interface ApercuCourse {
   nb_ecartes: number;
   confiance: number | null;
   accord_marche: boolean | null;
+  /* Nombre de chevaux dont la cote PMU dépasse l'exchange de plus de 10 %.
+     Absent tant que l'API déployée ne le fournit pas. */
+  nb_ecarts_prix?: number;
 }
 
 /* Tuile discipline : la silhouette propre à chaque discipline (plat, attelé, monté,
@@ -625,6 +628,8 @@ function TimelineRow({ course, reunionNum, vbCount, apercu, delay, onOuvrir }: {
   const isDone = course.statut === "termine" || course.statut === "annule";
   const countdown = useCountdown(course.date_heure, course.statut);
   const pari = course.est_quinte ? "Quinté+" : course.est_quarte ? "Quarté+" : course.est_tierce ? "Tiercé" : null;
+  const nbEcarts = apercu?.nb_ecarts_prix ?? 0;
+  const signaux = apercu?.analysee || (vbCount !== undefined && vbCount > 0) || nbEcarts > 0;
   return (
     <Link
       href={`/courses/${course.course_id}`}
@@ -649,9 +654,9 @@ function TimelineRow({ course, reunionNum, vbCount, apercu, delay, onOuvrir }: {
         className="absolute inset-y-0 left-0 w-1 sm:w-[5px]"
         style={{ background: isLive ? "linear-gradient(180deg,#34D399,#059669)" : isDone ? "#D6D3CD" : `linear-gradient(180deg,${m.color}B3,${m.color})` }}
       />
-      {/* Heure, et le temps restant quand le départ approche */}
-      <div className="flex w-[46px] flex-shrink-0 flex-col items-center gap-1 sm:w-[52px]">
-        <span className={cn("text-[16px] font-bold leading-none tracking-tight tabular-nums sm:text-[17px]", isLive ? "text-emerald-700" : isDone ? "text-stone-400 line-through decoration-stone-300" : "text-stone-900")} style={SG}>
+      {/* Heure de départ, et le temps restant quand il approche */}
+      <div className="flex w-[48px] flex-shrink-0 flex-col items-center gap-1 sm:w-[56px]">
+        <span className={cn("text-[17px] font-bold leading-none tracking-tight tabular-nums sm:text-[19px]", isLive ? "text-emerald-700" : isDone ? "text-stone-400 line-through decoration-stone-300" : "text-stone-900")} style={SG}>
           {formatTime(course.date_heure)}
         </span>
         {countdown && (
@@ -664,21 +669,26 @@ function TimelineRow({ course, reunionNum, vbCount, apercu, delay, onOuvrir }: {
           suffisent à marquer le passé. */}
       <TuileDiscipline discipline={course.discipline} className={cn("hidden min-[360px]:flex", isDone && "opacity-70 saturate-[.8]")} />
       <div className="min-w-0 flex-1">
-        {/* Où : réunion, hippodrome, discipline — en petit, c'est le contexte */}
-        <div className="flex min-w-0 items-center gap-x-1.5 gap-y-0.5 text-[12px] text-stone-600 sm:flex-wrap">
-          <span className={cn("flex-shrink-0 rounded-md px-1.5 py-px text-[10.5px] font-bold tabular-nums", isLive ? "bg-emerald-100 text-emerald-800 ring-1 ring-inset ring-emerald-200" : "bg-stone-100 text-stone-700 ring-1 ring-inset ring-stone-200")} style={SG}>
-            R{reunionNum}C{course.numero}
+        {/* Ligne 1 : le numéro de course, bien lisible — c'est lui qu'on cherche et
+            qu'on joue au guichet — puis l'hippodrome. */}
+        <div className="flex min-w-0 items-center gap-2">
+          <span
+            className={cn(
+              "inline-flex flex-shrink-0 items-center rounded-lg px-2 py-[3px] text-[13px] font-bold leading-none tracking-tight tabular-nums shadow-[inset_0_1px_0_rgba(255,255,255,.14),0_4px_10px_-6px_rgba(28,25,23,.6)] sm:text-[14px]",
+              isLive ? "bg-emerald-700 text-white" : isDone ? "bg-stone-400 text-white" : "bg-stone-900 text-white",
+            )}
+            style={SG}
+          >
+            R{reunionNum}<span className={cn("ml-px", isLive || isDone ? "text-white/80" : "text-amber-300")}>C{course.numero}</span>
           </span>
-          <span className="min-w-0 truncate font-semibold text-stone-700">{hippodromeCourt(course.hippodrome_nom)}</span>
-          <span aria-hidden className="text-stone-300">·</span>
-          <span className="whitespace-nowrap font-semibold" style={{ color: m.color }}>{titleCase(course.discipline)}</span>
-          {/* Sur téléphone, statut et paris de valeur montent ici : dans une colonne à
-              droite ils volaient la largeur du titre, qui passait sur quatre lignes. */}
-          {((vbCount !== undefined && vbCount > 0) || isLive || isDone) && (
-            <span className="ml-auto flex flex-shrink-0 items-center gap-1 pl-1 sm:hidden">
-              {vbCount !== undefined && vbCount > 0 && (
-                <span className="inline-flex items-center gap-0.5 rounded-full bg-amber-50 px-1.5 py-px text-[10px] font-bold text-amber-700 tabular-nums"><Zap className="h-2.5 w-2.5" />{vbCount}</span>
-              )}
+          <span className={cn("min-w-0 truncate text-[13px] font-semibold", isDone ? "text-stone-500" : "text-stone-700")}>{hippodromeCourt(course.hippodrome_nom)}</span>
+          {pari && (
+            <span className="inline-flex flex-shrink-0 items-center rounded-full bg-gradient-to-r from-amber-100 to-amber-50 px-2 py-px text-[10px] font-bold uppercase tracking-wide text-amber-800 ring-1 ring-inset ring-amber-300">{pari}</span>
+          )}
+          {/* Sur téléphone, le statut monte ici : dans une colonne à droite il volait
+              la largeur du titre, qui passait sur quatre lignes. */}
+          {(isLive || isDone) && (
+            <span className="ml-auto flex flex-shrink-0 items-center pl-1 sm:hidden">
               {isLive ? (
                 // La ligne est déjà verte : un point qui bat suffit, le mot reste lu à l'écran.
                 <span className="relative flex h-2 w-2" title="En direct">
@@ -692,54 +702,70 @@ function TimelineRow({ course, reunionNum, vbCount, apercu, delay, onOuvrir }: {
             </span>
           )}
         </div>
-        {/* Quoi : le nom de la course, le vrai titre de la ligne */}
-        <p className={cn("m-0 mt-1 line-clamp-2 text-[14.5px] font-semibold leading-snug sm:text-[15px]", isDone ? "text-stone-500" : "text-stone-900")}>
+        {/* Ligne 2 : le nom de la course */}
+        <p className={cn("m-0 mt-1.5 line-clamp-2 text-[14.5px] font-semibold leading-snug sm:text-[15px]", isDone ? "text-stone-500" : "text-stone-900")}>
           {joliNom(course.nom) || `Course ${course.numero}`}
-          {pari && (
-            <span className="ml-2 inline-flex translate-y-[-1px] items-center rounded-full bg-gradient-to-r from-amber-100 to-amber-50 px-2 py-px align-middle text-[10px] font-bold uppercase tracking-wide text-amber-800 ring-1 ring-inset ring-amber-300">{pari}</span>
-          )}
         </p>
-        {/* Détails et ce que le modèle dit de CETTE course. Rien d'identifiant : une
-            confiance, et le fait qu'il suive ou non le favori des parieurs.
-            Pas de pastille « Analysée » : toutes les courses le sont, elle
-            n'apprenait rien et volait la place des deux chiffres qui varient. */}
-        <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1.5 text-[12px] text-stone-600 sm:gap-x-2.5">
+        {/* Ligne 3 : discipline, distance, partants */}
+        <div className="mt-1 flex flex-wrap items-center gap-x-2 text-[12.5px] text-stone-600">
+          <span className="font-semibold" style={{ color: m.color }}>{titleCase(course.discipline)}</span>
+          <span aria-hidden className="text-stone-300">·</span>
           <span className="tabular-nums">{course.distance.toLocaleString("fr-FR")} m</span>
           <span aria-hidden className="text-stone-300">·</span>
           <span className="tabular-nums">{course.nb_partants} partants</span>
-          {apercu?.analysee && apercu.confiance != null && (
-            <span
-              className="inline-flex items-center gap-1.5 rounded-full bg-stone-50 py-0.5 pl-2 pr-2.5 text-[11px] font-medium text-stone-700 ring-1 ring-inset ring-stone-200"
-              title="Accord des 3 modèles (entre eux et avec le marché) sur le n°1 de cette course. Ce n'est pas sa chance de gagner."
-            >
-              <span className="sm:hidden">Accord</span>
-              <span className="hidden sm:inline">Accord des modèles</span>
-              <span aria-hidden className="h-1 w-8 overflow-hidden rounded-full bg-stone-200">
-                <span className="block h-full rounded-full bg-gradient-to-r from-amber-400 to-emerald-500" style={{ width: `${Math.max(0, Math.min(100, apercu.confiance))}%` }} />
-              </span>
-              <b className="font-semibold tabular-nums text-stone-800">{apercu.confiance}</b>
-            </span>
-          )}
-          {apercu?.analysee && apercu.accord_marche === false && (
-            <span
-              title="Le n°1 du modèle n'est pas le favori des parieurs sur cette course"
-              className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2.5 py-0.5 text-[11px] font-medium text-amber-800 ring-1 ring-inset ring-amber-200"
-            >
-              <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-amber-500" />
-              <span className="sm:hidden">≠ marché</span>
-              <span className="hidden sm:inline">Ne suit pas le marché</span>
-            </span>
-          )}
         </div>
+        {/* Ligne 4 : ce que l'analyse dit de CETTE course. Rien d'identifiant : une
+            confiance, l'avis du marché, des comptes — jamais un cheval.
+            Pas de pastille « Analysée » : toutes les courses le sont, elle
+            n'apprenait rien et volait la place des chiffres qui varient. */}
+        {signaux && (
+          <div className="mt-2 flex flex-wrap items-center gap-1.5">
+            {vbCount !== undefined && vbCount > 0 && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-800 ring-1 ring-inset ring-emerald-200">
+                <Zap className="h-3 w-3" aria-hidden />
+                <b className="font-bold tabular-nums">{vbCount}</b>
+                <span className="hidden sm:inline">pari{vbCount > 1 ? "s" : ""} de valeur</span>
+                <span className="sm:hidden">valeur</span>
+              </span>
+            )}
+            {nbEcarts > 0 && (
+              <span
+                title="La cote PMU dépasse d'au moins 10 % celle du marché d'échange sur au moins un cheval de cette course"
+                className="inline-flex items-center gap-1 rounded-full bg-sky-50 px-2 py-0.5 text-[11px] font-semibold text-sky-800 ring-1 ring-inset ring-sky-200"
+              >
+                <ArrowLeftRight className="h-3 w-3" aria-hidden />
+                Écart de prix{nbEcarts > 1 ? <b className="font-bold tabular-nums"> ×{nbEcarts}</b> : null}
+              </span>
+            )}
+            {apercu?.analysee && apercu.confiance != null && (
+              <span
+                className="inline-flex items-center gap-1.5 rounded-full bg-stone-50 py-0.5 pl-2 pr-2.5 text-[11px] font-medium text-stone-700 ring-1 ring-inset ring-stone-200"
+                title="Accord des 3 modèles (entre eux et avec le marché) sur le n°1 de cette course. Ce n'est pas sa chance de gagner."
+              >
+                <span className="sm:hidden">Accord</span>
+                <span className="hidden sm:inline">Accord des modèles</span>
+                <span aria-hidden className="h-1 w-8 overflow-hidden rounded-full bg-stone-200">
+                  <span className="block h-full rounded-full bg-gradient-to-r from-amber-400 to-emerald-500" style={{ width: `${Math.max(0, Math.min(100, apercu.confiance))}%` }} />
+                </span>
+                <b className="font-semibold tabular-nums text-stone-800">{apercu.confiance}</b>
+              </span>
+            )}
+            {apercu?.analysee && apercu.accord_marche === false && (
+              <span
+                title="Le n°1 du modèle n'est pas le favori des parieurs sur cette course"
+                className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-800 ring-1 ring-inset ring-amber-200"
+              >
+                <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+                <span className="sm:hidden">≠ marché</span>
+                <span className="hidden sm:inline">Ne suit pas le marché</span>
+              </span>
+            )}
+          </div>
+        )}
       </div>
       <div className="hidden flex-shrink-0 items-center gap-2 sm:flex">
-        {vbCount !== undefined && vbCount > 0 && (
-          <span className="inline-flex items-center gap-0.5 rounded-full bg-amber-50 px-2 py-0.5 text-[10.5px] font-bold text-amber-700 tabular-nums">
-            <Zap className="h-2.5 w-2.5" />{vbCount}
-          </span>
-        )}
         <StatutBadge statut={course.statut} />
-        <span className="hidden h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-stone-100 text-stone-500 ring-1 ring-inset ring-stone-200 transition-colors duration-300 group-hover:bg-amber-50 group-hover:text-amber-600 sm:flex">
+        <span className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-stone-100 text-stone-500 ring-1 ring-inset ring-stone-200 transition-colors duration-300 group-hover:bg-amber-50 group-hover:text-amber-600">
           <ChevronRight className="h-4 w-4 transition-transform duration-300 group-hover:translate-x-0.5" />
         </span>
       </div>
