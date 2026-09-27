@@ -576,7 +576,7 @@ function TuileDiscipline({ discipline, className }: { discipline: string; classN
       className={cn("relative h-11 w-11 flex-shrink-0 items-center justify-center overflow-hidden rounded-2xl [perspective:420px] sm:h-14 sm:w-14", className)}
       style={{
         background: `radial-gradient(120% 95% at 30% 0%,#FFFFFF 0%,${m.bg} 55%,${m.ring} 135%)`,
-        boxShadow: `inset 0 1px 0 #fff, inset 0 -8px 14px -8px ${m.ring}, 0 10px 20px -12px ${m.color}73`,
+        boxShadow: `inset 0 0 0 1px ${m.ring}, inset 0 1px 0 #fff, inset 0 -8px 14px -8px ${m.ring}, 0 10px 20px -12px ${m.color}80`,
       }}
     >
       {/* reflet de verre sur le haut du galet, sous le cheval */}
@@ -633,22 +633,29 @@ function TimelineRow({ course, reunionNum, vbCount, apercu, delay, onOuvrir }: {
       id={`course-${course.course_id}`}
       onClick={onOuvrir}
       className={cn(
-        "bt-apparition group relative flex scroll-mt-28 items-center gap-3 rounded-[20px] px-3.5 py-3.5 no-underline transition-[transform,box-shadow,background-color] duration-300 ease-out active:scale-[.995] sm:gap-4 sm:px-5 sm:py-4",
+        "bt-apparition group relative flex scroll-mt-28 items-center gap-3 overflow-hidden rounded-[20px] py-3.5 pl-4 pr-3.5 no-underline transition-[transform,box-shadow,background-color] duration-300 ease-out active:scale-[.995] sm:gap-4 sm:py-4 sm:pl-6 sm:pr-5",
         isDone
-          ? "bg-white/55 ring-1 ring-inset ring-stone-200/70 hover:bg-white"
+          ? "bg-[#F7F5F0] ring-1 ring-inset ring-stone-200 hover:bg-white"
           : isLive
-          ? "bg-gradient-to-r from-emerald-50 via-white to-white ring-1 ring-inset ring-emerald-200/80 shadow-[0_1px_2px_rgba(28,25,23,.04),0_10px_28px_-16px_rgba(5,150,105,.35)]"
-          : "bg-white ring-1 ring-inset ring-stone-900/[.05] shadow-[0_1px_2px_rgba(28,25,23,.04),0_10px_28px_-18px_rgba(28,25,23,.18)] hover:-translate-y-0.5 hover:shadow-[0_2px_4px_rgba(28,25,23,.04),0_20px_40px_-20px_rgba(146,64,14,.28)]",
+          ? "bg-gradient-to-r from-emerald-50 via-white to-white ring-1 ring-inset ring-emerald-300 shadow-[0_1px_2px_rgba(28,25,23,.06),0_12px_28px_-16px_rgba(5,150,105,.45)]"
+          : "bg-white ring-1 ring-inset ring-stone-200 shadow-[0_1px_2px_rgba(28,25,23,.06),0_12px_28px_-18px_rgba(28,25,23,.28)] hover:-translate-y-0.5 hover:ring-amber-300 hover:shadow-[0_2px_4px_rgba(28,25,23,.06),0_22px_40px_-20px_rgba(146,64,14,.4)]",
       )}
       style={{ ["--bt-delai" as string]: `${delay}s` }}
     >
+      {/* Liseré à la couleur de la discipline : on repère d'un coup d'œil plat, attelé,
+          obstacle en descendant la liste. Vert pour une course en piste. */}
+      <span
+        aria-hidden
+        className="absolute inset-y-0 left-0 w-1 sm:w-[5px]"
+        style={{ background: isLive ? "linear-gradient(180deg,#34D399,#059669)" : isDone ? "#D6D3CD" : `linear-gradient(180deg,${m.color}B3,${m.color})` }}
+      />
       {/* Heure, et le temps restant quand le départ approche */}
       <div className="flex w-[46px] flex-shrink-0 flex-col items-center gap-1 sm:w-[52px]">
         <span className={cn("text-[16px] font-bold leading-none tracking-tight tabular-nums sm:text-[17px]", isLive ? "text-emerald-700" : isDone ? "text-stone-400 line-through decoration-stone-300" : "text-stone-900")} style={SG}>
           {formatTime(course.date_heure)}
         </span>
         {countdown && (
-          <span className="whitespace-nowrap rounded-full bg-amber-50 px-1.5 py-px text-[9.5px] font-semibold leading-tight text-amber-700 tabular-nums">{countdown.replace(/^dans /, "")}</span>
+          <span className="whitespace-nowrap rounded-full bg-amber-50 px-1.5 py-px text-[9.5px] font-bold leading-tight text-amber-800 tabular-nums ring-1 ring-inset ring-amber-200">{countdown.replace(/^dans /, "")}</span>
         )}
       </div>
       {/* La pastille garde la couleur de la discipline même course finie : en gris
@@ -658,11 +665,11 @@ function TimelineRow({ course, reunionNum, vbCount, apercu, delay, onOuvrir }: {
       <TuileDiscipline discipline={course.discipline} className={cn("hidden min-[360px]:flex", isDone && "opacity-70 saturate-[.8]")} />
       <div className="min-w-0 flex-1">
         {/* Où : réunion, hippodrome, discipline — en petit, c'est le contexte */}
-        <div className="flex min-w-0 items-center gap-x-1.5 gap-y-0.5 text-[12px] text-stone-500 sm:flex-wrap">
-          <span className={cn("flex-shrink-0 rounded-md px-1.5 py-px text-[10.5px] font-bold tabular-nums", isLive ? "bg-emerald-100/80 text-emerald-800" : "bg-stone-100 text-stone-600")} style={SG}>
+        <div className="flex min-w-0 items-center gap-x-1.5 gap-y-0.5 text-[12px] text-stone-600 sm:flex-wrap">
+          <span className={cn("flex-shrink-0 rounded-md px-1.5 py-px text-[10.5px] font-bold tabular-nums", isLive ? "bg-emerald-100 text-emerald-800 ring-1 ring-inset ring-emerald-200" : "bg-stone-100 text-stone-700 ring-1 ring-inset ring-stone-200")} style={SG}>
             R{reunionNum}C{course.numero}
           </span>
-          <span className="min-w-0 truncate font-medium text-stone-600">{hippodromeCourt(course.hippodrome_nom)}</span>
+          <span className="min-w-0 truncate font-semibold text-stone-700">{hippodromeCourt(course.hippodrome_nom)}</span>
           <span aria-hidden className="text-stone-300">·</span>
           <span className="whitespace-nowrap font-semibold" style={{ color: m.color }}>{titleCase(course.discipline)}</span>
           {/* Sur téléphone, statut et paris de valeur montent ici : dans une colonne à
@@ -689,20 +696,20 @@ function TimelineRow({ course, reunionNum, vbCount, apercu, delay, onOuvrir }: {
         <p className={cn("m-0 mt-1 line-clamp-2 text-[14.5px] font-semibold leading-snug sm:text-[15px]", isDone ? "text-stone-500" : "text-stone-900")}>
           {joliNom(course.nom) || `Course ${course.numero}`}
           {pari && (
-            <span className="ml-2 inline-flex translate-y-[-1px] items-center rounded-full bg-gradient-to-r from-amber-100 to-amber-50 px-2 py-px align-middle text-[10px] font-bold uppercase tracking-wide text-amber-800">{pari}</span>
+            <span className="ml-2 inline-flex translate-y-[-1px] items-center rounded-full bg-gradient-to-r from-amber-100 to-amber-50 px-2 py-px align-middle text-[10px] font-bold uppercase tracking-wide text-amber-800 ring-1 ring-inset ring-amber-300">{pari}</span>
           )}
         </p>
         {/* Détails et ce que le modèle dit de CETTE course. Rien d'identifiant : une
             confiance, et le fait qu'il suive ou non le favori des parieurs.
             Pas de pastille « Analysée » : toutes les courses le sont, elle
             n'apprenait rien et volait la place des deux chiffres qui varient. */}
-        <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1.5 text-[12px] text-stone-500 sm:gap-x-2.5">
+        <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1.5 text-[12px] text-stone-600 sm:gap-x-2.5">
           <span className="tabular-nums">{course.distance.toLocaleString("fr-FR")} m</span>
           <span aria-hidden className="text-stone-300">·</span>
           <span className="tabular-nums">{course.nb_partants} partants</span>
           {apercu?.analysee && apercu.confiance != null && (
             <span
-              className="inline-flex items-center gap-1.5 rounded-full bg-stone-100/80 py-0.5 pl-2 pr-2.5 text-[11px] font-medium text-stone-600"
+              className="inline-flex items-center gap-1.5 rounded-full bg-stone-50 py-0.5 pl-2 pr-2.5 text-[11px] font-medium text-stone-700 ring-1 ring-inset ring-stone-200"
               title="Accord des 3 modèles (entre eux et avec le marché) sur le n°1 de cette course. Ce n'est pas sa chance de gagner."
             >
               <span className="sm:hidden">Accord</span>
@@ -716,7 +723,7 @@ function TimelineRow({ course, reunionNum, vbCount, apercu, delay, onOuvrir }: {
           {apercu?.analysee && apercu.accord_marche === false && (
             <span
               title="Le n°1 du modèle n'est pas le favori des parieurs sur cette course"
-              className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2.5 py-0.5 text-[11px] font-medium text-amber-800"
+              className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2.5 py-0.5 text-[11px] font-medium text-amber-800 ring-1 ring-inset ring-amber-200"
             >
               <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-amber-500" />
               <span className="sm:hidden">≠ marché</span>
@@ -732,7 +739,7 @@ function TimelineRow({ course, reunionNum, vbCount, apercu, delay, onOuvrir }: {
           </span>
         )}
         <StatutBadge statut={course.statut} />
-        <span className="hidden h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-stone-50 text-stone-400 transition-colors duration-300 group-hover:bg-amber-50 group-hover:text-amber-600 sm:flex">
+        <span className="hidden h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-stone-100 text-stone-500 ring-1 ring-inset ring-stone-200 transition-colors duration-300 group-hover:bg-amber-50 group-hover:text-amber-600 sm:flex">
           <ChevronRight className="h-4 w-4 transition-transform duration-300 group-hover:translate-x-0.5" />
         </span>
       </div>
@@ -1129,11 +1136,11 @@ export default function ProgrammeClient({
           {/* Repère horaire : une pastille légère et un filet qui s'efface, plutôt
               qu'un gros jeton — la liste respire et l'œil va aux courses. */}
           <div className="mb-3 flex items-center gap-3">
-            <span className="inline-flex items-center rounded-full bg-amber-50 px-3 py-1 text-[13px] font-bold tabular-nums text-amber-800 ring-1 ring-inset ring-amber-200/70" style={SG}>
+            <span className="inline-flex items-center rounded-full bg-gradient-to-b from-stone-800 to-stone-950 px-3.5 py-1 text-[13px] font-bold tabular-nums text-amber-300 shadow-[inset_0_1px_0_rgba(255,255,255,.12),0_6px_14px_-8px_rgba(28,25,23,.7)]" style={SG}>
               {hour}
             </span>
-            <span className="text-[12px] font-medium text-stone-500">{items.length} course{items.length > 1 ? "s" : ""}</span>
-            <span aria-hidden className="h-px flex-1 bg-gradient-to-r from-stone-200 to-transparent" />
+            <span className="text-[12px] font-semibold text-stone-600">{items.length} course{items.length > 1 ? "s" : ""}</span>
+            <span aria-hidden className="h-px flex-1 bg-gradient-to-r from-stone-300 to-transparent" />
           </div>
           <div className="flex flex-col gap-2.5">
             {items.map(({ course, reunionNum }, i) => (
@@ -1288,10 +1295,10 @@ export default function ProgrammeClient({
 
         {/* ── Contrôles ── */}
         {programme && programme.nb_courses > 0 && (
-          <div className="space-y-4 rounded-[24px] bg-white/80 p-4 ring-1 ring-inset ring-stone-900/[.05] shadow-[0_1px_2px_rgba(28,25,23,.04),0_16px_40px_-24px_rgba(28,25,23,.22)] backdrop-blur sm:p-5">
-            <div className="flex items-center justify-between gap-2">
+          <div className="space-y-4 rounded-[24px] bg-white p-4 ring-1 ring-inset ring-stone-200 shadow-[0_1px_2px_rgba(28,25,23,.06),0_18px_40px_-24px_rgba(28,25,23,.3)] sm:p-5">
+            <div className="-mx-4 -mt-4 flex items-center justify-between gap-2 rounded-t-[24px] border-b border-stone-200 bg-gradient-to-b from-[#FFFBF2] to-white px-4 py-3 sm:-mx-5 sm:-mt-5 sm:px-5">
               <div className="flex items-center gap-2.5">
-                <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-amber-50 text-amber-700">
+                <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-gradient-to-b from-stone-800 to-stone-950 text-amber-300 shadow-[inset_0_1px_0_rgba(255,255,255,.12)]">
                   <Filter className="h-4 w-4" aria-hidden />
                 </span>
                 <h2 className="m-0 text-[15px] font-bold text-stone-900" style={SG}>Filtrer les courses</h2>
@@ -1308,20 +1315,20 @@ export default function ProgrammeClient({
                   aria-pressed={vbOnly}
                   className={cn(
                     "inline-flex items-center gap-1.5 rounded-full px-4 py-2.5 text-[13px] font-semibold transition-all duration-200",
-                    vbOnly ? "bg-gradient-to-b from-amber-400 to-amber-500 text-stone-900 shadow-[0_6px_16px_-8px_rgba(217,119,6,.7)]" : "bg-amber-50 text-amber-800 hover:bg-amber-100",
+                    vbOnly ? "bg-gradient-to-b from-amber-400 to-amber-500 text-stone-900 shadow-[0_6px_16px_-8px_rgba(217,119,6,.7)]" : "bg-amber-50 text-amber-800 ring-1 ring-inset ring-amber-200 hover:bg-amber-100",
                   )}
                 >
                   <Zap className="h-3.5 w-3.5" /> Valeur
                 </button>
               )}
               <div className="relative min-w-[190px] flex-1">
-                <Search className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-400" />
+                <Search className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-500" />
                 <input
                   value={hippoSearch}
                   onChange={(e) => setHippoSearch(e.target.value)}
                   placeholder="Rechercher un hippodrome…"
                   aria-label="Rechercher un hippodrome"
-                  className="w-full rounded-full border-0 bg-stone-100/70 py-2.5 pl-10 pr-9 text-[13.5px] text-stone-800 outline-none ring-1 ring-inset ring-transparent transition-all placeholder:text-stone-400 focus:bg-white focus:ring-amber-300 focus:shadow-[0_0_0_4px_rgba(251,191,36,.15)]"
+                  className="w-full rounded-full border-0 bg-stone-50 py-2.5 pl-10 pr-9 text-[13.5px] text-stone-800 outline-none ring-1 ring-inset ring-stone-200 transition-all placeholder:text-stone-500 focus:bg-white focus:ring-amber-300 focus:shadow-[0_0_0_4px_rgba(251,191,36,.15)]"
                 />
                 {hippoSearch && (
                   <button onClick={() => setHippoSearch("")} aria-label="Effacer la recherche" className="absolute right-3 top-1/2 -translate-y-1/2 rounded-full p-0.5 hover:bg-stone-200/60">
@@ -1337,7 +1344,7 @@ export default function ProgrammeClient({
                 défilent, avec un fondu à droite qui signale la suite. */}
             {reunionOptions.length > 1 && (
               <div className="space-y-2">
-                <p className="m-0 text-[10.5px] font-bold uppercase tracking-[.14em] text-stone-400">Réunions</p>
+                <p className="m-0 text-[10.5px] font-bold uppercase tracking-[.14em] text-stone-500">Réunions</p>
                 <div className={cn("-mx-4 flex gap-1.5 overflow-x-auto px-4 pb-1 pr-8 [mask-image:linear-gradient(to_right,#000_calc(100%-2rem),transparent)] sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0 sm:pr-0 sm:[mask-image:none]", HIDE_SCROLLBAR)}>
                   {[{ numero: "all" as const, hippodrome: "Toutes" }, ...reunionOptions].map((r) => {
                     const active = reunionFilter === r.numero;
@@ -1351,11 +1358,11 @@ export default function ProgrammeClient({
                           "inline-flex flex-shrink-0 items-center gap-1.5 rounded-full px-3.5 py-2 text-[13px] transition-all duration-200",
                           active
                             ? "bg-stone-900 text-white shadow-[0_6px_14px_-8px_rgba(28,25,23,.7)]"
-                            : "bg-stone-100/70 text-stone-600 hover:bg-stone-200/60 hover:text-stone-900",
+                            : "bg-white text-stone-700 ring-1 ring-inset ring-stone-200 hover:ring-stone-300 hover:text-stone-900",
                         )}
                       >
                         {!tout && (
-                          <span className={cn("text-[11.5px] font-bold tabular-nums", active ? "text-amber-300" : "text-stone-400")} style={SG}>R{r.numero}</span>
+                          <span className={cn("text-[11.5px] font-bold tabular-nums", active ? "text-amber-300" : "text-amber-700")} style={SG}>R{r.numero}</span>
                         )}
                         {/* Pas d'`opacity-75` ici : un gris passé à 75 % tombait sous 4,5:1. */}
                         <span className={cn("whitespace-nowrap", tout ? "font-semibold" : "font-medium")}>{tout ? r.hippodrome : hippodromeCourt(r.hippodrome)}</span>
@@ -1368,7 +1375,7 @@ export default function ProgrammeClient({
 
             {/* Filtre par discipline : la silhouette de chaque discipline, sur un galet */}
             <div className="space-y-2">
-              <p className="m-0 text-[10.5px] font-bold uppercase tracking-[.14em] text-stone-400">Disciplines</p>
+              <p className="m-0 text-[10.5px] font-bold uppercase tracking-[.14em] text-stone-500">Disciplines</p>
               <div className={cn("-mx-4 flex gap-2 overflow-x-auto px-4 pb-1 sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0", HIDE_SCROLLBAR)}>
                 {["Tous", ...Object.keys(discCounts).sort((a, b) => discCounts[b] - discCounts[a])].map((d) => {
                   const count = d === "Tous" ? allCourses.length : (discCounts[d] ?? 0);
@@ -1385,7 +1392,7 @@ export default function ProgrammeClient({
                         d === "Tous" ? "pl-3.5" : "pl-1.5",
                         active
                           ? "bg-stone-900 text-white shadow-[0_6px_14px_-8px_rgba(28,25,23,.7)]"
-                          : "bg-white text-stone-700 ring-1 ring-inset ring-stone-200/80 hover:-translate-y-px hover:shadow-[0_8px_16px_-12px_rgba(28,25,23,.35)]",
+                          : "bg-white text-stone-700 ring-1 ring-inset ring-stone-200 hover:-translate-y-px hover:ring-stone-300 hover:shadow-[0_8px_16px_-12px_rgba(28,25,23,.35)]",
                       )}
                     >
                       {d !== "Tous" && (
@@ -1401,7 +1408,7 @@ export default function ProgrammeClient({
                         </span>
                       )}
                       {titleCase(d)}
-                      <span className={cn("rounded-full px-1.5 text-[11px] font-bold tabular-nums", active ? "bg-white/15 text-white" : "bg-stone-100 text-stone-500")}>{count}</span>
+                      <span className={cn("rounded-full px-1.5 text-[11px] font-bold tabular-nums", active ? "bg-white/15 text-white" : "bg-stone-100 text-stone-700")}>{count}</span>
                     </button>
                   );
                 })}
@@ -1480,10 +1487,10 @@ export default function ProgrammeClient({
                   onClick={() => setTerminesOuverts((v) => !v)}
                   aria-expanded={terminesOuverts}
                   aria-controls="courses-terminees"
-                  className="flex w-full items-center justify-between gap-3 rounded-[18px] bg-white/70 px-4 py-3 text-left text-[13px] font-semibold text-stone-700 ring-1 ring-inset ring-stone-200/70 transition-colors hover:bg-white active:scale-[.995]"
+                  className="flex w-full items-center justify-between gap-3 rounded-[18px] bg-white px-4 py-3 text-left text-[13px] font-semibold text-stone-800 ring-1 ring-inset ring-stone-200 shadow-[0_1px_2px_rgba(28,25,23,.05)] transition-colors hover:ring-amber-300 active:scale-[.995]"
                 >
                   <span className="inline-flex items-center gap-2.5">
-                    <span aria-hidden className="flex h-6 w-6 items-center justify-center rounded-full bg-stone-100 text-[10px] text-stone-500">✓</span>
+                    <span aria-hidden className="flex h-6 w-6 items-center justify-center rounded-full bg-emerald-50 text-[10px] font-bold text-emerald-700 ring-1 ring-inset ring-emerald-200">✓</span>
                     {flatTermines.length} course{flatTermines.length > 1 ? "s" : ""} déjà courue{flatTermines.length > 1 ? "s" : ""}
                   </span>
                   <span className="inline-flex items-center gap-1 text-[12px] font-medium text-amber-700">
