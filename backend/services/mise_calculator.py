@@ -368,13 +368,22 @@ RANG_MAX_BONUS_PLACE = 2
 RANG_MAX_FRACTION_CHAMP = 0.60
 
 
-def champ_reel(nb_declares, predictions) -> Optional[int]:
+def champ_reel(nb_declares, predictions, nb_courants=None) -> Optional[int]:
     """Partants RÉELS = déclarés moins les non-partants connus.
 
     `courses.nb_partants` compte les déclarés, non-partants compris (495 courses
     sur 1 693 en 30 jours au 27/09/2026). Le plafond de rang et la couverture se
     règlent sur le champ qui court. Sans nombre déclaré : les partants prédits.
+
+    `nb_courants` (compté en base, `bet_catalog.nb_partants_courants`) prime : un
+    non-partant retiré AVANT la prédiction n'a pas de ligne dans `predictions`, et
+    « déclarés − non-partants vus » le comptait encore (~6 % des courses).
     """
+    try:
+        if nb_courants is not None and int(nb_courants) > 0:
+            return int(nb_courants)
+    except (TypeError, ValueError):
+        pass
     nb_np = sum(1 for p in (predictions or []) if p.get("non_partant"))
     if nb_declares:
         try:
@@ -1432,7 +1441,8 @@ def generer_plan(
             except (TypeError, ValueError):
                 pass
 
-    nb_champ = champ_reel((course_info or {}).get("nb_partants"), predictions)
+    nb_champ = champ_reel((course_info or {}).get("nb_partants"), predictions,
+                          (course_info or {}).get("nb_partants_courants"))
 
     # RANG PRÉDIT par cheval = ordre de proba_top1 décroissante (même classement que
     # celui affiché à l'utilisateur). Chaque candidat porte le rang de son PIRE cheval :

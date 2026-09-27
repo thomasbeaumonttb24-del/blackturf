@@ -1982,8 +1982,11 @@ async def get_mise_plan(
         })
 
     # Drapeaux de disponibilité RÉELS (couplé/trio à l'ordre si champ réduit, etc.).
-    from services.bet_catalog import course_info_bets
+    from services.bet_catalog import course_info_bets, nb_partants_courants
     course_info = course_info_bets(course)
+    # Champ qui court compté en base : un NP retiré avant la prédiction n'a pas de
+    # ligne dans `preds` (plafond de rang et couverture, cf. mise_calculator.champ_reel).
+    course_info["nb_partants_courants"] = await nb_partants_courants(db, course_id)
 
     # Auto-amélioration : pondération ROI réel par type + thermostat adaptatif
     # (calibration du modèle + ROI récent → durcit/assouplit la sélection).
@@ -2229,8 +2232,11 @@ async def enregistrer_paris(
         "cote_pmu": (live_cotes.get(part.numero) if not fige_e else None) or _cote_plan(pred, part),
         "non_partant": part.non_partant,
     } for pred, part, cheval in rows]
-    from services.bet_catalog import course_info_bets
+    from services.bet_catalog import course_info_bets, nb_partants_courants
     course_info = course_info_bets(course)
+    # Champ qui court compté en base : un NP retiré avant la prédiction n'a pas de
+    # ligne dans `preds` (plafond de rang et couverture, cf. mise_calculator.champ_reel).
+    course_info["nb_partants_courants"] = await nb_partants_courants(db, course_id)
 
     # Mêmes signaux adaptatifs que l'aperçu (le plan enregistré = celui montré) :
     # poids par type APPRIS POUR CE PROFIL + multiplicateurs de signaux par profil.
@@ -2446,8 +2452,11 @@ async def get_bilan_pronostic(
             "rang_predit": pred.rang_predit,
         })
 
-    from services.bet_catalog import course_info_bets
+    from services.bet_catalog import course_info_bets, nb_partants_courants
     course_info = course_info_bets(course)
+    # Champ qui court compté en base : un NP retiré avant la prédiction n'a pas de
+    # ligne dans `preds` (plafond de rang et couverture, cf. mise_calculator.champ_reel).
+    course_info["nb_partants_courants"] = await nb_partants_courants(db, course_id)
 
     montant = max(2.0, min(float(montant or 20), 10000.0))
     nb_partants = course.nb_partants or len(preds)

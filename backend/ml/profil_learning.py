@@ -213,7 +213,10 @@ async def record_profil_runs(session: AsyncSession, course_id: str,
     # cf. la note « CALIBRAGE PAR ZONE » dans ml/signal_performance.
     course = (await session.execute(text("""
         SELECT c.statut, c.nb_partants, c.est_quinte, c.est_quarte, c.est_tierce, c.est_2sur4,
-               c.paris_disponibles, c.discipline, c.date_heure, h.pays
+               c.paris_disponibles, c.discipline, c.date_heure, h.pays,
+               (SELECT COUNT(*) FROM participations pa
+                 WHERE pa.course_id = c.course_id
+                   AND COALESCE(pa.non_partant, false) = false) AS nb_courants
         FROM courses c
         LEFT JOIN hippodromes h ON h.nom = c.hippodrome_nom
         WHERE c.course_id = :cid
@@ -250,6 +253,9 @@ async def record_profil_runs(session: AsyncSession, course_id: str,
         est_quinte=bool(course[2]), est_2sur4=bool(course[5]),
     )
     course_info["nb_partants"] = course[1]
+    # Partants qui courent, comptés en base (même source que /mise-plan) : un NP
+    # retiré avant la prédiction n'apparaît pas dans `preds`.
+    course_info["nb_partants_courants"] = course[10] or None
 
     # Contexte d'apprentissage réel (mêmes sources que /mise-plan)
     try:
