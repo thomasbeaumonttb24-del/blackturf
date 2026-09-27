@@ -419,7 +419,7 @@ function NextRaceBanner({ item }: { item: { course: CourseSummary; reunionNum: n
           </p>
           <h2 className="m-0 mt-0.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[17px] font-bold leading-tight text-white sm:text-[19px]" style={SG}>
             <span className="rounded-md bg-gradient-to-b from-amber-300 to-amber-500 px-1.5 py-0.5 text-[11.5px] font-bold tabular-nums text-stone-900 shadow-[inset_0_1px_0_rgba(255,255,255,.55),0_2px_0_#92400E]">R{reunionNum}C{course.numero}</span>
-            <span className="min-w-0">{course.hippodrome_nom}</span>
+            <span className="min-w-0 break-words">{joliNom(course.hippodrome_nom)}</span>
           </h2>
         </div>
         <Link
@@ -475,7 +475,7 @@ function NextRaceBanner({ item }: { item: { course: CourseSummary; reunionNum: n
 
           {/* La course */}
           <div className="min-w-0">
-            {course.nom && <p className="m-0 text-[15px] font-semibold leading-snug text-stone-800" style={SG}>{course.nom}</p>}
+            {course.nom && <p className="m-0 text-[15px] font-semibold leading-snug text-stone-800" style={SG}>{joliNom(course.nom)}</p>}
             <div className="mt-2 flex flex-wrap gap-1.5">
               <span className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-[12px] font-semibold" style={{ color: m.color, background: m.bg, boxShadow: `inset 0 0 0 1px ${m.ring}` }}>
                 <DiscIcon discipline={course.discipline} w={26} h={18} />{titleCase(course.discipline)}
@@ -671,7 +671,7 @@ function TimelineRow({ course, reunionNum, vbCount, apercu, delay, onOuvrir }: {
       <div className="min-w-0 flex-1">
         {/* Ligne 1 : le numéro de course, bien lisible — c'est lui qu'on cherche et
             qu'on joue au guichet — puis l'hippodrome. */}
-        <div className="flex min-w-0 items-center gap-2">
+        <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
           <span
             className={cn(
               "inline-flex flex-shrink-0 items-center rounded-lg px-2 py-[3px] text-[13px] font-bold leading-none tracking-tight tabular-nums shadow-[inset_0_1px_0_rgba(255,255,255,.14),0_4px_10px_-6px_rgba(28,25,23,.6)] sm:text-[14px]",
@@ -681,7 +681,7 @@ function TimelineRow({ course, reunionNum, vbCount, apercu, delay, onOuvrir }: {
           >
             R{reunionNum}<span className={cn("ml-px", isLive || isDone ? "text-white/80" : "text-amber-300")}>C{course.numero}</span>
           </span>
-          <span className={cn("min-w-0 truncate text-[13px] font-semibold", isDone ? "text-stone-500" : "text-stone-700")}>{hippodromeCourt(course.hippodrome_nom)}</span>
+          <span className={cn("min-w-0 break-words text-[13px] font-semibold", isDone ? "text-stone-500" : "text-stone-700")}>{hippodromeCourt(course.hippodrome_nom)}</span>
           {pari && (
             <span className="inline-flex flex-shrink-0 items-center rounded-full bg-gradient-to-r from-amber-100 to-amber-50 px-2 py-px text-[10px] font-bold uppercase tracking-wide text-amber-800 ring-1 ring-inset ring-amber-300">{pari}</span>
           )}
@@ -703,7 +703,7 @@ function TimelineRow({ course, reunionNum, vbCount, apercu, delay, onOuvrir }: {
           )}
         </div>
         {/* Ligne 2 : le nom de la course */}
-        <p className={cn("m-0 mt-1.5 line-clamp-2 text-[14.5px] font-semibold leading-snug sm:text-[15px]", isDone ? "text-stone-500" : "text-stone-900")}>
+        <p className={cn("m-0 mt-1.5 break-words text-[14.5px] font-semibold leading-snug sm:text-[15px]", isDone ? "text-stone-500" : "text-stone-900")}>
           {joliNom(course.nom) || `Course ${course.numero}`}
         </p>
         {/* Ligne 3 : discipline, distance, partants */}
@@ -1354,7 +1354,7 @@ export default function ProgrammeClient({
                   onChange={(e) => setHippoSearch(e.target.value)}
                   placeholder="Rechercher un hippodrome…"
                   aria-label="Rechercher un hippodrome"
-                  className="w-full rounded-full border-0 bg-stone-50 py-2.5 pl-10 pr-9 text-[13.5px] text-stone-800 outline-none ring-1 ring-inset ring-stone-200 transition-all placeholder:text-stone-500 focus:bg-white focus:ring-amber-300 focus:shadow-[0_0_0_4px_rgba(251,191,36,.15)]"
+                  className={cn("w-full rounded-full border-0 bg-stone-50 py-2.5 pl-10 text-[13.5px] text-stone-800 outline-none ring-1 ring-inset ring-stone-200 transition-all placeholder:text-stone-500 focus:bg-white focus:ring-amber-300 focus:shadow-[0_0_0_4px_rgba(251,191,36,.15)]", hippoSearch ? "pr-9" : "pr-4")}
                 />
                 {hippoSearch && (
                   <button onClick={() => setHippoSearch("")} aria-label="Effacer la recherche" className="absolute right-3 top-1/2 -translate-y-1/2 rounded-full p-0.5 hover:bg-stone-200/60">
