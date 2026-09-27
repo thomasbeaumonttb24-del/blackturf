@@ -5,7 +5,7 @@ import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
 import { useState, useEffect, useRef, useCallback } from "react";
 import useSWR from "swr";
-import { LucideIcon, Menu, X, Bell, User, LogOut, ChevronDown, Zap, LayoutDashboard, Gauge, Search, BarChart2, MessagesSquare, Wallet, Bot } from "lucide-react";
+import { LucideIcon, Menu, X, Bell, User, LogOut, ChevronDown, Zap, LayoutDashboard, Gauge, Search, BarChart2, MessagesSquare, Wallet, Bot, Gift } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/hooks/useAuth";
@@ -357,6 +357,17 @@ export function Navbar() {
                           <User className="h-4 w-4 text-gray-600" /> {R.profil.label}
                         </Link>
                         <Link
+                          href="/profil#parrainage"
+                          rel="nofollow"
+                          className="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                          onClick={() => setUserMenuOpen(false)}
+                        >
+                          <Gift className="h-4 w-4 text-emerald-600" /> Parrainage
+                          <span className="ml-auto rounded-full bg-emerald-50 px-1.5 py-0.5 text-[9px] font-bold text-emerald-700 ring-1 ring-emerald-200">
+                            5 €
+                          </span>
+                        </Link>
+                        <Link
                           href="/statistiques"
                           className="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
                           onClick={() => setUserMenuOpen(false)}
@@ -513,6 +524,10 @@ export function Navbar() {
               <p className="px-4 pb-2 text-[10px] font-bold uppercase tracking-[.14em] text-gray-500">Mes outils</p>
               <Link href="/bankroll" rel="nofollow" className="block rounded-lg px-4 py-2 text-sm font-medium text-gray-700" onClick={() => setMenuOpen(false)}>{R.suiviCapital.label}</Link>
               <Link href="/assistant" rel="nofollow" className="block rounded-lg px-4 py-2 text-sm font-medium text-gray-700" onClick={() => setMenuOpen(false)}>{R.assistant.label}</Link>
+              <Link href="/profil#parrainage" rel="nofollow" className="flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium text-gray-700" onClick={() => setMenuOpen(false)}>
+                <Gift className="h-4 w-4 text-emerald-600" aria-hidden /> Parrainage
+                <span className="rounded-full bg-emerald-50 px-1.5 py-0.5 text-[9px] font-bold text-emerald-700 ring-1 ring-emerald-200">5 € offerts</span>
+              </Link>
             </div>
           )}
           {peutDemarrerEssai(user) && (
