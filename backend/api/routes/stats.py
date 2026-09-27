@@ -1912,8 +1912,8 @@ async def stats_palmares_public(
         gagnants : sans ce dénominateur, n'afficher que les paris gagnants serait un
         biais du survivant. Le front doit présenter les deux ensemble.
 
-    Ce qui N'EST PAS exposé : le ROI et les agrégats de gains par profil restent
-    réservés à l'admin (exigence produit déjà appliquée à `/stats/public`).
+    Ce qui N'EST PAS exposé : le ROI, la mise, le bénéfice net et les agrégats par
+    profil restent réservés à l'admin — seul le total brut `total_gain` est public.
     """
     CACHE_KEY = "stats:palmares-public"
     cached = await _cache_get(redis, CACHE_KEY)
@@ -1931,6 +1931,11 @@ async def stats_palmares_public(
         "nb_paris_gagnes": data["n"],
         "nb_courses_gagnantes": data["n_courses"],
         "nb_courses_reglees": data["n_courses_reglees"],
+        # Gains bruts encaissés (somme des rapports officiels des paris gagnés) :
+        # c'est le chiffre phare du hero de la page track-record, qui doit être le
+        # même pour un visiteur et pour un membre. La mise, le bénéfice net et le
+        # ROI restent, eux, réservés à l'admin.
+        "total_gain": data["total_gain"],
         # Ticket Quinté+ : ligne SÉPARÉE, jamais mêlée aux paris ni aux totaux
         # ci-dessus. Version publique = comptages seulement (pas de ROI ni de
         # montants agrégés, cf. _quinte_public) ; l'admin a le bloc complet.
