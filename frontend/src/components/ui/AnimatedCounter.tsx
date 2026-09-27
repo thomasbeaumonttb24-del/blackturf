@@ -30,7 +30,7 @@ export function AnimatedCounter({ end, duration = 2000, decimals = 0, prefix = "
       const startTime = performance.now();
       const tick = (now: number) => {
         if (cancelled) return;
-        const p = Math.min((now - startTime) / duration, 1);
+        const p = Math.min(Math.max((now - startTime) / duration, 0), 1);
         const eased = 1 - Math.pow(1 - p, 3);
         setDisplay(eased * end);
         if (p < 1) raf = requestAnimationFrame(tick);
