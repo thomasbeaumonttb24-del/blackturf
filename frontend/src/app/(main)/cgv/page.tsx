@@ -107,8 +107,54 @@ export default function CGVPage() {
         </p>
       </section>
 
+      <section className="mb-8" id="parrainage">
+        <h2 className="text-lg font-bold mb-3">8. Programme de parrainage</h2>
+        <p className="text-muted-foreground">
+          Tout titulaire d&apos;un compte BlackTurf dont l&apos;adresse e-mail est confirmée (le « parrain ») peut
+          inviter de nouveaux utilisateurs (les « filleuls ») au moyen de son lien ou de son code de
+          parrainage personnel, disponible dans son espace « Profil ».
+        </p>
+        <ul className="text-muted-foreground list-disc pl-5 space-y-1.5 mt-3">
+          <li>
+            <strong>Avantage du filleul</strong> : une remise de 5 € TTC sur sa première facture payante
+            (formule Standard ou Expert, mensuelle ou annuelle), appliquée automatiquement lors du paiement.
+            Cette remise remplace la période d&apos;essai gratuit, dont le filleul ne bénéficie pas.
+          </li>
+          <li>
+            <strong>Avantage du parrain</strong> : un crédit de 5 € TTC par filleul, acquis uniquement lorsque le
+            premier paiement du filleul a été effectivement encaissé. Ce crédit est imputé automatiquement sur
+            les prochaines factures d&apos;abonnement du parrain ; il n&apos;est ni remboursable, ni cessible, ni
+            convertible en espèces.
+          </li>
+          <li>
+            <strong>Plafond</strong> : les crédits imputés sur une même période de facturation mensuelle sont
+            limités au nombre nécessaire pour couvrir la mensualité (4 pour la formule Expert, 3 pour la formule
+            Standard). Les crédits acquis au-delà sont reportés sur les périodes suivantes. Un reliquat inférieur
+            au montant d&apos;une facture est déduit de la facture suivante. Le parrain qui ne règle aucune
+            facture (abonnement offert ou non encore souscrit) conserve ses crédits jusqu&apos;à sa première
+            facture payante.
+          </li>
+          <li>
+            <strong>Conditions</strong> : le filleul doit être un nouveau client, créer son compte au moyen du
+            lien ou du code du parrain, et régler avec un moyen de paiement qui lui est propre. Un compte ne peut
+            avoir qu&apos;un seul parrain, fixé à sa création, et nul ne peut se parrainer lui-même.
+          </li>
+          <li>
+            <strong>Annulation</strong> : si le paiement du filleul ayant ouvert droit au crédit est remboursé ou
+            contesté, le crédit correspondant est annulé. En cas d&apos;utilisation abusive ou frauduleuse
+            (notamment comptes multiples ou moyen de paiement déjà rattaché à un autre compte), BlackTurf peut
+            refuser ou annuler les avantages concernés, la remise indûment accordée pouvant être réintégrée à la
+            facture suivante du filleul.
+          </li>
+        </ul>
+        <p className="text-muted-foreground mt-3">
+          BlackTurf peut modifier ou mettre fin au programme à tout moment ; les crédits déjà acquis restent
+          imputables dans les conditions ci-dessus.
+        </p>
+      </section>
+
       <section className="mb-8">
-        <h2 className="text-lg font-bold mb-3">8. Médiation de la consommation</h2>
+        <h2 className="text-lg font-bold mb-3">9. Médiation de la consommation</h2>
         <p className="text-muted-foreground">
           Conformément à l&apos;article L612-1 du Code de la consommation, le consommateur peut recourir
           gratuitement à un médiateur de la consommation en vue de la résolution amiable d&apos;un litige.
@@ -121,7 +167,7 @@ export default function CGVPage() {
       </section>
 
       <section className="mb-8">
-        <h2 className="text-lg font-bold mb-3">9. Responsabilité &amp; jeu responsable</h2>
+        <h2 className="text-lg font-bold mb-3">10. Responsabilité &amp; jeu responsable</h2>
         <p className="text-muted-foreground">
           BlackTurf est un outil d&apos;aide à la décision : les analyses et plans de mise <strong>ne
           garantissent aucun gain</strong> et ne constituent ni un conseil en investissement, ni une
@@ -133,7 +179,7 @@ export default function CGVPage() {
       </section>
 
       <section className="mb-8">
-        <h2 className="text-lg font-bold mb-3">10. Droit applicable</h2>
+        <h2 className="text-lg font-bold mb-3">11. Droit applicable</h2>
         <p className="text-muted-foreground">
           Les présentes CGV sont soumises au droit français. En cas de litige, et après tentative de résolution
           amiable, les tribunaux français sont compétents.
@@ -141,7 +187,7 @@ export default function CGVPage() {
       </section>
 
       <p className="text-xs text-muted-foreground mt-12">
-        Dernière mise à jour : juin 2026
+        Dernière mise à jour : septembre 2026
       </p>
     </div>
   );
