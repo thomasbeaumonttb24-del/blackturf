@@ -103,10 +103,12 @@ export function JaugeHasard({ label, aide, nous, hasard, facteur, teinte = "or" 
 
 // ─── Échelle de Brier ─────────────────────────────────────────
 // Un score de Brier nu n'évoque rien : on le place sur son échelle, entre la
-// prédiction parfaite (0) et le pile ou face (0,25).
+// prédiction parfaite (0) et le pile ou face (0,33).
+const BRIER_PILE_OU_FACE = 0.33;
+
 export function JaugeBrier({ value }: { value: number }) {
   const { ref, hidden } = useReveal<HTMLDivElement>(0.4);
-  const position = Math.max(0, Math.min(1, value / 0.25)) * 100;
+  const position = Math.max(0, Math.min(1, value / BRIER_PILE_OU_FACE)) * 100;
   return (
     <div ref={ref} className="relative overflow-hidden rounded-3xl bg-slate-950 p-6 text-white ring-1 ring-white/10 sm:p-7">
       <span className="tr-glow pointer-events-none absolute -right-16 -top-16 h-48 w-48 rounded-full bg-emerald-400/20 blur-3xl" aria-hidden="true" />
@@ -135,7 +137,7 @@ export function JaugeBrier({ value }: { value: number }) {
       </div>
       <div className="relative mt-3 flex justify-between text-[10px] font-medium uppercase tracking-wider text-white/55">
         <span>0 · parfait</span>
-        <span>0,25 · pile ou face</span>
+        <span>0,33 · pile ou face</span>
       </div>
     </div>
   );

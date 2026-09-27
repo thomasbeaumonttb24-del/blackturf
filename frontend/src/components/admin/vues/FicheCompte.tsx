@@ -55,6 +55,8 @@ export default function FicheCompte({ userId, onClose }: { userId: string; onClo
   const { data, isLoading } = useSWR<UserDetail>(
     ["/admin-user-detail", userId],
     () => adminApi.userDetail(userId).then((r) => r.data),
+    // Fiche ouverte = paris et abonnement suivis en direct, comme le reste de la console.
+    { refreshInterval: 30_000, revalidateOnFocus: true, keepPreviousData: true },
   );
 
   // Échap ferme, et le défilement de la page de fond est gelé : sans ça, le
@@ -134,6 +136,54 @@ export default function FicheCompte({ userId, onClose }: { userId: string; onClo
                   </Champ>
                 </dl>
               </section>
+
+              {/* Parrainage : par qui ce compte est arrivé, et qui il a amené. */}
+              {data.parrainage && (data.parrainage.parraine_par || data.parrainage.filleuls.length > 0 || data.parrainage.code) && (
+                <section>
+                  <h3 className="mb-2 flex items-center gap-2 text-[13px] font-semibold">
+                    Parrainage
+                    {data.parrainage.code && (
+                      <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-[11px] font-medium tracking-wider text-muted-foreground">
+                        {data.parrainage.code}
+                      </span>
+                    )}
+                  </h3>
+                  <div className="space-y-2 rounded-xl border border-border p-3 text-xs">
+                    <div>
+                      <span className="text-muted-foreground">Parrainé par : </span>
+                      {data.parrainage.parraine_par ? (
+                        <>
+                          <b className="font-semibold">{data.parrainage.parraine_par.email}</b>
+                          <span className="text-muted-foreground"> · {data.parrainage.parraine_par.etape_libelle}</span>
+                        </>
+                      ) : <span className="text-muted-foreground">personne (inscription directe)</span>}
+                    </div>
+                    <div>
+                      <span className="text-muted-foreground">A parrainé : </span>
+                      <b className="font-semibold">{data.parrainage.filleuls.length} personne{data.parrainage.filleuls.length > 1 ? "s" : ""}</b>
+                      <span className="text-muted-foreground">
+                        {" "}· {data.parrainage.valides} abonné{data.parrainage.valides > 1 ? "s" : ""} · {formatEuro(data.parrainage.gagne_cents / 100)} de crédits gagnés
+                      </span>
+                    </div>
+                    {data.parrainage.filleuls.length > 0 && (
+                      <ul className="divide-y divide-border/60 rounded-lg border border-border/60">
+                        {data.parrainage.filleuls.map((f, i) => (
+                          <li key={`${f.user_id ?? "x"}-${i}`} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-0.5 px-3 py-2">
+                            <span className="min-w-0 truncate font-medium">{f.email}</span>
+                            <span className={cn(
+                              "text-[11px]",
+                              f.statut === "valide" ? "font-semibold text-emerald-700"
+                                : f.statut === "en_attente" ? "text-amber-700" : "text-muted-foreground",
+                            )}>
+                              {f.etape_libelle}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                </section>
+              )}
 
               {/* Portefeuille */}
               <section>

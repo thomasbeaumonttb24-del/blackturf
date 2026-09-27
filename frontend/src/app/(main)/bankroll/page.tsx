@@ -337,7 +337,7 @@ export default function BankrollPage() {
                           </Link>
                         )}
                       </td>
-                      <td className="px-4 py-3 text-xs text-gray-600 hidden md:table-cell max-w-[100px] truncate">{e.chevaux || "—"}</td>
+                      <td className="px-4 py-3 text-xs text-gray-600 hidden md:table-cell break-words">{e.chevaux || "—"}</td>
                       <td className="px-4 py-3 text-right font-mono text-sm font-semibold text-gray-800">{formatEuro(e.mise)}</td>
                       <td className="px-4 py-3 text-right text-gray-600 hidden sm:table-cell font-mono text-xs">{e.cote?.toFixed(2) || "—"}</td>
                       <td className="px-4 py-3 text-center">
@@ -479,7 +479,7 @@ export default function BankrollPage() {
                     return (
                       <div key={t.type} className="flex items-center gap-2.5">
                         <div className="w-[88px] sm:w-28 shrink-0">
-                          <div className="text-[13px] font-medium text-gray-700 truncate leading-tight">{t.type}</div>
+                          <div className="text-[13px] font-medium text-gray-700 break-words leading-tight">{t.type}</div>
                           <div className="text-[10px] text-gray-600 tabular-nums">{t.nb} pari{t.nb > 1 ? "s" : ""}{t.settled > 0 ? ` · ${Math.round(t.winRate)}%` : ""}</div>
                         </div>
                         <div className="flex-1 h-7 rounded-lg bg-gray-100/80 overflow-hidden">

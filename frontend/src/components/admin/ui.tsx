@@ -27,6 +27,7 @@
 import * as React from "react";
 import { ChevronDown, Info } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Compteur, PALETTE, Sparkline } from "./graphes";
 
 /* ─────────────────────────── échelle typographique ─────────────────────── */
 
@@ -152,20 +153,23 @@ export function EnTetePage({
   icone?: React.ReactNode;
 }) {
   return (
-    <header className="flex flex-col items-start gap-3 sm:flex-row sm:items-start sm:justify-between">
+    <header className="bt-entree flex flex-col items-start gap-3 border-b border-border pb-4 sm:flex-row sm:items-end sm:justify-between sm:pb-5">
       <div className="flex min-w-0 items-start gap-3">
         {/* Sur téléphone, la barre du haut affiche déjà le nom de l'écran, et il
             reste visible en défilant. Le répéter 60 px plus bas mangeait un
             tiers du premier écran pour ne rien apprendre : le titre reste dans
             le document (structure, lecteurs d'écran) mais sort du visuel. */}
         {icone && (
-          <span className="mt-0.5 hidden h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-brand-gold/10 text-brand-gold-dark lg:flex">
+          <span className="mt-1 hidden h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-border bg-white text-foreground/70 shadow-[0_1px_2px_rgba(16,24,40,0.05)] lg:flex [&_svg]:h-[18px] [&_svg]:w-[18px]">
             {icone}
           </span>
         )}
         <div className="min-w-0">
-          <h1 className={cn(T.titreSection, "font-display sr-only lg:not-sr-only")}>{titre}</h1>
-          {desc && <p className={cn("max-w-2xl lg:mt-1", T.meta, "leading-relaxed")}>{desc}</p>}
+          <div className="hidden text-xs font-medium text-muted-foreground lg:block">
+            Administration <span className="mx-1 text-border">/</span> <span className="text-foreground/80">{titre}</span>
+          </div>
+          <h1 className={cn("text-2xl font-semibold tracking-tight text-foreground", "sr-only lg:not-sr-only lg:mt-0.5")}>{titre}</h1>
+          {desc && <p className={cn("max-w-3xl lg:mt-1", "text-[13px] leading-relaxed text-muted-foreground")}>{desc}</p>}
         </div>
       </div>
       {actions && <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div>}
@@ -191,16 +195,16 @@ export function Panneau({
   return (
     <section
       className={cn(
-        "overflow-hidden rounded-2xl border bg-card shadow-sm",
-        ton === "neutre" ? "border-border" : t.bord,
+        "bt-verre bt-entree overflow-hidden rounded-xl",
+        ton === "alerte" && t.bord,
         className,
       )}
     >
       {(titre || actions) && (
-        <header className="flex flex-col gap-2.5 border-b border-border/60 px-4 py-3.5 sm:flex-row sm:items-start sm:justify-between sm:gap-4 sm:px-5">
+        <header className="flex flex-col gap-2.5 border-b border-border/80 px-4 py-3.5 sm:flex-row sm:items-start sm:justify-between sm:gap-4 sm:px-5">
           <div className="flex min-w-0 items-start gap-2.5">
             {icone && (
-              <span className={cn("mt-px flex h-6 w-6 shrink-0 items-center justify-center rounded-lg", t.pastille)}>
+              <span className={cn("mt-px flex h-6 w-6 shrink-0 items-center justify-center rounded-md border", t.pastille)}>
                 {icone}
               </span>
             )}
@@ -214,7 +218,7 @@ export function Panneau({
       )}
       <div className={cn("p-4 sm:p-5", bodyClassName)}>{children}</div>
       {pied && (
-        <footer className={cn("border-t border-border/60 bg-muted/20 px-4 py-2.5 sm:px-5", T.meta)}>
+        <footer className={cn("border-t border-border/80 bg-muted/50 px-4 py-2.5 sm:px-5", T.meta)}>
           {pied}
         </footer>
       )}
@@ -272,8 +276,8 @@ export function Repliable({
   return (
     <section
       className={cn(
-        "overflow-hidden rounded-2xl border bg-card shadow-sm transition-colors",
-        ton === "neutre" ? "border-border" : t.bord,
+        "bt-verre bt-entree overflow-hidden rounded-xl",
+        ton === "alerte" && t.bord,
       )}
     >
       <div className={cn("px-3 sm:px-5", ouvert && "border-b border-border/60")}>
@@ -285,7 +289,7 @@ export function Repliable({
           className="group flex min-h-[3.25rem] w-full items-center gap-3 py-2.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-card"
         >
           {icone && (
-            <span className={cn("flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border", t.pastille)}>
+            <span className={cn("flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border", t.pastille)}>
               {icone}
             </span>
           )}
@@ -367,10 +371,10 @@ export function Tuile({
   return (
     <div
       className={cn(
-        "rounded-xl border bg-card p-3 sm:p-3.5",
+        "bt-verre rounded-lg p-3 sm:p-3.5",
         ton === "alerte" ? "border-red-200 bg-red-50/40"
           : ton === "attention" ? "border-amber-200 bg-amber-50/40"
-          : "border-border",
+          : "",
         className,
       )}
     >
@@ -414,7 +418,7 @@ export function GrilleTuiles({
 
 export function Vide({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex min-h-[7rem] items-center justify-center rounded-xl border border-dashed border-border px-6 py-8 text-center text-[13px] text-muted-foreground">
+    <div className="flex min-h-[7rem] items-center justify-center rounded-lg border border-dashed border-border bg-muted/40 px-6 py-8 text-center text-[13px] text-muted-foreground">
       {children}
     </div>
   );
@@ -524,11 +528,11 @@ export function Carte({
   return (
     <div
       className={cn(
-        "rounded-xl border bg-card p-3",
+        "bt-verre rounded-lg p-3",
         ton === "alerte" ? "border-red-200 bg-red-50/40"
           : ton === "attention" ? "border-amber-200 bg-amber-50/40"
           : ton === "ok" ? "border-emerald-200 bg-emerald-50/30"
-          : "border-border",
+          : "",
         className,
       )}
       {...rest}
@@ -579,7 +583,7 @@ export function Segments<K extends string>({
     <div
       role="tablist"
       className={cn(
-        "flex snap-x gap-1 overflow-x-auto rounded-xl border border-border bg-card p-1 shadow-sm [scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
+        "flex snap-x gap-0.5 overflow-x-auto rounded-lg border border-border bg-muted/70 p-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
         className,
       )}
     >
@@ -592,11 +596,11 @@ export function Segments<K extends string>({
             aria-selected={on}
             onClick={() => onChange(t.key)}
             className={cn(
-              "flex shrink-0 snap-start items-center gap-1.5 whitespace-nowrap rounded-lg px-3 font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-              taille === "compact" ? "min-h-[2.25rem] text-xs" : "min-h-[2.5rem] text-[13px]",
+              "flex shrink-0 snap-start items-center gap-1.5 whitespace-nowrap rounded-md px-3 font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+              taille === "compact" ? "min-h-[2rem] text-xs" : "min-h-[2.25rem] text-[13px]",
               on
-                ? "bg-foreground text-background"
-                : "text-muted-foreground hover:bg-muted hover:text-foreground",
+                ? "bg-white text-foreground shadow-[0_1px_2px_rgba(16,24,40,0.08),0_0_0_1px_rgba(16,24,40,0.04)]"
+                : "text-muted-foreground hover:text-foreground",
             )}
           >
             {t.label}
@@ -604,7 +608,7 @@ export function Segments<K extends string>({
               <span
                 className={cn(
                   "inline-flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] font-bold tabular-nums",
-                  on ? "bg-background/20 text-background" : "bg-destructive/10 text-destructive",
+                  on ? "bg-red-50 text-red-700" : "bg-red-50 text-red-700",
                 )}
               >
                 {t.badge > 99 ? "99+" : t.badge}
@@ -643,15 +647,15 @@ export function BarrePolarite({ value, max }: { value: number | null; max: numbe
         style={{
           left: value >= 0 ? "50%" : `${50 - frac}%`,
           width: `${frac}%`,
-          background: value >= 0 ? "#059669" : "#EF4444",
+          background: value >= 0 ? DIVERGING_POS : DIVERGING_NEG,
         }}
       />
     </div>
   );
 }
 
-export const DIVERGING_POS = "#059669";
-export const DIVERGING_NEG = "#EF4444";
+export const DIVERGING_POS = "#0F7B5A";
+export const DIVERGING_NEG = "#B42318";
 
 /* ─────────────────────── tableau de bord (2026-09-14) ──────────────────── */
 // L'exploitant jugeait la console « illisible, trop d'infos inutiles ». Ces
@@ -660,37 +664,103 @@ export const DIVERGING_NEG = "#EF4444";
 // d'explication sous chaque titre.
 
 const ACCENTS_KPI = {
-  neutre: "bg-slate-100 text-slate-600",
-  or: "bg-amber-50 text-amber-700 ring-1 ring-inset ring-amber-200/70",
-  ok: "bg-emerald-50 text-emerald-700 ring-1 ring-inset ring-emerald-200/70",
-  bleu: "bg-sky-50 text-sky-700 ring-1 ring-inset ring-sky-200/70",
-  violet: "bg-violet-50 text-violet-700 ring-1 ring-inset ring-violet-200/70",
+  neutre: "#6b7079",
+  or: PALETTE.or,
+  ok: PALETTE.vert,
+  bleu: PALETTE.ardoise,
+  violet: PALETTE.violet,
+  rouge: PALETTE.rouge,
 } as const;
 
-/** Grand chiffre d'en-tête d'écran. Quatre par rangée au maximum. */
+export type AccentKpi = keyof typeof ACCENTS_KPI;
+export const couleurAccent = (a: AccentKpi) => ACCENTS_KPI[a];
+
+/**
+ * Grand chiffre d'en-tête d'écran, façon rapport financier : libellé, valeur,
+ * variation signée, mini-courbe, puis une ligne de contexte.
+ *
+ * `nombre` + `format` : la valeur glisse vers sa nouvelle valeur à chaque
+ * rafraîchissement. `serie` : historique réel sous le chiffre. `tendance` :
+ * variation en %, verte si elle monte, rouge si elle descend.
+ */
 export function Kpi({
-  label, valeur, sub, icone, accent = "neutre",
+  label, valeur, sub, icone, accent = "neutre", nombre, format, serie, tendance, tendanceLabel, href,
 }: {
   label: string;
-  valeur: React.ReactNode;
+  valeur?: React.ReactNode;
   sub?: React.ReactNode;
   icone?: React.ReactNode;
-  accent?: keyof typeof ACCENTS_KPI;
+  accent?: AccentKpi;
+  nombre?: number | null;
+  format?: (v: number) => string;
+  serie?: Array<number | null | undefined>;
+  tendance?: number | null;
+  tendanceLabel?: string;
+  href?: string;
 }) {
-  return (
-    <div className="rounded-2xl border border-border/70 bg-card p-4 shadow-[0_1px_2px_rgba(16,24,40,0.04)] sm:p-5">
-      <div className="flex items-start justify-between gap-3">
-        <span className={cn(T.etiquette, "leading-tight")}>{label}</span>
-        {icone && (
-          <span className={cn("flex h-8 w-8 shrink-0 items-center justify-center rounded-lg", ACCENTS_KPI[accent])} aria-hidden>
-            {icone}
+  const couleur = ACCENTS_KPI[accent];
+  const corps = (
+    <div className={cn("bt-verre bt-entree flex h-full flex-col rounded-xl p-4 sm:p-5", href && "bt-relief")}>
+      <div className="flex items-center justify-between gap-3">
+        <span className="flex items-center gap-2 text-[13px] font-medium text-muted-foreground">
+          <span aria-hidden className="h-2 w-2 rounded-[3px]" style={{ background: couleur }} />
+          {label}
+        </span>
+        {icone && <span className="shrink-0 text-muted-foreground/60 [&_svg]:h-4 [&_svg]:w-4" aria-hidden>{icone}</span>}
+      </div>
+      <div className="mt-2.5 text-[26px] font-semibold leading-none tracking-tight tabular-nums text-foreground sm:text-[30px]">
+        {nombre !== undefined && format ? <Compteur valeur={nombre} format={format} /> : valeur}
+      </div>
+      {(tendance != null && isFinite(tendance)) && (
+        <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs">
+          <span
+            className={cn(
+              "inline-flex items-center gap-0.5 whitespace-nowrap rounded px-1.5 py-0.5 font-semibold tabular-nums",
+              tendance > 0 ? "bg-emerald-50 text-emerald-700" : tendance < 0 ? "bg-red-50 text-red-700" : "bg-muted text-muted-foreground",
+            )}
+          >
+            {tendance > 0 ? "↑" : tendance < 0 ? "↓" : "→"} {signedPct(tendance)}
           </span>
-        )}
+          {tendanceLabel && <span className="text-muted-foreground">{tendanceLabel}</span>}
+        </div>
+      )}
+      {serie && serie.filter((v) => v != null).length > 1 && (
+        <Sparkline valeurs={serie} couleur={couleur} className="mt-3" hauteur={36} />
+      )}
+      {sub && <div className="mt-auto pt-3 text-xs leading-snug text-muted-foreground">{sub}</div>}
+    </div>
+  );
+  return href
+    ? <a href={href} className="block h-full rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">{corps}</a>
+    : corps;
+}
+
+/**
+ * Répartition compacte pour le bas d'une carte KPI : une barre fine et, sous
+ * elle, chaque part nommée avec son effectif. Donne le « de quoi est fait ce
+ * chiffre » sans ouvrir un autre écran.
+ */
+export function MiniRepartition({
+  parts,
+}: {
+  parts: ReadonlyArray<{ label: string; n: number; couleur: string }>;
+}) {
+  const total = parts.reduce((s, p) => s + Math.max(0, p.n), 0);
+  return (
+    <div>
+      <div className="flex h-1.5 w-full gap-[2px] overflow-hidden rounded-full bg-muted">
+        {total > 0 && parts.filter((p) => p.n > 0).map((p) => (
+          <div key={p.label} className="h-full" style={{ width: `${(p.n / total) * 100}%`, background: p.couleur }} />
+        ))}
       </div>
-      <div className="mt-1.5 text-[26px] font-semibold leading-none tracking-tight tabular-nums sm:text-[30px]">
-        {valeur}
+      <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
+        {parts.map((p) => (
+          <span key={p.label} className="inline-flex items-center gap-1.5">
+            <span aria-hidden className="h-1.5 w-1.5 rounded-full" style={{ background: p.couleur }} />
+            {p.label} <b className="font-semibold tabular-nums text-foreground">{nf.format(p.n)}</b>
+          </span>
+        ))}
       </div>
-      {sub && <div className="mt-2 text-xs leading-snug text-muted-foreground">{sub}</div>}
     </div>
   );
 }
@@ -702,9 +772,9 @@ export function GrilleKpi({ children }: { children: React.ReactNode }) {
 /** Point vert « en direct ». L'animation se coupe si l'OS demande moins de mouvement. */
 export function PointLive({ className }: { className?: string }) {
   return (
-    <span className={cn("relative flex h-2.5 w-2.5 shrink-0", className)} aria-hidden>
-      <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-60 motion-safe:animate-ping" />
-      <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-emerald-500" />
+    <span className={cn("relative flex h-2 w-2 shrink-0", className)} aria-hidden>
+      <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-500 opacity-40 motion-safe:animate-ping" />
+      <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-600" />
     </span>
   );
 }
@@ -723,25 +793,25 @@ export function BarreRepartition({
       <div
         role="img"
         aria-label={segments.map((s) => `${s.label} : ${s.n}`).join(", ")}
-        className="flex h-3 w-full gap-0.5 overflow-hidden rounded-full bg-muted"
+        className="flex h-2.5 w-full gap-[2px] overflow-hidden rounded-full bg-muted"
       >
         {t > 0 && segments.filter((s) => s.n > 0).map((s) => (
-          <div key={s.cle} className={cn("h-full first:rounded-l-full last:rounded-r-full", s.couleur)} style={{ width: `${(s.n / t) * 100}%` }} />
+          <div key={s.cle} className={cn("h-full", s.couleur)} style={{ width: `${(s.n / t) * 100}%` }} />
         ))}
       </div>
-      <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-4">
+      <dl className="mt-4 grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-4">
         {segments.map((s) => (
-          <div key={s.cle} className="flex items-start gap-2">
-            <span className={cn("mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full", s.couleur)} aria-hidden />
-            <div className="min-w-0">
-              <dt className="text-xs text-muted-foreground">{s.label}</dt>
-              <dd className="text-lg font-semibold leading-tight tabular-nums">
-                {nf.format(s.n)}
-                <span className="ml-1.5 text-xs font-medium text-muted-foreground">
-                  {t > 0 ? pct((s.n / t) * 100, 0) : "—"}
-                </span>
-              </dd>
-            </div>
+          <div key={s.cle} className="min-w-0">
+            <dt className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <span className={cn("h-2 w-2 shrink-0 rounded-[3px]", s.couleur)} aria-hidden />
+              {s.label}
+            </dt>
+            <dd className="mt-0.5 text-lg font-semibold leading-tight tabular-nums text-foreground">
+              {nf.format(s.n)}
+              <span className="ml-1.5 text-xs font-normal text-muted-foreground">
+                {t > 0 ? pct((s.n / t) * 100, 0) : "—"}
+              </span>
+            </dd>
           </div>
         ))}
       </dl>
@@ -750,8 +820,8 @@ export function BarreRepartition({
 }
 
 const TEINTES_AVATAR = [
-  "bg-amber-100 text-amber-800", "bg-emerald-100 text-emerald-800", "bg-sky-100 text-sky-800",
-  "bg-violet-100 text-violet-800", "bg-rose-100 text-rose-800", "bg-slate-200 text-slate-700",
+  "bg-[#f3ead8] text-[#7a5412]", "bg-[#e3eee9] text-[#0f5f47]", "bg-[#e4eaf2] text-[#27456b]",
+  "bg-[#ebe7f2] text-[#57497d]", "bg-[#f1e6e4] text-[#8a3a2e]", "bg-[#ecebe7] text-[#4b5058]",
 ];
 
 /** Pastille d'initiales, couleur stable par adresse — repère visuel d'une ligne. */
@@ -764,7 +834,7 @@ export function Initiales({ email }: { email: string }) {
   return (
     <span
       aria-hidden
-      className={cn("flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[11px] font-bold", TEINTES_AVATAR[h % TEINTES_AVATAR.length])}
+      className={cn("flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold", TEINTES_AVATAR[h % TEINTES_AVATAR.length])}
     >
       {texte}
     </span>
@@ -784,12 +854,12 @@ export function CelluleCompte({ email, detail }: { email: string; detail?: React
 }
 
 const FORMULES: Record<string, { texte: string; classe: string }> = {
-  expert: { texte: "Expert", classe: "bg-amber-50 text-amber-800 ring-amber-200" },
-  pro: { texte: "Expert", classe: "bg-amber-50 text-amber-800 ring-amber-200" },
-  standard: { texte: "Standard", classe: "bg-slate-100 text-slate-700 ring-slate-200" },
-  starter: { texte: "Standard", classe: "bg-slate-100 text-slate-700 ring-slate-200" },
+  expert: { texte: "Expert", classe: "bg-[#faf3e4] text-[#7a5412] ring-[#ecd9b0]" },
+  pro: { texte: "Expert", classe: "bg-[#faf3e4] text-[#7a5412] ring-[#ecd9b0]" },
+  standard: { texte: "Standard", classe: "bg-[#eef2f7] text-[#27456b] ring-[#d3dce8]" },
+  starter: { texte: "Standard", classe: "bg-[#eef2f7] text-[#27456b] ring-[#d3dce8]" },
   free: { texte: "Gratuit", classe: "bg-card text-muted-foreground ring-border" },
-  admin: { texte: "Admin", classe: "bg-brand-dark text-white ring-brand-dark" },
+  admin: { texte: "Admin", classe: "bg-[#1b2230] text-white ring-[#1b2230]" },
 };
 
 export function BadgeFormule({ plan, periodicite }: { plan: string | null | undefined; periodicite?: string | null }) {
@@ -856,7 +926,7 @@ export function Tableau<L>({
           <DefilementX label={label}>
             <table className="w-full min-w-[640px] border-collapse">
               <thead>
-                <tr className="border-b border-border">
+                <tr className="border-b border-border bg-muted/50">
                   {colonnes.map((c) => (
                     <th key={c.titre} scope="col" className={cn(TH, c.droite && "text-right", c.className)}>{c.titre}</th>
                   ))}

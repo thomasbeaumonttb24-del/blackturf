@@ -373,6 +373,31 @@ def _verdict(db: dict, logs: dict, modele: dict) -> str:
     return statut
 
 
+# Au-delà de cette avance sur la cote en AUC de classement, un modèle a appris
+# l'arrivée : même seuil que le garde-fou de promotion
+# (`ml.pipeline.FUITE_AVANCE_MARCHE_MAX`), recopié pour ne pas charger tout le
+# pipeline d'entraînement dans un script de rapport. Record honnête : +0,02.
+FUITE_AVANCE_MARCHE_MAX = 0.08
+
+
+def _reference_valable() -> tuple:
+    """Conditions SQL d'une version qui peut servir de référence au rapport.
+
+    - Pas retirée (`est_rollback`), c'est-à-dire pas abandonnée par un retour
+      arrière depuis l'admin.
+    - Pas fuyante : une avance sur la cote au-delà de `FUITE_AVANCE_MARCHE_MAX`
+      n'est pas un niveau atteint, c'est une fuite. C'est cette condition qui
+      écarte v545, retirée le 25/09 par une remise en service de v544 qui ne
+      l'avait pas marquée. NULL (avance non mesurée) reste admis : l'exclure
+      viderait l'historique d'avant le 20/08.
+    """
+    return (
+        ModelVersion.est_rollback.is_not(True),
+        (ModelVersion.rank_delta_market.is_(None)
+         | (ModelVersion.rank_delta_market <= FUITE_AVANCE_MARCHE_MAX)),
+    )
+
+
 def _promu_recemment(modele: dict, fenetre_jours: int = 1) -> bool:
     """Un modèle a-t-il été promu sur la fenêtre couverte par le rapport ?"""
     age = modele.get("age_jours")
@@ -432,9 +457,17 @@ async def _etat_modele() -> dict:
         # Le prédécesseur est la version de numéro immédiatement inférieur, pas
         # « celle d'hier » : plusieurs promotions peuvent tomber le même jour
         # (v511/512/513 le 20/08), et une date ne les départage pas.
+        #
+        # Une version RETIRÉE n'est ni un prédécesseur ni un record. Nuit du 24→25/09 :
+        # v545 avait appris l'arrivée (fuite ELO, classement 0,9632 contre 0,7486
+        # pour la cote) et la production a été remise sur v544 le matin. Le
+        # rapport du 26/09 comparait pourtant v546 à v545 — « −0,1013 de
+        # walk-forward, sous son record historique » — alors que le retrain venait
+        # de mesurer +0,0952 contre le vrai champion sortant (v544) et que le
+        # cliquet nommait v546 comme record.
         prec = (await s.execute(
             select(ModelVersion)
-            .where(ModelVersion.version_num < mv.version_num)
+            .where(ModelVersion.version_num < mv.version_num, *_reference_valable())
             .order_by(ModelVersion.version_num.desc())
         )).scalars().first()
         # Deux provenances differentes ne se soustraient pas : l'ecart au
@@ -499,6 +532,7 @@ async def _etat_modele() -> dict:
                     # NULL ne s'egale pas a NULL en SQL : les versions sans
                     # provenance forment leur propre population.
                     meme_source,
+                    *_reference_valable(),
                 )
                 .order_by(colonne.desc())
                 .limit(1)
@@ -699,7 +733,12 @@ def _bloc_apprentissages(etat: dict) -> str:
             else (str(succes)[:16] if succes else "jamais")
         detail = ""
         if perimee:
+            # L'erreur d'abord : « PÉRIMÉ » seul dit qu'il faut chercher, pas quoi.
+            # Le 26/09, `nettete_probas` échouait depuis deux nuits sans que le
+            # rapport ne dise pourquoi, alors que la base le savait.
             detail = " ← PÉRIMÉ"
+            if e.get("last_error"):
+                detail += f" — {_esc(str(e['last_error'])[:120])}"
         elif e["last_status"] != "ok" and e.get("last_error"):
             detail = f" — {_esc(str(e['last_error'])[:80])}"
         rangs.append(

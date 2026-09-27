@@ -145,7 +145,7 @@ export default function ApprentissageTab({
           </div>
         </div>
 
-        <div className="rounded-xl border border-border/70 bg-card p-4 shadow-sm">
+        <div className="bt-verre rounded-xl p-4 shadow-sm">
           <div className="mb-3 flex items-center gap-2">
             <Thermometer className="h-4 w-4 text-amber-700" />
             <span className="text-sm font-bold text-foreground">Température de calibration</span>
@@ -157,7 +157,7 @@ export default function ApprentissageTab({
           </div>
         </div>
 
-        <div className="rounded-xl border border-border/70 bg-card p-4 shadow-sm">
+        <div className="bt-verre rounded-xl p-4 shadow-sm">
           <div className="mb-3 text-sm font-bold text-foreground">Corrections appliquées à l&apos;inférence</div>
           {!calibration ? (
             <p className="text-[11px] text-muted-foreground">État de calibration indisponible.</p>
@@ -238,7 +238,7 @@ export default function ApprentissageTab({
               if (!p) return null;
               const labels: Record<string, string> = { conservateur: "Prudent", equilibre: "Modéré", agressif: "Risqué" };
               return (
-                <div key={pk} className="rounded-xl border border-border/70 bg-card p-3 shadow-sm">
+                <div key={pk} className="bt-verre rounded-xl p-3 shadow-sm">
                   <div className="flex items-center justify-between">
                     <span className="text-sm font-bold text-foreground">{labels[pk]}</span>
                     <span className="text-[11px] text-muted-foreground">{num(p.n_runs)} conseils réglés</span>

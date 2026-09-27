@@ -21,7 +21,7 @@ export interface QuintePalmaresData {
   nb_tickets: number;
   nb_courses: number;
   nb_en_attente: number;
-  // Montants et ROI : vue admin seulement (le public ne reçoit que les comptages).
+  // Mise, net et ROI : admin seulement (non affichés). `retour` est public.
   mise_totale?: number;
   retour?: number;
   net?: number;
@@ -58,7 +58,7 @@ export function QuinteLigne({ quinte }: { quinte?: QuintePalmaresData | null }) 
           <h3 className="font-display text-lg font-bold text-slate-900">Quinté+ · compté à part</h3>
           <p className="mt-1 text-sm leading-6 text-muted-foreground">
             Sur chaque course Quinté+, chaque profil joue aussi un ticket Quinté+ (2 € la combinaison).
-            Ses résultats sont sur cette ligne seulement : ils n&apos;entrent dans aucun autre total de cette page.
+            Ses tickets gagnants apparaissent avec les autres paris gagnés, mais n&apos;entrent dans aucun autre total de cette page.
           </p>
         </div>
       </div>
@@ -75,22 +75,13 @@ export function QuinteLigne({ quinte }: { quinte?: QuintePalmaresData | null }) 
         </p>
       ) : (
         <>
-          <div className={`mt-5 grid grid-cols-2 gap-3 ${quinte!.mise_totale != null ? "lg:grid-cols-5" : "lg:grid-cols-3"}`}>
-            <Chiffre label="Tickets" value={nf(quinte!.nb_tickets)}
+          {/* Uniquement ce qui a été gagné : tickets gagnants et montant encaissé.
+              La mise et le ROI ne sont pas affichés, même à l'admin. */}
+          <div className="mt-5 grid grid-cols-2 gap-3">
+            <Chiffre label="Tickets gagnants" value={nf(quinte!.nb_tickets_gagnants)}
               sub={`sur ${nf(quinte!.nb_courses)} course${quinte!.nb_courses > 1 ? "s" : ""} Quinté+`} />
-            {quinte!.mise_totale != null && <Chiffre label="Mise totale" value={eur(quinte!.mise_totale)} />}
-            {quinte!.retour != null ? (
-              <Chiffre label="Retour" value={eur(quinte!.retour)}
-                sub={`${nf(quinte!.nb_tickets_gagnants)} ticket${quinte!.nb_tickets_gagnants > 1 ? "s" : ""} avec un retour`} />
-            ) : (
-              <Chiffre label="Tickets avec un retour" value={nf(quinte!.nb_tickets_gagnants)} />
-            )}
-            {quinte!.roi !== undefined && (
-              <Chiffre label="ROI" value={quinte!.roi == null ? "—" : `${quinte!.roi > 0 ? "+" : ""}${nf(quinte!.roi, 1)} %`}
-                ton={quinte!.roi != null && quinte!.roi >= 0 ? "text-emerald-700" : "text-rose-700"} />
-            )}
-            <Chiffre label="Bonus" value={nf(quinte!.nb_bonus)}
-              sub={`combinaison${quinte!.nb_bonus > 1 ? "s" : ""} payée${quinte!.nb_bonus > 1 ? "s" : ""} en Bonus · ${nf(quinte!.nb_cinq_sur_cinq)} aux 5 premiers`} />
+            <Chiffre label="Montant total" value={quinte!.retour != null ? eur(quinte!.retour) : "—"}
+              sub="encaissé aux rapports officiels" ton="text-emerald-700" />
           </div>
           <p className="mt-4 text-xs leading-5 text-muted-foreground">
             Tickets des plans figés avant le départ (plan de référence de 10 €), réglés aux rapports PMU officiels,

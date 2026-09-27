@@ -374,6 +374,20 @@ async def job_resolve_courses_sans_resultat() -> None:
         log.error("jobs.resolve_courses_sans_resultat.error", error=str(e))
 
 
+async def job_alertes_strategies() -> None:
+    """Toutes les 10 minutes — e-mail des stratégies dont un pari visible remplit
+    les critères (plan Expert, au plus un e-mail par 4 h, cf. services/alertes_strategies)."""
+    try:
+        from db.database import AsyncSessionLocal
+        from services.alertes_strategies import envoyer_alertes_strategies
+        async with AsyncSessionLocal() as session:
+            n = await envoyer_alertes_strategies(session)
+        if n:
+            log.info("jobs.alertes_strategies.done", envoyes=n)
+    except Exception as e:
+        log.error("jobs.alertes_strategies.error", error=str(e))
+
+
 async def job_vb_notify() -> None:
     """Toutes les 10 minutes — notifie nouveaux value bets non notifiés."""
     try:
@@ -490,6 +504,20 @@ async def job_warm_caches() -> None:
                 log.warning("jobs.warm_cache.failed", url=u, err=str(e)[:120])
 
 
+async def job_track_record_a_jour() -> None:
+    """Recalcule le palmarès dès qu'une course a été intégrée (drapeau posé par le
+    pipeline post-course), sans attendre l'heure de fraîcheur ni `warm_caches`.
+    Ne fait rien le reste du temps : le calcul (~29 s) ne tourne qu'au besoin."""
+    from api.routes.stats import refresh_track_record_cache, track_record_a_recalculer
+
+    try:
+        if await track_record_a_recalculer():
+            reecrit = await refresh_track_record_cache()
+            log.info("jobs.track_record_a_jour", reecrit=reecrit)
+    except Exception as e:  # noqa: BLE001
+        log.warning("jobs.track_record_a_jour.failed", err=str(e)[:120])
+
+
 def start_scheduler() -> None:
     scheduler = get_scheduler()
 
@@ -545,6 +573,16 @@ def start_scheduler() -> None:
         job_vb_notify,
         CronTrigger(minute="*/10"),
         id="vb_notify",
+        replace_existing=True,
+        misfire_grace_time=120,
+    )
+
+    # Alertes e-mail des stratégies — toutes les 10 minutes, décalées de 5 min
+    # après vb_notify pour lire les paris du cycle qui vient d'être notifié.
+    scheduler.add_job(
+        job_alertes_strategies,
+        CronTrigger(minute="5-59/10"),
+        id="alertes_strategies",
         replace_existing=True,
         misfire_grace_time=120,
     )
@@ -615,6 +653,18 @@ def start_scheduler() -> None:
         id="relances_paiement",
         replace_existing=True,
         misfire_grace_time=1800,
+    )
+
+    # Palmarès à jour dans la minute qui suit chaque course intégrée.
+    # max_instances=1 : un calcul (~29 s) ne se chevauche jamais avec le suivant.
+    scheduler.add_job(
+        job_track_record_a_jour,
+        CronTrigger(minute="*"),
+        id="track_record_a_jour",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=30,
     )
 
     # Pre-chauffe caches pages publiques lentes — toutes les 30 min
@@ -721,6 +771,14 @@ def start_scheduler() -> None:
     # Renouvellement des jetons d'integration — 04:20 Paris, tous les jours. Le job ne
     # renouvelle qu'a l'approche de l'echeance ; passer tous les jours sert a absorber
     # plusieurs echecs consecutifs avant que le jeton n'expire pour de bon.
+    # Crédits de parrainage reportés — 03:10 Paris, tous les jours.
+    scheduler.add_job(
+        job_credits_parrainage,
+        CronTrigger(hour=3, minute=10, timezone="Europe/Paris"),
+        id="credits_parrainage",
+        replace_existing=True,
+        misfire_grace_time=7200,
+    )
     scheduler.add_job(
         job_renouveler_jetons,
         CronTrigger(hour=4, minute=20, timezone="Europe/Paris"),
@@ -1430,6 +1488,26 @@ async def job_surveillance_mosaique() -> None:
         log.info("jobs.mosaique.surveillance_alerte", jour=jour, envoye=bool(envoye))
     except Exception as e:  # noqa: BLE001
         log.warning("jobs.mosaique.surveillance_alerte_echec", jour=jour, err=str(e)[:200])
+
+
+async def job_credits_parrainage() -> None:
+    """1x/jour — pose les crédits de parrainage reportés.
+
+    Un parrain ne reçoit pas plus de crédits par mois que sa mensualité n'en
+    absorbe (4 en Expert, 3 en Standard) ; les suivants attendent le mois
+    d'après. Le paiement de sa facture les pose déjà ; ce passage quotidien
+    couvre les parrains sans facture (offerts, gratuits, annuels), dont le
+    « mois » est le mois civil.
+    """
+    try:
+        from db.database import AsyncSessionLocal
+        from services.parrainage import liberer_tous_les_credits
+
+        async with AsyncSessionLocal() as session:
+            poses = await liberer_tous_les_credits(session)
+        log.info("jobs.credits_parrainage.done", poses=poses)
+    except Exception as e:
+        log.error("jobs.credits_parrainage.error", error=str(e))
 
 
 async def job_renouveler_jetons() -> None:

@@ -5,7 +5,7 @@ import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
 import { useState, useEffect, useRef, useCallback } from "react";
 import useSWR from "swr";
-import { LucideIcon, Menu, X, Bell, User, LogOut, ChevronDown, Zap, LayoutDashboard, Gauge, Search, BarChart2, MessagesSquare, Wallet, Bot } from "lucide-react";
+import { LucideIcon, Menu, X, Bell, User, LogOut, ChevronDown, Zap, LayoutDashboard, Gauge, Search, BarChart2, MessagesSquare, Wallet, Bot, Gift } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/hooks/useAuth";
@@ -103,8 +103,8 @@ function SearchPalette({ onClose }: { onClose: () => void }) {
                 >
                   <span className="text-base flex-shrink-0">{TYPE_ICONS[r.type] ?? "🔍"}</span>
                   <div className="min-w-0">
-                    <div className="text-sm font-medium text-gray-900 truncate">{r.label}</div>
-                    <div className="text-xs text-gray-600 truncate">{r.sub}</div>
+                    <div className="text-sm font-medium text-gray-900 break-words">{r.label}</div>
+                    <div className="text-xs text-gray-600 break-words">{r.sub}</div>
                   </div>
                 </button>
               </li>
@@ -328,7 +328,7 @@ export function Navbar() {
                     <div className="h-6 w-6 rounded-full bg-brand-gold-tint flex items-center justify-center ring-1 ring-brand-gold/30">
                       <User className="h-3 w-3 text-brand-gold-dark" />
                     </div>
-                    <span className="hidden sm:block max-w-[100px] truncate text-gray-700 font-medium">
+                    <span className="hidden whitespace-nowrap sm:block text-gray-700 font-medium">
                       {user.prenom || user.email.split("@")[0]}
                     </span>
                     <Badge
@@ -355,6 +355,17 @@ export function Navbar() {
                           onClick={() => setUserMenuOpen(false)}
                         >
                           <User className="h-4 w-4 text-gray-600" /> {R.profil.label}
+                        </Link>
+                        <Link
+                          href="/profil#parrainage"
+                          rel="nofollow"
+                          className="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                          onClick={() => setUserMenuOpen(false)}
+                        >
+                          <Gift className="h-4 w-4 text-emerald-600" /> Parrainage
+                          <span className="ml-auto rounded-full bg-emerald-50 px-1.5 py-0.5 text-[9px] font-bold text-emerald-700 ring-1 ring-emerald-200">
+                            5 €
+                          </span>
                         </Link>
                         <Link
                           href="/statistiques"
@@ -513,6 +524,10 @@ export function Navbar() {
               <p className="px-4 pb-2 text-[10px] font-bold uppercase tracking-[.14em] text-gray-500">Mes outils</p>
               <Link href="/bankroll" rel="nofollow" className="block rounded-lg px-4 py-2 text-sm font-medium text-gray-700" onClick={() => setMenuOpen(false)}>{R.suiviCapital.label}</Link>
               <Link href="/assistant" rel="nofollow" className="block rounded-lg px-4 py-2 text-sm font-medium text-gray-700" onClick={() => setMenuOpen(false)}>{R.assistant.label}</Link>
+              <Link href="/profil#parrainage" rel="nofollow" className="flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium text-gray-700" onClick={() => setMenuOpen(false)}>
+                <Gift className="h-4 w-4 text-emerald-600" aria-hidden /> Parrainage
+                <span className="rounded-full bg-emerald-50 px-1.5 py-0.5 text-[9px] font-bold text-emerald-700 ring-1 ring-emerald-200">5 € offerts</span>
+              </Link>
             </div>
           )}
           {peutDemarrerEssai(user) && (

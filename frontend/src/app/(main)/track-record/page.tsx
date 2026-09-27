@@ -552,47 +552,45 @@ export default function TrackRecordPage() {
   );
 
   // Paris RÉELLEMENT gagnés par l'algorithme, par profil (pronos émis réglés)
-  const { data: gagnantsData, error: gagnantsError, mutate: mutateGagnants } = useSWR<{
+  type PalmaresData = {
     gagnants: WinningBet[]; top_gains?: WinningBet[]; n: number; n_courses?: number; total_gain?: number; total_benefice?: number;
     profils?: Array<{ profil: string; label: string; nb_courses: number; mise_totale?: number; gain_total?: number; gain_net: number; roi: number | null; paris_gagnes: number; taux_courses_beneficiaires: number | null }>;
     quinte?: QuintePalmaresData | null;   // ligne Quinté+ à part (hors de tous les totaux)
     updated_at?: string;
-  }>(
-    // Tant que l'auth n'a pas tranché, on n'appelle rien : la clé `null` suspend SWR.
-    // Pour un visiteur anonyme, `hasSessionHint()` répond sans aller au réseau, donc
-    // l'attente est nulle en pratique.
-    authEnCours ? null : estAdmin ? "palmares-gagnants-admin" : "palmares-gagnants-public",
-    // `palmaresGagnants` est gardé par require_admin → 401 pour un visiteur, et cette
-    // page est PUBLIQUE : sans repli, tout prospect voyait un palmarès vide. Les blocs
-    // ROI se masquent d'eux-mêmes quand `profils` est absent — le ROI reste donc
-    // admin-only, conformément à la règle produit.
-    //
-    // On ne tente PLUS la version admin d'abord : le 401 était rattrapé côté code mais
-    // le navigateur le journalise quand même, et Lighthouse le compte en « erreurs de
-    // console » (−4 points de bonnes pratiques sur une page vue par des prospects).
-    // Le repli est conservé : un admin dont l'appel échoue voit la version publique
-    // plutôt qu'un palmarès vide.
+  };
+  // Version PUBLIQUE : chargée tout de suite, pour tout le monde, SANS attendre que
+  // l'auth ait tranché. Elle porte le total des gains encaissés : le hero affiche donc
+  // « Gains encaissés » d'emblée, connecté ou non. Avant, la clé dépendait de l'auth
+  // → requête retardée, puis bascule « Paris gagnés » → « Gains encaissés » quelques
+  // secondes plus tard (et jamais de montant pour un visiteur).
+  const { data: publicData, error: publicError, isLoading: publicEnCours, mutate: mutatePublic } = useSWR<PalmaresData>(
+    "palmares-gagnants-public",
     async () => {
-      const publique = async () => {
-        const pub = (await statsApi.palmaresPublic()).data;
-        return {
-          gagnants: pub.gagnants ?? [],
-          top_gains: pub.top_gains ?? [],
-          n: pub.nb_paris_gagnes ?? 0,
-          n_courses: pub.nb_courses_reglees ?? 0,
-          quinte: pub.quinte ?? null,
-          updated_at: pub.updated_at,
-        };
+      const pub = (await statsApi.palmaresPublic()).data;
+      return {
+        gagnants: pub.gagnants ?? [],
+        top_gains: pub.top_gains ?? [],
+        n: pub.nb_paris_gagnes ?? 0,
+        n_courses: pub.nb_courses_reglees ?? 0,
+        total_gain: pub.total_gain,
+        quinte: pub.quinte ?? null,
+        updated_at: pub.updated_at,
       };
-      if (!estAdmin) return publique();
-      try {
-        return (await statsApi.palmaresGagnants()).data;
-      } catch {
-        return publique();
-      }
     },
     { refreshInterval: 60_000, revalidateOnFocus: true, shouldRetryOnError: false },
   );
+  // Version ADMIN (ROI, détail par profil) : `palmaresGagnants` est gardé par
+  // require_admin → on ne l'appelle que pour un admin (un 401 visiteur serait
+  // journalisé en console et compté par Lighthouse). Elle complète la version
+  // publique sans la remplacer tant qu'elle n'est pas arrivée — pas de saut visuel.
+  const { data: adminData, mutate: mutateAdmin } = useSWR<PalmaresData>(
+    !authEnCours && estAdmin ? "palmares-gagnants-admin" : null,
+    () => statsApi.palmaresGagnants().then((r) => r.data),
+    { refreshInterval: 60_000, revalidateOnFocus: true, shouldRetryOnError: false },
+  );
+  const gagnantsData = adminData ?? publicData;
+  const gagnantsError = adminData ? undefined : publicError;
+  const mutateGagnants = () => Promise.all([mutatePublic(), estAdmin ? mutateAdmin() : undefined]);
 
   // Arrivée par `/track-record#records` (lien « Voir les 30 records » de l'accueil) :
   // la section n'existe qu'une fois le palmarès chargé par SWR, bien après la
@@ -629,7 +627,9 @@ export default function TrackRecordPage() {
   // donc aucun `<h1>` : la page de preuve du site était sa page la moins bien
   // référencée. L'en-tête, dont le texte ne dépend d'aucune donnée, y figure
   // désormais tel quel ; seuls les chiffres restent en attente.
-  if (isLoading) {
+  // On attend aussi le palmarès public : sinon le hero s'affichait avec « — » puis
+  // se complétait quelques secondes plus tard. Les deux requêtes partent en parallèle.
+  if (isLoading || (publicEnCours && !publicData)) {
     return (
       <div className="min-h-screen bg-[#FCFBF8]">
         <HeroPalmares courses={null} depuis={null} barreBas={!!user} />
@@ -656,8 +656,8 @@ export default function TrackRecordPage() {
   }
 
   const g = data.global;
-  // `total_gain` n'existe que sur la version admin du palmarès (règle produit :
-  // les montants agrégés ne sont pas publics). Sans ce garde-fou, un visiteur lisait
+  // `total_gain` est servi par les deux versions du palmarès. Le garde-fou reste pour
+  // un cache public antérieur au champ ou un total nul : sans lui, on lirait
   // « Total réglé aux rapports officiels : +0 € ».
   const gainConnu = typeof gagnantsData?.total_gain === "number" && (gagnantsData?.total_gain ?? 0) > 0;
   const nbGagnants = gagnantsData?.n ?? 0;

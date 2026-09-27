@@ -21,6 +21,8 @@ export function CheckoutButton({ plan, periodicite, label, variant = "brand", si
   const { user, loading: authLoading } = useAuth();
   const router = useRouter();
   const [loading, setLoading] = useState(false);
+  // Filleul : l'essai n'existe pas pour lui, le bouton annonce sa remise.
+  const libelle = user?.remise_parrainage && /essai|essayer/i.test(label) ? "S'abonner — 5 € offerts" : label;
 
   async function startCheckout() {
     if (!user) {
@@ -61,7 +63,7 @@ export function CheckoutButton({ plan, periodicite, label, variant = "brand", si
       disabled={loading || authLoading}
       onClick={startCheckout}
     >
-      {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : label}
+      {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : libelle}
     </Button>
   );
 }

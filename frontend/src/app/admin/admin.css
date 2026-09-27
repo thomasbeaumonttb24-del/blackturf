@@ -1,0 +1,65 @@
+/*
+ * Console d'administration — thème clair « rapport financier » (2026-09-25).
+ *
+ * Première refonte du jour : un cockpit sombre à effets 3D. L'exploitant l'a
+ * jugé trop « IA / technologique » et a demandé du clair, sobre, professionnel.
+ * La direction retenue est celle d'un outil de gestion financière : papier
+ * légèrement chaud, cartes blanches à bord fin, une couleur de donnée
+ * principale (ardoise), l'or réservé à l'accent, aucune lueur, aucune
+ * animation décorative.
+ *
+ * Tout reste confiné sous `.bt-admin` : le site public n'est pas concerné.
+ */
+
+.bt-admin {
+  --background: 45 14% 97%;
+  --foreground: 220 26% 12%;
+  --card: 0 0% 100%;
+  --card-foreground: 220 26% 12%;
+  --muted: 40 12% 95.5%;
+  --muted-foreground: 220 7% 40%;
+  --accent: 40 12% 95%;
+  --accent-foreground: 220 26% 12%;
+  --border: 40 9% 89%;
+  --input: 40 9% 89%;
+  --ring: 213 40% 35%;
+
+  color: hsl(var(--foreground));
+  background-color: hsl(var(--background));
+}
+
+/* ── Surfaces ──────────────────────────────────────────────────────────────
+   `bt-verre` est la classe de carte de la console : le nom date de la version
+   sombre, l'apparence est désormais celle d'une carte blanche à bord fin. */
+.bt-verre {
+  background-color: hsl(var(--card));
+  border: 1px solid hsl(var(--border));
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04);
+}
+.bt-relief { transition: border-color 0.15s ease; }
+@media (hover: hover) {
+  .bt-relief:hover { border-color: hsl(40 8% 80%); }
+}
+
+/* Apparition discrète au chargement — un fondu, rien de plus. */
+@media (prefers-reduced-motion: no-preference) {
+  .bt-entree { animation: bt-fondu 0.25s ease-out both; }
+}
+@keyframes bt-fondu {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* ── Recharts ──────────────────────────────────────────────────────────── */
+.bt-admin .recharts-cartesian-axis-tick-value { fill: #6b7079; }
+.bt-admin .recharts-cartesian-grid line { stroke: #ecebe6; }
+.bt-admin .recharts-default-tooltip {
+  border: 1px solid hsl(var(--border)) !important;
+  border-radius: 8px !important;
+  box-shadow: 0 8px 24px -8px rgba(16, 24, 40, 0.18) !important;
+}
+.bt-admin .recharts-legend-item-text { color: #4b5058 !important; }
+
+/* ── Tableaux ──────────────────────────────────────────────────────────── */
+.bt-admin tbody tr { transition: background-color 0.12s ease; }
+.bt-admin tbody tr:hover { background-color: hsl(45 20% 98%); }

@@ -292,7 +292,7 @@ export default function JockeyPage() {
                     </span>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center justify-between mb-1">
-                        <span className="text-sm font-semibold truncate">{h.hippodrome}</span>
+                        <span className="text-sm font-semibold break-words">{h.hippodrome}</span>
                         <div className="flex items-center gap-3 text-xs shrink-0">
                           <span className="text-muted-foreground">{nb} courses</span>
                           <span className="font-bold font-mono" style={{ color: barColor }}>
@@ -336,7 +336,7 @@ export default function JockeyPage() {
                     key={a.entraineur_id}
                     className="flex items-center justify-between gap-2 rounded-lg border border-border/30 bg-muted/20 p-2.5"
                   >
-                    <p className="text-sm font-semibold truncate">{a.entraineur}</p>
+                    <p className="text-sm font-semibold break-words">{a.entraineur}</p>
                     <div className="flex items-center gap-3 text-xs shrink-0">
                       <span className="text-muted-foreground font-mono">{a.nb_courses}c</span>
                       <span className="font-mono text-amber-700">{a.nb_victoires}v</span>
@@ -420,7 +420,7 @@ export default function JockeyPage() {
                 <div className="min-w-0">
                   <Link
                     href={`/chevaux/${p.cheval_id}`}
-                    className="text-sm font-semibold truncate block hover:text-brand-gold-dark transition-colors"
+                    className="text-sm font-semibold break-words block hover:text-brand-gold-dark transition-colors"
                   >
                     <IdentiteCheval numero={p.numero} nom={p.nom_cheval} imgUrl={p.casaque_image_url} />
                   </Link>
@@ -472,7 +472,7 @@ export default function JockeyPage() {
                     <td className="px-3 py-2 font-mono whitespace-nowrap">
                       {p.date ? String(p.date).slice(0, 10) : "—"}
                     </td>
-                    <td className="px-3 py-2 font-semibold max-w-[120px] truncate">
+                    <td className="px-3 py-2 font-semibold break-words">
                       <Link
                         href={`/chevaux/${p.cheval_id}`}
                         className="hover:text-brand-gold-dark transition-colors"
@@ -480,7 +480,7 @@ export default function JockeyPage() {
                         <IdentiteCheval numero={p.numero} nom={p.nom_cheval} imgUrl={p.casaque_image_url} />
                       </Link>
                     </td>
-                    <td className="px-3 py-2 max-w-[110px] truncate hidden sm:table-cell">{p.hippodrome || "—"}</td>
+                    <td className="px-3 py-2 break-words hidden sm:table-cell">{p.hippodrome || "—"}</td>
                     <td className="px-3 py-2 whitespace-nowrap hidden sm:table-cell">{p.discipline || "—"}</td>
                     <td className="px-3 py-2 text-center">{positionBadge(p.position)}</td>
                     <td className="px-3 py-2 font-mono">

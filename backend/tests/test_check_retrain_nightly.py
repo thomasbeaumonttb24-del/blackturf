@@ -603,3 +603,68 @@ def test_un_demarrage_legerement_en_avance_reste_dans_la_fenetre(mod):
     """La dérive du scheduler ne doit pas transformer une nuit réussie en alerte."""
     avance = datetime(2026, 9, 3, 1, 58, tzinfo=timezone.utc)
     assert avance >= mod._debut_fenetre(datetime(2026, 9, 3, 5, 0, tzinfo=timezone.utc))
+
+
+# ── Une version retirée n'est ni prédécesseur ni record (rapport du 26/09) ──
+# v545 avait appris l'arrivée (fuite ELO : classement 0,9632, cote 0,7486) et la
+# production a été remise sur v544 le 25/09. Le rapport du 26/09 comparait
+# pourtant v546 à v545 : « −0,1013 de walk-forward, sous son record historique »,
+# quand le retrain mesurait +0,0952 contre v544 et que le cliquet nommait v546.
+
+async def _versions_du_26_09(db, v545_retiree: bool = False):
+    import uuid
+    from db.models import ModelVersion
+
+    def _mv(num, wf, delta, actif=False, rollback=False):
+        return ModelVersion(
+            version_id=str(uuid.uuid4()), version_num=num,
+            nom_fichier=f"model_v{num:04d}.pkl", auc_roc=wf, brier_score=0.07,
+            precision_top3=0.5, roi_simule=0.0, nb_courses_train=178_000,
+            walk_forward_auc=wf, rank_auc=0.75 + delta, market_rank_auc=0.7485,
+            rank_delta_market=delta, rank_source="hold_out",
+            est_actif=actif, est_rollback=rollback, est_synthetique=False)
+
+    db.add_all([
+        _mv(544, 0.7761, 0.0182),
+        _mv(545, 0.9726, 0.2146, rollback=v545_retiree),
+        _mv(546, 0.8713, 0.0465, actif=True),
+    ])
+    await db.commit()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("v545_retiree", [False, True])
+async def test_une_version_fuyante_ou_retiree_nest_pas_une_reference(mod, db, v545_retiree):
+    from sqlalchemy import select
+    from db.models import ModelVersion
+
+    await _versions_du_26_09(db, v545_retiree)
+    prec = (await db.execute(
+        select(ModelVersion.version_num)
+        .where(ModelVersion.version_num < 546, *mod._reference_valable())
+        .order_by(ModelVersion.version_num.desc())
+    )).scalars().first()
+    assert prec == 544
+
+    record = (await db.execute(
+        select(ModelVersion.version_num)
+        .where(*mod._reference_valable())
+        .order_by(ModelVersion.walk_forward_auc.desc())
+    )).scalars().first()
+    assert record == 546, "le modèle actif est le record, comme le dit le cliquet"
+
+
+def test_le_seuil_de_fuite_du_rapport_suit_celui_du_pipeline(mod):
+    from ml.pipeline import FUITE_AVANCE_MARCHE_MAX
+    assert mod.FUITE_AVANCE_MARCHE_MAX == FUITE_AVANCE_MARCHE_MAX
+
+
+def test_une_etape_perimee_dit_pourquoi(mod):
+    html = mod._bloc_apprentissages({
+        "etapes": [{"step": "nettete_probas", "last_status": "echec",
+                    "last_success_at": datetime(2026, 9, 24, 2, 16),
+                    "last_error": "DataError: invalid input for query argument $1"}],
+        "perimees": [{"step": "nettete_probas"}], "seuil_heures": 48,
+    })
+    assert "PÉRIMÉ" in html
+    assert "DataError" in html

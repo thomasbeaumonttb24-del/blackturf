@@ -16,7 +16,7 @@ import { ArrowUpRight, Brain, CircleDollarSign, Layers, ShieldAlert, Sparkles } 
 import { ChartTooltip, GRID, axisLine, axisTick, tickLine } from "@/components/charts/chart-kit";
 import {
   DIVERGING_NEG, DIVERGING_POS, Empty, Note, Section, StatTile, VerdictBadge,
-  eur, num, pct, signedEur, signedPct, tone,
+  eur, num, pct, signedEur, signedPct, tone, DegradeZero, offsetZero,
 } from "./kit";
 import type { AlgoEvolutionPayload, ParisPayload, RentabilitePayload } from "./types";
 
@@ -206,17 +206,14 @@ export default function OverviewTab({
             <ResponsiveContainer width="100%" height={230}>
               <AreaChart data={chart} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
                 <defs>
-                  <linearGradient id="ovCapital" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor={DIVERGING_NEG} stopOpacity={0.04} />
-                    <stop offset="100%" stopColor={DIVERGING_NEG} stopOpacity={0.2} />
-                  </linearGradient>
+<DegradeZero id="ovCapital" offset={offsetZero(chart.map((c) => c.cumul_net))} />
                 </defs>
                 <CartesianGrid {...GRID} />
                 <XAxis dataKey="label" tick={axisTick} axisLine={axisLine} tickLine={tickLine} minTickGap={26} />
                 <YAxis tick={axisTick} axisLine={axisLine} tickLine={tickLine} tickFormatter={(v) => `${Math.round(v)} €`} width={62} />
                 <ReferenceLine y={0} stroke="#4B5563" strokeDasharray="3 3" />
                 <Tooltip content={<ChartTooltip valueFormatter={(v) => signedEur(v, 2)} />} />
-                <Area type="monotone" dataKey="cumul_net" name="Capital cumulé" stroke={DIVERGING_NEG} strokeWidth={2} fill="url(#ovCapital)" isAnimationActive={false} />
+                <Area type="monotone" dataKey="cumul_net" name="Capital cumulé" stroke="url(#ovCapital-trait)" strokeWidth={2.5} fill="url(#ovCapital-aire)" isAnimationActive />
               </AreaChart>
             </ResponsiveContainer>
           )}

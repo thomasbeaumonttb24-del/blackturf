@@ -52,6 +52,8 @@ export default function AdminInstagramPage() {
   const { data: etat, mutate } = useSWR<EtatJeton>(
     "/admin/integrations/instagram",
     () => adminApi.integrationInstagram().then((r) => r.data),
+    // L'état du jeton change la nuit (renouvellement automatique) : relu chaque minute.
+    { refreshInterval: 60_000, revalidateOnFocus: true, keepPreviousData: true },
   );
 
   async function deposer(e: React.FormEvent) {

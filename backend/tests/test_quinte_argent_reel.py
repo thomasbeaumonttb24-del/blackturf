@@ -478,12 +478,13 @@ async def test_palmares_quinte_exclut_les_tickets_jamais_affiches(db):
 
 @pytest.mark.asyncio
 async def test_palmares_public_quinte_sans_roi_ni_montants(client):
-    """Le public reçoit des comptages : ni ROI, ni mise/retour agrégés (qui
-    permettraient de le recalculer), ni détail par profil — réservés à l'admin."""
+    """Le public reçoit des comptages et le montant total encaissé, mais ni ROI, ni
+    mise (qui, avec le retour, permettrait de recalculer le ROI), ni détail par
+    profil — réservés à l'admin."""
     q = (await client.get("/api/v1/stats/palmares-public")).json()["quinte"]
-    for champ in ("roi", "net", "mise_totale", "retour", "par_profil"):
+    for champ in ("roi", "net", "mise_totale", "par_profil"):
         assert champ not in q, champ
-    assert {"nb_tickets", "nb_bonus", "nb_tickets_gagnants"} <= set(q)
+    assert {"nb_tickets", "nb_bonus", "nb_tickets_gagnants", "retour"} <= set(q)
 
 
 @pytest.mark.parametrize("montant,total", [(3, 13.0), (20, 20.0)])
@@ -523,3 +524,9 @@ async def test_palmares_quinte_compte_les_cinq_tickets_du_risque(db, monkeypatch
     # Ordre (ticket joué dans l'ordre d'arrivée), deux Bonus 4sur5, un Bonus 3.
     assert q["nb_tickets_gagnants"] == 4
     assert q["retour"] == pytest.approx(2 * 4703.3 + 2 * 2 * 2.4 + 2 * 2.1, abs=0.01)
+    # Chaque combinaison payée figure aussi dans les listes « paris gagnés ».
+    g = q["gagnants"]
+    assert len(g) == 4 and all(x["type_pari"].startswith("Quinté+ · ") for x in g)
+    assert all(x["mise"] == 2.0 and x["benefice"] > 0 for x in g)
+    assert sum(x["gain"] for x in g) == pytest.approx(q["retour"], abs=0.01)
+    assert {x["code"] for x in g} == {"R1C1"}

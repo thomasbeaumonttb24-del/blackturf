@@ -24,7 +24,7 @@ import { rapportsTries, libellePari, formatRapport } from "@/lib/rapports";
 import { SeoHero, Container, Section, Callout } from "@/components/seo/kit";
 import { NewsletterForm } from "@/components/newsletter/NewsletterForm";
 import { PreuvesRecentesCard } from "@/components/courses/insights";
-import { BilanAlgoJour, VerdictAlgoLigne } from "@/components/seo/ComparaisonAlgo";
+import { BilanAlgoJour, PronosticAlgoTop5 } from "@/components/seo/ComparaisonAlgo";
 
 /**
  * Page « arrivées et rapports » d'une journée PMU.
@@ -330,7 +330,7 @@ export async function ResultatsJour({ jour }: { jour: string }) {
  * Une arrivée = une carte. Les cinq premiers sont sur UNE ligne, en colonnes égales
  * (place, numéro, casaque, nom) : l'ancienne liste en ligne laissait les chevaux
  * passer à la ligne au hasard de la longueur des noms, et l'œil ne retrouvait plus
- * l'ordre d'arrivée. Les rapports suivent en tuiles, le verdict de l'algo en pied.
+ * l'ordre d'arrivée. Les rapports suivent en tuiles, le top 5 de l'algo en pied.
  */
 function CarteArrivee({
   course: c,
@@ -401,8 +401,10 @@ function CarteArrivee({
               {l.position === 1 ? "1er" : `${l.position}e`}
             </span>
             <CasaqueNumero numero={l.numero} courseId={c.course_id} vertical />
+            {/* Sur téléphone, un cinquième de carte ne loge que le numéro : le nom
+                y était coupé en plein mot (« Capitain e… »). */}
             <span
-              className="line-clamp-2 w-full break-words px-0.5 text-[10.5px] font-medium leading-tight text-stone-700 sm:text-[11.5px]"
+              className="hidden w-full break-words px-0.5 text-[11.5px] font-medium leading-tight text-stone-700 sm:block"
               title={titleCase(l.nom)}
             >
               {titleCase(l.nom)}
@@ -420,7 +422,7 @@ function CarteArrivee({
           <dl className="mt-2 grid grid-cols-2 gap-1.5 sm:grid-cols-3">
             {rapports.map(([code, val]) => (
               <div key={code} className="min-w-0 rounded-lg border border-stone-100 bg-stone-50 px-2.5 py-1.5">
-                <dt className="truncate text-[10.5px] text-stone-500">{libellePari(code)}</dt>
+                <dt className="break-words text-[10.5px] leading-tight text-stone-500">{libellePari(code)}</dt>
                 <dd className="font-display text-[14px] font-bold tabular-nums text-brand-dark">
                   {formatRapport(val)} €
                 </dd>
@@ -430,12 +432,10 @@ function CarteArrivee({
         </div>
       )}
 
-      {/* Verdict de l'algo, poussé en pied pour aligner les cartes voisines */}
-      <footer className="mt-auto px-4 pb-4 pt-2 sm:px-5">
+      {/* Pronostic de l'algo (top 5), poussé en pied pour aligner les cartes voisines */}
+      <footer className="mt-auto px-3 pb-3 pt-3 sm:px-4 sm:pb-4">
         {verdict ? (
-          <div className="border-t border-stone-100 pt-1.5">
-            <VerdictAlgoLigne v={verdict} courseId={c.course_id} />
-          </div>
+          <PronosticAlgoTop5 v={verdict} courseId={c.course_id} />
         ) : (
           <Link
             href={`/courses/${c.course_id}`}

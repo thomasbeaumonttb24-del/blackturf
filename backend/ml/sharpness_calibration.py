@@ -237,7 +237,31 @@ def ajuster_exposant(courses: Sequence[tuple], frac_ajustement: float = 0.8,
     return {"retenu": True, "exposant": compose, **commun}
 
 
-async def _charger_courses(session: AsyncSession, depuis: Optional[str]) -> list[tuple]:
+def _depuis_en_datetime(depuis) -> Optional[datetime]:
+    """`applique_depuis` (ISO, tel que stocké dans le JSON) en datetime UTC.
+
+    asyncpg REFUSE de lier une chaîne à une colonne horodatée : « expected a
+    datetime.date or datetime.datetime instance, got 'str' ». SQLite, lui,
+    compare des chaînes sans broncher. La panne ne se voyait donc qu'en
+    production, et seulement une fois un exposant retenu (neutre, `depuis` vaut
+    None) : `nettete_probas` a retenu un exposant le 24/09 puis a échoué toutes
+    les nuits suivantes, le correcteur figé sur sa première valeur.
+    Illisible → None : on relit alors tout l'historique plutôt que d'échouer.
+    """
+    if depuis is None or isinstance(depuis, datetime):
+        dt = depuis
+    else:
+        try:
+            dt = datetime.fromisoformat(str(depuis).replace("Z", "+00:00"))
+        except ValueError:
+            log.warning("sharpness.depuis_illisible", depuis=str(depuis)[:40])
+            return None
+    if dt is not None and dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
+async def _charger_courses(session: AsyncSession, depuis) -> list[tuple]:
     """[(probas servies, index du gagnant)] par course, en ordre chronologique.
 
     Source : les prédictions FIGÉES avant le départ (`prediction_evaluation`, mêmes
@@ -251,7 +275,8 @@ async def _charger_courses(session: AsyncSession, depuis: Optional[str]) -> list
     """
     conditions = ""
     params: dict = {}
-    if depuis:
+    depuis = _depuis_en_datetime(depuis)
+    if depuis is not None:
         conditions = " AND pe.created_at >= :depuis"
         params["depuis"] = depuis
     rows = (await session.execute(text(f"""

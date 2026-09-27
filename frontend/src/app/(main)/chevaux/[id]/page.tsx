@@ -484,7 +484,7 @@ export default function ChevalPage() {
                       </span>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center justify-between mb-1">
-                          <span className="text-sm font-semibold truncate">{h.hippodrome}</span>
+                          <span className="text-sm font-semibold break-words">{h.hippodrome}</span>
                           <div className="flex items-center gap-3 text-xs shrink-0">
                             <span className="text-muted-foreground">{h.nb_courses} courses</span>
                             <span className="font-bold font-mono" style={{ color: barColor }}>
@@ -614,7 +614,7 @@ export default function ChevalPage() {
                 >
                   <div className="flex items-center justify-between gap-2">
                     <div className="min-w-0">
-                      <p className="text-sm font-semibold truncate">{h.hippodrome || "—"}</p>
+                      <p className="text-sm font-semibold break-words">{h.hippodrome || "—"}</p>
                       <p className="text-[11px] text-muted-foreground font-mono">
                         {h.date ? String(h.date).slice(0, 10) : "—"}
                         {h.distance ? ` · ${h.distance}m` : ""}
@@ -667,7 +667,7 @@ export default function ChevalPage() {
                       <td className="px-3 py-2 font-mono whitespace-nowrap">
                         {h.date ? String(h.date).slice(0, 10) : "—"}
                       </td>
-                      <td className="px-3 py-2 max-w-[120px] truncate">{h.hippodrome || "—"}</td>
+                      <td className="px-3 py-2 break-words">{h.hippodrome || "—"}</td>
                       <td className="px-3 py-2 whitespace-nowrap hidden sm:table-cell">{h.discipline || "—"}</td>
                       <td className="px-3 py-2 font-mono whitespace-nowrap">
                         {h.distance ? `${h.distance}m` : "—"}
@@ -684,7 +684,7 @@ export default function ChevalPage() {
                       <td className="px-3 py-2 font-mono whitespace-nowrap text-emerald-700 hidden sm:table-cell">
                         {h.gains ? formatGains(h.gains) : "—"}
                       </td>
-                      <td className="px-3 py-2 max-w-[100px] truncate text-muted-foreground hidden lg:table-cell">
+                      <td className="px-3 py-2 break-words text-muted-foreground hidden lg:table-cell">
                         {h.jockey || "—"}
                       </td>
                     </tr>

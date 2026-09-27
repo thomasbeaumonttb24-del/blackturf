@@ -472,7 +472,11 @@ async def dashboard_summary(
             "numero": part.numero,
             "hippodrome": course.hippodrome_nom,
             "discipline": course.discipline,
+            # `heure` est en UTC (heure du serveur) : le front lit `date_heure` et
+            # l'affiche à l'heure de Paris ; `heure` reste pour les anciens clients.
             "heure": course.date_heure.strftime("%H:%M") if course.date_heure else None,
+            "date_heure": course.date_heure.isoformat() if course.date_heure else None,
+            "code": (f"R{course.numero_reunion}C{course.numero}" if course.numero_reunion and course.numero else None),
             "ev": round(vb.ev_max, 2),
             "niveau": vb.niveau,
             "cote": round(part.cote_pmu, 1) if part.cote_pmu else None,
@@ -710,6 +714,12 @@ async def perf_personnelle(
 # ─────────────────────────────────────────────────────────────
 TRACK_RECORD_CACHE_KEY = "stats:track-record"
 TRACK_RECORD_FRESH_TTL = 3600   # 1 h de fraîcheur
+# Posé par le pipeline post-course dès qu'une course est journalisée : le job
+# `job_track_record_a_jour` (chaque minute) recalcule alors sans attendre l'heure.
+# Distinct du drapeau `:fresh` : un recalcul déjà lancé AVANT l'arrivée réécrirait
+# `:fresh` en finissant et masquerait la nouvelle course ; `:dirty`, lui, n'est
+# effacé qu'au DÉBUT d'un calcul, donc une course arrivée pendant reste en attente.
+TRACK_RECORD_DIRTY_KEY = f"{TRACK_RECORD_CACHE_KEY}:dirty"
 
 # Références fortes sur les tâches de fond : sans ça, asyncio peut collecter une
 # tâche non référencée avant sa fin (le recalcul serait tué en cours de route).
@@ -769,6 +779,10 @@ async def refresh_track_record_cache() -> bool:
     if not verrou:
         return False            # un recalcul est déjà en cours ailleurs
     try:
+        try:
+            await redis.delete(TRACK_RECORD_DIRTY_KEY)
+        except Exception:
+            pass
         async with AsyncSessionLocal() as session:
             result = await _compute_track_record(session)
         await _cache_set_swr(redis, TRACK_RECORD_CACHE_KEY, result,
@@ -783,6 +797,34 @@ async def refresh_track_record_cache() -> bool:
             await redis.delete(lock_key)
         except Exception:
             pass
+
+
+async def marquer_track_record_perime() -> None:
+    """Signale qu'une course vient d'être journalisée (race_learning_log).
+
+    Appelé depuis le worker RQ, qui meurt avec son job : on n'y lance donc pas le
+    calcul (~29 s), on pose seulement les drapeaux. La version en cache reste servie
+    (SWR) jusqu'au recalcul par `job_track_record_a_jour`, dans la minute."""
+    from db.redis_client import get_redis as _get_redis
+    try:
+        redis = await _get_redis()
+        await redis.set(TRACK_RECORD_DIRTY_KEY, "1", ex=_SWR_STALE_TTL)
+        await redis.delete(f"{TRACK_RECORD_CACHE_KEY}:fresh")
+    except Exception as e:
+        log.warning("stats.track_record.mark_stale_failed", error=str(e)[:200])
+
+
+async def track_record_a_recalculer() -> bool:
+    """Vrai si une course a été intégrée depuis le dernier calcul, ou si le cache
+    n'est plus frais."""
+    from db.redis_client import get_redis as _get_redis
+    try:
+        redis = await _get_redis()
+        if await redis.exists(TRACK_RECORD_DIRTY_KEY):
+            return True
+        return not await redis.exists(f"{TRACK_RECORD_CACHE_KEY}:fresh")
+    except Exception:
+        return False
 
 
 async def _compute_track_record(db: AsyncSession) -> dict:
@@ -1573,11 +1615,12 @@ async def _palmares_rows(db: AsyncSession) -> dict:
 # mais invisible : un ticket que personne n'a vu ne compte pas au palmarès.
 QUINTE_MODULE_DEPUIS = datetime(2026, 9, 24, 17, 8, 10, tzinfo=timezone.utc)
 
-# Version publique du bloc : comptages seulement. Le ROI et les agrégats d'argent
-# restent réservés à l'admin (règle produit de `/stats/public` et du palmarès) —
+# Version publique du bloc : comptages + montant total encaissé (`retour`), qui est
+# ce que le site affiche. La mise, le net et le ROI restent réservés à l'admin :
 # mise + retour publiés suffiraient à recalculer le ROI.
 _QUINTE_CHAMPS_PUBLICS = ("disponible", "nb_tickets", "nb_courses", "nb_en_attente",
-                          "nb_tickets_gagnants", "nb_bonus", "nb_cinq_sur_cinq", "depuis")
+                          "nb_tickets_gagnants", "nb_bonus", "nb_cinq_sur_cinq", "depuis",
+                          "retour")
 
 
 def _quinte_public(bloc: dict) -> dict:
@@ -1606,11 +1649,12 @@ async def _quinte_palmares(db: AsyncSession) -> dict:
     vide = {"disponible": False, "nb_tickets": 0, "nb_courses": 0, "nb_en_attente": 0,
             "mise_totale": 0.0, "retour": 0.0, "net": 0.0, "roi": None,
             "nb_tickets_gagnants": 0, "nb_bonus": 0, "nb_cinq_sur_cinq": 0,
-            "par_profil": {}, "depuis": None}
+            "par_profil": {}, "depuis": None, "gagnants": []}
     try:
         rows = (await db.execute(_text("""
             SELECT r.course_id, r.profil, r.plan, c.nb_partants, c.date_heure,
-                   res.classement, res.rapports, res.rapports_detail
+                   res.classement, res.rapports, res.rapports_detail,
+                   c.hippodrome_nom, c.numero_reunion, c.numero, r.created_at, r.settled_at
             FROM profil_run_log r
             JOIN courses c ON c.course_id = r.course_id
             JOIN resultats res ON res.course_id = r.course_id
@@ -1649,10 +1693,14 @@ async def _quinte_palmares(db: AsyncSession) -> dict:
         except (TypeError, ValueError):
             return None
 
-    out = dict(vide, par_profil={})
+    def _iso(v):
+        return v.isoformat() if hasattr(v, "isoformat") else v
+
+    out = dict(vide, par_profil={}, gagnants=[])
     courses: set = set()
     depuis = None
-    for cid, profil, plan, nb_part, dh, classement, rapports, detail in rows:
+    for (cid, profil, plan, nb_part, dh, classement, rapports, detail,
+         hippo, n_reunion, n_course, created_at, settled_at) in rows:
         module = (_json(plan) or {}).get("module_quinte")
         classement = _json(classement) or []
         if not isinstance(module, dict) or not classement:
@@ -1688,6 +1736,34 @@ async def _quinte_palmares(db: AsyncSession) -> dict:
         p["mise_totale"] += bilan["total_mise"]
         p["retour"] += bilan["total_gain"]
         p["nb_bonus"] += nb_bonus
+        # Chaque combinaison payée devient un « pari gagné » du palmarès, au même
+        # format que ceux du plan principal (listes récents / records). Elles
+        # n'entrent pas dans les totaux du plan principal : cf. `_avec_quinte`.
+        if n_reunion and n_course:
+            code = f"R{n_reunion}C{n_course}"
+        else:
+            m = re.search(r"(R\d+C\d+)", str(cid))
+            code = m.group(1) if m else None
+        mise_c = float(bilan.get("mise_par_combinaison") or 0)
+        for g in bilan["gagnantes"]:
+            gain = float(g["gain"])
+            out["gagnants"].append({
+                "profil": profil,
+                "course_id": cid,
+                "code": code,
+                "hippodrome": hippo,
+                "date": _iso(dh),
+                "type_pari": f"Quinté+ · {g.get('rang') or 'Désordre'}",
+                "chevaux": list(g["combinaison"]),
+                "mise": round(mise_c, 2),
+                "gain": round(gain, 2),
+                "benefice": round(gain - mise_c, 2),
+                "rapport": round(gain / mise_c, 2) if mise_c > 0 else None,
+                "rapport_vise": None,
+                "fige_avant_course": True,
+                "fige_le": _iso(created_at),
+                "regle_le": _iso(settled_at),
+            })
 
     mise, retour = round(out["mise_totale"], 2), round(out["retour"], 2)
     for p in out["par_profil"].values():
@@ -1704,6 +1780,16 @@ async def _quinte_palmares(db: AsyncSession) -> dict:
         "depuis": (depuis.isoformat() if hasattr(depuis, "isoformat") else depuis) if depuis else None,
     })
     return out
+
+
+def _avec_quinte(data: dict, quinte: dict) -> tuple[list, list]:
+    """Listes « paris gagnés » (récents, records) du palmarès, tickets Quinté+
+    gagnants compris. Les totaux (`n`, `total_gain`…) restent ceux du plan
+    principal : le Quinté+ a sa propre ligne de chiffres."""
+    q = quinte.get("gagnants") or []
+    gagnants = sorted(data["gagnants"] + q, key=lambda g: g.get("date") or "", reverse=True)
+    top = sorted(data["top_gains"] + q, key=lambda x: x["benefice"], reverse=True)[:30]
+    return gagnants, top
 
 
 _PALMARES_INTEGRITE = (
@@ -1870,8 +1956,8 @@ async def stats_palmares_public(
         gagnants : sans ce dénominateur, n'afficher que les paris gagnants serait un
         biais du survivant. Le front doit présenter les deux ensemble.
 
-    Ce qui N'EST PAS exposé : le ROI et les agrégats de gains par profil restent
-    réservés à l'admin (exigence produit déjà appliquée à `/stats/public`).
+    Ce qui N'EST PAS exposé : le ROI, la mise, le bénéfice net et les agrégats par
+    profil restent réservés à l'admin — seul le total brut `total_gain` est public.
     """
     CACHE_KEY = "stats:palmares-public"
     cached = await _cache_get(redis, CACHE_KEY)
@@ -1879,20 +1965,27 @@ async def stats_palmares_public(
         return cached
 
     data = await _palmares_rows(db)
+    quinte = await _quinte_palmares(db)
+    gagnants, top_gains = _avec_quinte(data, quinte)
     result = {
         # Volumes alignés sur ce que la page track-record sait dérouler via ses
         # boutons « voir plus » (50 récents / 30 records). Avec l'ancien cap à 10,
         # un visiteur anonyme recevait exactement 10 lignes : le bouton, conditionné
         # à `limite < longueur`, ne s'affichait jamais et la liste semblait close.
-        "top_gains": data["top_gains"][:30],
-        "gagnants": data["gagnants"][:50],
+        "top_gains": top_gains[:30],
+        "gagnants": gagnants[:50],
         "nb_paris_gagnes": data["n"],
         "nb_courses_gagnantes": data["n_courses"],
         "nb_courses_reglees": data["n_courses_reglees"],
+        # Gains bruts encaissés (somme des rapports officiels des paris gagnés) :
+        # c'est le chiffre phare du hero de la page track-record, qui doit être le
+        # même pour un visiteur et pour un membre. La mise, le bénéfice net et le
+        # ROI restent, eux, réservés à l'admin.
+        "total_gain": data["total_gain"],
         # Ticket Quinté+ : ligne SÉPARÉE, jamais mêlée aux paris ni aux totaux
         # ci-dessus. Version publique = comptages seulement (pas de ROI ni de
         # montants agrégés, cf. _quinte_public) ; l'admin a le bloc complet.
-        "quinte": _quinte_public(await _quinte_palmares(db)),
+        "quinte": _quinte_public(quinte),
         "integrite": data["integrite"],
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
@@ -2001,7 +2094,8 @@ async def stats_palmares_gagnants(
     `/stats/palmares-public`) ; seuls les agrégats ROI/gains par profil, réservés à
     l'admin, sont calculés ici."""
     data = await _palmares_rows(db)
-    gagnants = data["gagnants"]
+    quinte = await _quinte_palmares(db)
+    gagnants, top_gains = _avec_quinte(data, quinte)
     by_profil = data["by_profil"]
 
     profils = []
@@ -2023,14 +2117,15 @@ async def stats_palmares_gagnants(
         # Liste = 100 paris gagnants les plus récents (le résumé par profil + les
         # totaux ci-dessous portent eux sur TOUTES les courses analysées).
         "gagnants": gagnants[:100],
-        "top_gains": data["top_gains"],
+        "top_gains": top_gains,
         "n": data["n"],
         "n_courses": data["n_courses"],
         "nb_courses_reglees": data["n_courses_reglees"],
         "total_gain": data["total_gain"],
         "total_benefice": round(data["total_gain"] - data["total_mise"], 2),
         "profils": profils,
-        "quinte": await _quinte_palmares(db),   # ligne à part, hors totaux ci-dessus
+        # Ligne à part, hors totaux ci-dessus (ses tickets gagnants figurent dans les listes).
+        "quinte": {k: v for k, v in quinte.items() if k != "gagnants"},
         "integrite": data["integrite"],
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }

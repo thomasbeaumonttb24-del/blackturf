@@ -25,6 +25,7 @@ import {
 
 export { eur, nf, num, pct, signedEur, signedPct, tone };
 export { DIVERGING_NEG, DIVERGING_POS } from "../ui";
+import { DIVERGING_NEG as DIVERGING_NEG_, DIVERGING_POS as DIVERGING_POS_ } from "../ui";
 
 // ─── verdict ─────────────────────────────────────────────────
 const VERDICTS: Record<string, { label: string; cls: string; aide: string }> = {
@@ -120,4 +121,39 @@ export function Note({ children }: { children: React.ReactNode }) {
 /** Barre horizontale de polarité, pour lire un ROI sans lire le chiffre. */
 export function PolarityBar({ value, max }: { value: number | null; max: number }) {
   return <BarrePolarite value={value} max={max} />;
+}
+
+/**
+ * Position (0 → 1, du haut vers le bas du graphe) où la courbe franchit zéro,
+ * pour un dégradé qui passe du vert au rouge EXACTEMENT sur l'axe : une courbe
+ * de capital positive se lit verte, sa partie sous l'eau rouge.
+ */
+export function offsetZero(valeurs: Array<number | null | undefined>): number {
+  const v = valeurs.filter((x): x is number => x != null && isFinite(x));
+  if (v.length === 0) return 0.5;
+  const max = Math.max(...v);
+  const min = Math.min(...v);
+  if (max <= 0) return 0;
+  if (min >= 0) return 1;
+  return max / (max - min);
+}
+
+/** Dégradés vert/rouge coupés à zéro : `{id}-trait` pour le contour, `{id}-aire` pour le remplissage. */
+export function DegradeZero({ id, offset }: { id: string; offset: number }) {
+  return (
+    <>
+      <linearGradient id={`${id}-trait`} x1="0" y1="0" x2="0" y2="1">
+        <stop offset={0} stopColor={DIVERGING_POS_} />
+        <stop offset={offset} stopColor={DIVERGING_POS_} />
+        <stop offset={offset} stopColor={DIVERGING_NEG_} />
+        <stop offset={1} stopColor={DIVERGING_NEG_} />
+      </linearGradient>
+      <linearGradient id={`${id}-aire`} x1="0" y1="0" x2="0" y2="1">
+        <stop offset={0} stopColor={DIVERGING_POS_} stopOpacity={0.35} />
+        <stop offset={offset} stopColor={DIVERGING_POS_} stopOpacity={0.02} />
+        <stop offset={offset} stopColor={DIVERGING_NEG_} stopOpacity={0.02} />
+        <stop offset={1} stopColor={DIVERGING_NEG_} stopOpacity={0.35} />
+      </linearGradient>
+    </>
+  );
 }

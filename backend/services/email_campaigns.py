@@ -214,7 +214,7 @@ async def build_week(session, now):
                         for p in totals.values() if p["n"]]}
 
 
-async def deliver(session, campaign, email, subject, html, plain, unsubscribe, now):
+async def deliver(session, campaign, email, subject, html, plain, unsubscribe, now, journal=None):
     from services.alerts import send_email
     address = email.strip().lower()
     suppressed = await session.scalar(select(EmailLivraison.cle).where(
@@ -253,8 +253,14 @@ async def deliver(session, campaign, email, subject, html, plain, unsubscribe, n
         row.erreur = getattr(result, "erreur", "Échec fournisseur")
     from services.alerts import _log_alerte
     user_id = await session.scalar(select(User.user_id).where(func.lower(User.email) == address))
-    await _log_alerte(session, user_id, "digest_matin" if campaign.startswith("jour-") else "weekly_best_vb",
-                      "email", {"campagne": campaign}, result, row.erreur)
+    if campaign.startswith("jour-"):
+        type_alerte = "digest_matin"
+    elif campaign.startswith("strategie-"):
+        type_alerte = "strategie_email"  # cf. services/alertes_strategies.py
+    else:
+        type_alerte = "weekly_best_vb"
+    await _log_alerte(session, user_id, type_alerte, "email", {"campagne": campaign, **(journal or {})},
+                      result, row.erreur, quand=now)
     await session.commit()
     return bool(result)
 
@@ -357,7 +363,11 @@ async def send_daily(session, now=None):
             items.append({"course_id": course.course_id,
                           "heure": utc(course.date_heure).astimezone(PARIS).strftime("%H:%M"),
                           "hippodrome": course.hippodrome_nom, "nom_cheval": horse.nom,
-                          "numero": part.numero, "ev": ev, "niveau": vb.niveau})
+                          "numero": part.numero, "ev": ev, "niveau": vb.niveau,
+                          # Habillage de la carte, comme la page Value bets.
+                          "course_nom": course.nom, "reunion": course.numero_reunion,
+                          "course_num": course.numero, "cote": part.cote_pmu,
+                          "casaque_url": part.casaque_image_url})
         if not items:
             continue
         html, plain = daily(items, local.strftime("%d/%m/%Y à %H:%M (Paris)"), _unsubscribe_url(user.user_id))

@@ -205,6 +205,102 @@ export interface AbonnementsData {
   mouvements: MouvementAbo[];
 }
 
+export interface PaiementRecu {
+  date: string;
+  email: string | null;
+  plan: Formule;
+  montant_cents: number;
+  rembourse_cents: number;
+  /** Frais Stripe et net crédité — `null` quand la source est le journal interne. */
+  frais_cents: number | null;
+  net_cents: number | null;
+  /** Premier encaissement du client, ou échéance suivante. */
+  nature: "nouveau" | "renouvellement";
+  motif: string | null;
+  charge_id: string | null;
+  /** Reçu Stripe officiel du paiement. */
+  recu_url: string | null;
+  facture_id: string | null;
+  source: "stripe" | "journal";
+}
+
+export interface MoisRevenu {
+  mois: string; // AAAA-MM, fuseau Europe/Paris
+  /** Débits réussis, bruts. */
+  encaisse_cents: number;
+  rembourse_cents: number;
+  /** Chiffre d'affaires encaissé = brut − remboursements. */
+  ca_cents: number;
+  frais_cents: number;
+  net_cents: number;
+  /** Virements arrivés sur le compte bancaire ce mois-là. */
+  verse_cents: number;
+  nb_remboursements: number;
+  frais_connus: boolean;
+  nb_paiements: number;
+  nouveaux_cents: number;
+  renouvellements_cents: number;
+  par_formule: Record<Formule, number>;
+  echecs_cents: number;
+  nb_echecs: number;
+  nb_clients: number;
+  panier_moyen_cents: number | null;
+  cumul_cents: number;
+  paiements: PaiementRecu[];
+}
+
+export type NatureEcheance = "renouvellement" | "premier_prelevement" | "fin_acces" | "impaye";
+
+export interface Echeance {
+  user_id: string;
+  email: string;
+  plan: Formule;
+  periodicite: string;
+  statut: string;
+  nature: NatureEcheance;
+  date: string | null;
+  jours_restants: number | null;
+  montant_cents: number;
+  stripe_subscription_id: string | null;
+}
+
+export interface EcartRapprochement {
+  date: string;
+  email: string | null;
+  montant_cents: number;
+  charge_id?: string | null;
+}
+
+export interface RevenusData {
+  fuseau: string;
+  source: { type: "stripe" | "journal"; lu_le: string | null; erreur: string | null };
+  rapprochement: {
+    verifie: boolean;
+    absents_du_journal: EcartRapprochement[];
+    absents_de_stripe: EcartRapprochement[];
+  };
+  mois: MoisRevenu[];
+  totaux: {
+    periode_cents: number;
+    brut_cents: number;
+    rembourse_cents: number;
+    frais_cents: number;
+    net_cents: number;
+    verse_cents: number;
+    mois_courant_cents: number;
+    mois_precedent_cents: number | null;
+    variation_pct: number | null;
+    reste_a_encaisser_mois_cents: number;
+    atterrissage_mois_cents: number;
+    moyenne_mensuelle_cents: number;
+    nb_paiements: number;
+    echecs_cents: number;
+  };
+  prevision: Array<{ mois: string; prevu_cents: number }>;
+  echeancier: Echeance[];
+  computed_at: string;
+}
+
 export interface CompteLigne {
   user_id: string;
   email: string;
@@ -243,6 +339,14 @@ export interface UserDetail {
   par_type: Array<{ type_pari: string; nb: number; mise: number; net: number; nb_gagnes: number; roi: number | null }>;
   subscriptions: Array<{ sub_id: string; plan: string; periodicite: string; statut: string; periode_debut: string | null; periode_fin: string | null }>;
   nb_bets: number;
+  /** Absent sur une API antérieure au parrainage. */
+  parrainage?: {
+    code: string | null;
+    parraine_par: LienFiche | null;
+    filleuls: LienFiche[];
+    valides: number;
+    gagne_cents: number;
+  };
   bets: Array<{
     entry_id: string; date: string; type_pari: string; chevaux: string | null;
     mise: number; cote: number | null; resultat: string | null; gain_perte: number | null;
@@ -342,3 +446,80 @@ export const PROFIL_NET_LABELS: Record<string, string> = {
  *  projet (4 scrapers « ok » à zéro donnée pendant des semaines). Il reste rouge. */
 export const SCRAPERS_SAINS = ["ok", "ok_avec_echecs"];
 export const scraperSain = (statut: string) => SCRAPERS_SAINS.includes(statut);
+
+
+/* ───────────────────────────── parrainage ───────────────────────────── */
+
+export interface LienFiche {
+  user_id: string | null;
+  email: string;
+  statut: StatutParrainage;
+  etape_libelle: string;
+  created_at: string;
+  valide_at: string | null;
+}
+
+export type StatutParrainage = "en_attente" | "valide" | "refuse" | "annule";
+
+export interface CompteParrainage {
+  user_id: string | null;
+  email: string | null;
+  prenom: string | null;
+  plan: string | null;
+}
+
+export interface LienParrainage {
+  parrainage_id: string;
+  created_at: string;
+  parrain: CompteParrainage;
+  filleul: CompteParrainage;
+  statut: StatutParrainage;
+  etape: string;
+  etape_libelle: string;
+  motif: string | null;
+  motif_libelle: string | null;
+  remise_filleul_at: string | null;
+  valide_at: string | null;
+  credit_pose_at: string | null;
+  stripe_invoice_id: string | null;
+  paye_filleul_cents: number;
+}
+
+export interface ParrainClassement {
+  user_id: string;
+  email: string | null;
+  prenom: string | null;
+  plan: string | null;
+  code: string | null;
+  filleuls: number;
+  en_attente: number;
+  valides: number;
+  reportes: number;
+  refuses: number;
+  annules: number;
+  gagne_cents: number;
+  ca_filleuls_cents: number;
+  dernier_filleul_at: string | null;
+}
+
+export interface ParrainagesData {
+  resume: {
+    liens_generes: number;
+    parrains_actifs: number;
+    filleuls: number;
+    en_attente: number;
+    valides: number;
+    reportes: number;
+    refuses: number;
+    annules: number;
+    taux_conversion: number | null;
+    credits_parrains_cents: number;
+    remises_filleuls_cents: number;
+    cout_total_cents: number;
+    ca_filleuls_cents: number;
+    rendement: number | null;
+  };
+  parrains: ParrainClassement[];
+  liens: LienParrainage[];
+  evolution: Array<{ mois: string; inscrits: number; valides: number }>;
+}

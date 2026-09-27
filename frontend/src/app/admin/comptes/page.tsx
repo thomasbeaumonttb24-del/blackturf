@@ -20,14 +20,14 @@
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import {
-  Ban, Download, RotateCcw, Search, Trash2, Users, Wallet,
+  Activity, Ban, CreditCard, Download, RotateCcw, Search, Trash2, Users, Wallet,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { adminApi } from "@/lib/api";
 import { cn, formatDateTime } from "@/lib/utils";
 import {
-  Carte, CartesOuTableau, Champ, DefilementX, EnTetePage, GrilleTuiles, Panneau, Puce,
-  Segments, Squelette, TD, TH, Tuile, Vide, eur, num, signedEur, signedPct, tone,
+  Carte, CartesOuTableau, Champ, DefilementX, EnTetePage, Kpi, Panneau, Puce,
+  Segments, Squelette, TD, TH, Vide, eur, num, signedEur, signedPct, tone,
 } from "@/components/admin/ui";
 import { useComptes } from "@/components/admin/data";
 import FicheCompte from "@/components/admin/vues/FicheCompte";
@@ -216,18 +216,20 @@ export default function ComptesPage() {
         }
       />
 
-      <GrilleTuiles colonnes={5}>
-        <Tuile label="Comptes" valeur={num(resume.total)} icone={<Users className="h-3.5 w-3.5" />} />
-        <Tuile label="Abonnés" valeur={num(resume.abonnes)} ton={resume.abonnes > 0 ? "ok" : "neutre"} />
-        <Tuile label="Ont parié" valeur={num(resume.parieurs)} sub="au moins un pari enregistré" />
-        <Tuile label="Suspendus" valeur={num(resume.suspendus)} ton={resume.suspendus > 0 ? "attention" : "neutre"} />
-        <Tuile
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-5 lg:gap-4">
+        <Kpi label="Comptes" nombre={resume.total} format={(v) => num(Math.round(v))} icone={<Users className="h-4 w-4" />} accent="violet" />
+        <Kpi label="Abonnés" nombre={resume.abonnes} format={(v) => num(Math.round(v))} icone={<CreditCard className="h-4 w-4" />} accent="ok" />
+        <Kpi label="Ont parié" nombre={resume.parieurs} format={(v) => num(Math.round(v))} icone={<Activity className="h-4 w-4" />} accent="bleu" sub="au moins un pari enregistré" />
+        <Kpi label="Suspendus" nombre={resume.suspendus} format={(v) => num(Math.round(v))} icone={<Ban className="h-4 w-4" />} accent={resume.suspendus > 0 ? "rouge" : "neutre"} />
+        <Kpi
           label="Capital cumulé"
-          valeur={eur(resume.capital)}
-          icone={<Wallet className="h-3.5 w-3.5" />}
-          aide="Somme des soldes déclarés par les utilisateurs. Ce n'est pas de l'argent détenu par BlackTurf."
+          nombre={resume.capital}
+          format={(v) => eur(v)}
+          icone={<Wallet className="h-4 w-4" />}
+          accent="or"
+          sub="soldes déclarés par les utilisateurs"
         />
-      </GrilleTuiles>
+      </div>
 
       <Panneau
         titre="Liste des comptes"

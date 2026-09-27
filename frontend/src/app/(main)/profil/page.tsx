@@ -7,8 +7,9 @@ import { z } from "zod";
 import { toast } from "sonner";
 import {
   Loader2, CreditCard, Bell, User, Shield, Check, X,
-  TrendingUp, Zap, Brain, Star, ChevronRight, Lock, AlertTriangle,
+  TrendingUp, Zap, Brain, Star, ChevronRight, Lock, AlertTriangle, Gift,
 } from "lucide-react";
+import { ParrainageSection } from "@/components/billing/ParrainageSection";
 import Link from "next/link";
 import { useRequireAuth } from "@/hooks/useAuth";
 import { authApi, api } from "@/lib/api";
@@ -141,7 +142,15 @@ export default function ProfilPage() {
   const [loadingPortal, setLoadingPortal] = useState(false);
   const [loadingCancel, setLoadingCancel] = useState(false);
   const [pushEnabled, setPushEnabled] = useState(false);
-  const [activeSection, setActiveSection] = useState<"profile" | "plan" | "notifs" | "security">("profile");
+  const [activeSection, setActiveSection] = useState<"profile" | "plan" | "parrainage" | "notifs" | "security">("profile");
+
+  // Lien direct vers l'onglet (e-mail « 5 € offerts » → /profil#parrainage).
+  useEffect(() => {
+    const suivre = () => { if (window.location.hash === "#parrainage") setActiveSection("parrainage"); };
+    suivre();
+    window.addEventListener("hashchange", suivre);
+    return () => window.removeEventListener("hashchange", suivre);
+  }, []);
 
   const { register, handleSubmit, watch, setValue, reset, formState: { errors } } = useForm<ProfileForm>({
     resolver: zodResolver(profileSchema),
@@ -257,6 +266,7 @@ export default function ProfilPage() {
   const SECTIONS = [
     { id: "profile" as const, label: "Profil", icon: User },
     { id: "plan" as const, label: "Abonnement", icon: CreditCard },
+    { id: "parrainage" as const, label: "Parrainage", icon: Gift },
     { id: "notifs" as const, label: "Notifications", icon: Bell },
     { id: "security" as const, label: "Sécurité", icon: Shield },
   ];
@@ -270,7 +280,7 @@ export default function ProfilPage() {
           {initials}
         </div>
         <div className="flex-1 min-w-0">
-          <h1 className="text-lg font-bold text-gray-900 truncate">
+          <h1 className="text-lg font-bold text-gray-900 break-words">
             {user.prenom ? `${user.prenom}${user.nom ? ` ${user.nom}` : ""}` : user.email}
           </h1>
           <div className="flex items-center gap-2 mt-1 flex-wrap">
@@ -530,6 +540,17 @@ export default function ProfilPage() {
             </div>
           )}
 
+          {/* ── Parrainage ── */}
+          {activeSection === "parrainage" && (
+            <div id="parrainage">
+              <div className="px-4 sm:px-6 py-4 border-b border-gray-100">
+                <h2 className="font-bold text-gray-900">Parrainage</h2>
+                <p className="text-xs text-gray-600 mt-0.5">Invitez vos amis, économisez sur votre abonnement</p>
+              </div>
+              <ParrainageSection />
+            </div>
+          )}
+
           {/* ── Notifications ── */}
           {activeSection === "notifs" && (
             <div>
@@ -587,7 +608,7 @@ export default function ProfilPage() {
                 <div className="flex items-center justify-between gap-3 rounded-2xl border border-gray-200 p-4">
                   <div className="min-w-0">
                     <p className="text-sm font-semibold text-gray-800">E-mail vérifié</p>
-                    <p className="text-xs text-gray-600 mt-0.5 truncate">{user.email}</p>
+                    <p className="text-xs text-gray-600 mt-0.5 break-all">{user.email}</p>
                   </div>
                   <div className="flex items-center gap-2">
                     {user.email_verified ? (

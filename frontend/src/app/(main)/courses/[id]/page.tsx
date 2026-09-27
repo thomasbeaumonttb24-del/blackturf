@@ -417,25 +417,31 @@ export default async function CoursePage({ params }: Props) {
                   .
                 </p>
                 <div className="mt-3 overflow-x-auto rounded-xl border border-stone-200">
-                  <table className="w-full min-w-[460px] border-collapse text-[13px]">
+                  <table className="w-full border-collapse text-[12.5px] sm:min-w-[460px] sm:text-[13px]">
                     <caption className="sr-only">
                       Classement prédit par BlackTurf, probabilité de victoire et cote juste
                     </caption>
                     <thead>
-                      <tr className="bg-stone-50 text-left text-[11px] uppercase tracking-[0.08em] text-stone-600">
-                        <th scope="col" className="px-3 py-2 font-semibold">Rang</th>
-                        <th scope="col" className="px-3 py-2 font-semibold">Cheval</th>
-                        <th scope="col" className="px-3 py-2 text-right font-semibold">Proba. victoire</th>
-                        <th scope="col" className="px-3 py-2 text-right font-semibold">Cote juste</th>
+                      <tr className="bg-stone-50 text-left text-[10.5px] uppercase text-stone-600 sm:text-[11px] sm:tracking-[0.08em]">
+                        <th scope="col" className="px-2 py-2 sm:px-3 font-semibold">
+                          <span className="sm:hidden" title="Rang">#</span><span className="hidden sm:inline">Rang</span>
+                        </th>
+                        <th scope="col" className="px-2 py-2 sm:px-3 font-semibold">Cheval</th>
+                        <th scope="col" className="px-2 py-2 sm:px-3 text-right font-semibold">
+                          <span className="sm:hidden">Proba.</span><span className="hidden sm:inline">Proba. victoire</span>
+                        </th>
+                        <th scope="col" className="px-2 py-2 sm:px-3 text-right font-semibold">
+                          <span className="sm:hidden">C. juste</span><span className="hidden sm:inline">Cote juste</span>
+                        </th>
                       </tr>
                     </thead>
                     <tbody>
                       {apercu.classement.map((l) => (
                         <tr key={l.rang} className="border-t border-stone-100 text-stone-600">
-                          <td className="px-3 py-2 font-display font-bold tabular-nums text-slate-900">
+                          <td className="px-2 py-2 sm:px-3 font-display font-bold tabular-nums text-slate-900">
                             {l.rang}
                           </td>
-                          <td className="px-3 py-2 font-medium text-slate-900">
+                          <td className="px-2 py-2 sm:px-3 font-medium text-slate-900">
                             {l.revele && l.nom ? (
                               <>
                                 {l.numero != null && (
@@ -449,12 +455,12 @@ export default async function CoursePage({ params }: Props) {
                               <span className="text-stone-500">Réservé aux abonnés</span>
                             )}
                           </td>
-                          <td className="px-3 py-2 text-right tabular-nums">
+                          <td className="px-2 py-2 sm:px-3 text-right tabular-nums">
                             {l.proba_top1 != null
                               ? `${(l.proba_top1 * 100).toLocaleString("fr-FR", { maximumFractionDigits: 1 })} %`
                               : "—"}
                           </td>
-                          <td className="px-3 py-2 text-right tabular-nums">
+                          <td className="px-2 py-2 sm:px-3 text-right tabular-nums">
                             {l.cote_juste != null
                               ? l.cote_juste.toLocaleString("fr-FR", { maximumFractionDigits: 1 })
                               : "—"}
@@ -470,17 +476,19 @@ export default async function CoursePage({ params }: Props) {
             <h3 className="mt-6 font-display text-[15px] font-bold text-slate-900">
               Tous les engagés ({course.nb_partants})
             </h3>
+            {/* Sur téléphone : numéro, cheval, cote, arrivée. Jockey et musique (déjà
+                dans l'onglet Partants) faisaient défiler la table hors de l'écran. */}
             <div className="mt-3 overflow-x-auto rounded-xl border border-stone-200">
-              <table className="w-full min-w-[560px] border-collapse text-[13px]">
+              <table className="w-full border-collapse text-[12.5px] sm:min-w-[560px] sm:text-[13px]">
                 <thead>
-                  <tr className="bg-stone-50 text-left text-[11px] uppercase tracking-[0.08em] text-stone-600">
-                    <th scope="col" className="px-3 py-2 font-semibold">N°</th>
-                    <th scope="col" className="px-3 py-2 font-semibold">Cheval</th>
-                    <th scope="col" className="px-3 py-2 font-semibold">Jockey / driver</th>
-                    <th scope="col" className="px-3 py-2 font-semibold">Musique</th>
-                    <th scope="col" className="px-3 py-2 text-right font-semibold">Cote</th>
+                  <tr className="bg-stone-50 text-left text-[10.5px] uppercase text-stone-600 sm:text-[11px] sm:tracking-[0.08em]">
+                    <th scope="col" className="px-2 py-2 sm:px-3 font-semibold">N°</th>
+                    <th scope="col" className="px-2 py-2 sm:px-3 font-semibold">Cheval</th>
+                    <th scope="col" className="hidden px-2 py-2 sm:px-3 font-semibold sm:table-cell">Jockey / driver</th>
+                    <th scope="col" className="hidden px-2 py-2 sm:px-3 font-semibold sm:table-cell">Musique</th>
+                    <th scope="col" className="px-2 py-2 sm:px-3 text-right font-semibold">Cote</th>
                     {resultats?.classement?.length ? (
-                      <th scope="col" className="px-3 py-2 text-right font-semibold">Arrivée</th>
+                      <th scope="col" className="px-2 py-2 sm:px-3 text-right font-semibold">Arrivée</th>
                     ) : null}
                   </tr>
                 </thead>
@@ -493,10 +501,10 @@ export default async function CoursePage({ params }: Props) {
                         key={p.numero}
                         className={`border-t border-stone-100 ${p.non_partant ? "text-stone-600" : "text-stone-600"}`}
                       >
-                        <td className="px-3 py-2 font-display font-bold tabular-nums text-slate-900">
+                        <td className="px-2 py-2 sm:px-3 font-display font-bold tabular-nums text-slate-900">
                           <CasaqueNumero numero={p.numero} imgUrl={p.casaque_image_url} />
                         </td>
-                        <td className={`px-3 py-2 font-medium text-slate-900 ${p.non_partant ? "line-through opacity-60" : ""}`}>
+                        <td className={`px-2 py-2 sm:px-3 font-medium text-slate-900 ${p.non_partant ? "line-through opacity-60" : ""}`}>
                           {titleCase(p.nom_cheval)}
                           {p.non_partant ? (
                             <span className="ml-2 rounded-full bg-stone-100 px-2 py-0.5 text-[10.5px] font-semibold uppercase text-stone-600">
@@ -504,13 +512,13 @@ export default async function CoursePage({ params }: Props) {
                             </span>
                           ) : null}
                         </td>
-                        <td className="px-3 py-2">{p.jockey ? titleCase(p.jockey) : "—"}</td>
-                        <td className="px-3 py-2 font-mono text-[12px]">{p.musique || "—"}</td>
-                        <td className="px-3 py-2 text-right tabular-nums">
+                        <td className="hidden px-2 py-2 sm:px-3 sm:table-cell">{p.jockey ? titleCase(p.jockey) : "—"}</td>
+                        <td className="hidden px-2 py-2 sm:px-3 font-mono text-[12px] sm:table-cell">{p.musique || "—"}</td>
+                        <td className="px-2 py-2 sm:px-3 text-right tabular-nums">
                           {p.cote_pmu ? p.cote_pmu.toFixed(1) : "—"}
                         </td>
                         {resultats?.classement?.length ? (
-                          <td className="px-3 py-2 text-right tabular-nums">
+                          <td className="px-2 py-2 sm:px-3 text-right tabular-nums">
                             {place ? (
                               <span
                                 className={

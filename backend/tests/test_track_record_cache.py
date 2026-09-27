@@ -166,6 +166,79 @@ async def test_refresh_verrouille_les_recalculs_concurrents(monkeypatch):
     assert await refresh_track_record_cache() is False
 
 
+# ── Mise à jour dès qu'une course est intégrée ───────────────────────────────
+async def test_course_integree_rend_le_palmares_a_recalculer(monkeypatch):
+    """Le pipeline post-course marque le palmarès périmé : la version en cache
+    reste servie, mais le job minute sait qu'il doit recalculer."""
+    r = FauxRedis()
+    await _cache_set_swr(r, TRACK_RECORD_CACHE_KEY, {"v": 1}, fresh_ttl=3600)
+
+    async def _get_redis():
+        return r
+
+    monkeypatch.setattr("db.redis_client.get_redis", _get_redis)
+    assert await stats_mod.track_record_a_recalculer() is False
+
+    await stats_mod.marquer_track_record_perime()
+    assert await stats_mod.track_record_a_recalculer() is True
+    assert await _cache_get_swr(r, TRACK_RECORD_CACHE_KEY) == ({"v": 1}, False)
+
+
+async def test_recalcul_efface_le_drapeau_puis_reste_a_jour(monkeypatch):
+    r = FauxRedis()
+    r.store[stats_mod.TRACK_RECORD_DIRTY_KEY] = "1"
+
+    async def _get_redis():
+        return r
+
+    monkeypatch.setattr("db.redis_client.get_redis", _get_redis)
+
+    class _Session:
+        async def __aenter__(self):
+            return None
+
+        async def __aexit__(self, *a):
+            return False
+
+    monkeypatch.setattr("db.database.AsyncSessionLocal", lambda: _Session())
+
+    async def _calcul(_db):
+        return {"v": 2}
+
+    monkeypatch.setattr(stats_mod, "_compute_track_record", _calcul)
+    assert await refresh_track_record_cache() is True
+    assert await stats_mod.track_record_a_recalculer() is False
+    assert await _cache_get_swr(r, TRACK_RECORD_CACHE_KEY) == ({"v": 2}, True)
+
+
+async def test_course_arrivee_pendant_le_calcul_n_est_pas_perdue(monkeypatch):
+    """Une course journalisée PENDANT un recalcul (~29 s) doit déclencher le
+    suivant, même si ce calcul réécrit `:fresh` en finissant."""
+    r = FauxRedis()
+
+    async def _get_redis():
+        return r
+
+    monkeypatch.setattr("db.redis_client.get_redis", _get_redis)
+
+    class _Session:
+        async def __aenter__(self):
+            return None
+
+        async def __aexit__(self, *a):
+            return False
+
+    monkeypatch.setattr("db.database.AsyncSessionLocal", lambda: _Session())
+
+    async def _calcul(_db):
+        await stats_mod.marquer_track_record_perime()   # course arrivée en cours
+        return {"v": 3}
+
+    monkeypatch.setattr(stats_mod, "_compute_track_record", _calcul)
+    assert await refresh_track_record_cache() is True
+    assert await stats_mod.track_record_a_recalculer() is True
+
+
 # ── Honnêteté de la période mesurée ──────────────────────────────────────────
 async def test_le_track_record_expose_depuis_quand_il_mesure():
     """Le read-model ne retient que la cohorte rejouable (snapshots pré-course,

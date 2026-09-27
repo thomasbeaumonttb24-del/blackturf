@@ -7,7 +7,8 @@ export function cn(...inputs: ClassValue[]) {
 
 export function formatCote(cote: number | null | undefined): string {
   if (!cote) return "—";
-  return cote.toFixed(1);
+  // Écriture française (« 4,4 »), comme toutes les cotes de la fiche course.
+  return cote.toLocaleString("fr-FR", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 }
 
 /**

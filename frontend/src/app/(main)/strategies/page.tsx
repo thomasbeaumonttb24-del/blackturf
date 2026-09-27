@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Plus, Play, Trash2, Loader2, TrendingUp } from "lucide-react";
+import { Plus, Play, Trash2, Loader2, TrendingUp, Mail, MailX } from "lucide-react";
 import useSWR from "swr";
 import { toast } from "sonner";
 import Link from "next/link";
@@ -43,10 +43,12 @@ function StrategieCard({
   strat,
   onBacktest,
   onDelete,
+  onToggleAlerte,
 }: {
   strat: Strategie;
   onBacktest: (id: string) => void;
   onDelete: (id: string) => void;
+  onToggleAlerte: (strat: Strategie) => void;
 }) {
   return (
     <Card className="card-hover">
@@ -54,7 +56,23 @@ function StrategieCard({
         <div className="flex items-start justify-between gap-2 mb-3">
           <h3 className="font-semibold">{strat.nom}</h3>
           <div className="flex gap-1">
-            {strat.alerte_email && <Badge variant="warning" className="text-[10px]">📧 Alerte</Badge>}
+            {/* Alerte e-mail : envoyée par services/alertes_strategies.py (job toutes
+                les 10 min, au plus un e-mail par 4 h). Cliquable pour l'activer ou la couper. */}
+            <button
+              type="button"
+              onClick={() => onToggleAlerte(strat)}
+              aria-pressed={strat.alerte_email}
+              title={strat.alerte_email ? "Alerte e-mail activée — cliquer pour la couper" : "Alerte e-mail coupée — cliquer pour l'activer"}
+              className={cn(
+                "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1 transition-colors",
+                strat.alerte_email
+                  ? "bg-amber-50 text-amber-800 ring-amber-300 hover:bg-amber-100"
+                  : "bg-white text-muted-foreground ring-border hover:text-foreground",
+              )}
+            >
+              {strat.alerte_email ? <Mail className="h-3 w-3" /> : <MailX className="h-3 w-3" />}
+              {strat.alerte_email ? "Alerte e-mail" : "Sans alerte"}
+            </button>
             {strat.partage_communaute && <Badge variant="secondary" className="text-[10px]">🌍 Partagée</Badge>}
           </div>
         </div>
@@ -161,6 +179,17 @@ export default function StrategiesPage() {
       toast.error("Erreur lors de la simulation");
     } finally {
       setBacktestLoading(false);
+    }
+  }
+
+  async function handleToggleAlerte(strat: Strategie) {
+    const active = !strat.alerte_email;
+    try {
+      await api.patch(`/strategies/${strat.strategie_id}`, { alerte_email: active });
+      toast.success(active ? "Alerte e-mail activée" : "Alerte e-mail coupée");
+      mutate();
+    } catch {
+      toast.error("Impossible de modifier l'alerte");
     }
   }
 
@@ -299,13 +328,19 @@ export default function StrategiesPage() {
                 </div>
               </div>
 
-              <label className="flex items-center gap-2 text-sm cursor-pointer">
+              <label className="flex items-start gap-2 text-sm cursor-pointer">
                 <input
                   type="checkbox"
+                  className="mt-0.5"
                   checked={formData.alerte_email}
                   onChange={(e) => setFormData({ ...formData, alerte_email: e.target.checked })}
                 />
-                Recevoir une alerte email quand un signal est détecté
+                <span>
+                  Recevoir une alerte e-mail quand un pari de valeur correspond à cette stratégie
+                  <span className="block text-xs text-muted-foreground">
+                    Au plus un e-mail toutes les 4 heures, jamais deux fois le même signal.
+                  </span>
+                </span>
               </label>
 
               <div className="flex gap-2">
@@ -382,6 +417,7 @@ export default function StrategiesPage() {
               strat={s}
               onBacktest={handleBacktest}
               onDelete={handleDelete}
+              onToggleAlerte={handleToggleAlerte}
             />
           ))}
         </div>

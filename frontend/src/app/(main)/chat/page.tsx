@@ -179,7 +179,7 @@ function ChoixPseudo({ userId, onChoisi }: { userId: string; onChoisi: () => voi
           <div className="flex items-center gap-3 rounded-2xl border border-dashed border-gray-200 bg-gray-50/70 p-3">
             <Avatar pseudo={apercu} userId={userId} />
             <div className="min-w-0">
-              <div className="truncate text-sm font-semibold text-gray-900">{apercu}</div>
+              <div className="break-words text-sm font-semibold text-gray-900">{apercu}</div>
               <div className="text-xs text-gray-600">Aperçu de votre profil dans le salon</div>
             </div>
           </div>
@@ -308,7 +308,7 @@ function PanneauModeration({
         <ul className="mt-2 divide-y divide-gray-100 rounded-2xl border border-gray-200 bg-white">
           {bannis?.map((b) => (
             <li key={b.user_id} className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
-              <span className="min-w-0 truncate">
+              <span className="min-w-0 break-words">
                 <strong className="text-gray-900">{b.pseudo ?? "—"}</strong>{" "}
                 <span className="text-gray-600">{b.email}</span>
               </span>
@@ -379,7 +379,7 @@ function ModalPseudo({
           <div className="flex items-center gap-3 rounded-2xl bg-gray-50 p-3">
             <Avatar pseudo={pseudo.trim() || "?"} userId={userId} />
             <div className="min-w-0">
-              <div className="truncate text-sm font-semibold text-gray-900">{pseudo.trim() || "Votre pseudo"}</div>
+              <div className="break-words text-sm font-semibold text-gray-900">{pseudo.trim() || "Votre pseudo"}</div>
               <div className="text-xs text-gray-600">Visible par tous les membres</div>
             </div>
           </div>
@@ -676,7 +676,7 @@ function Salon({ moi, onBanni, onPseudoModifie }: {
             <div className="min-w-0">
               <h1 className="text-base font-bold leading-tight tracking-tight text-gray-900 sm:text-lg">Communauté</h1>
               <p className="flex min-w-0 items-center gap-1 text-xs text-gray-600">
-                <span className="hidden truncate sm:inline">L&apos;entraide des turfistes ·</span>
+                <span className="hidden sm:inline">L&apos;entraide des turfistes ·</span>
                 <span className="shrink-0">vous êtes</span>
                 <button
                   onClick={() => setEditionPseudo(true)}
@@ -684,7 +684,7 @@ function Salon({ moi, onBanni, onPseudoModifie }: {
                   aria-label={`Modifier mon pseudo (${moi.pseudo})`}
                   className="group/pseudo inline-flex min-w-0 items-center gap-1 rounded-md px-1 font-semibold text-gray-900 hover:bg-amber-100/70"
                 >
-                  <span className="truncate">{moi.pseudo}</span>
+                  <span className="break-words">{moi.pseudo}</span>
                   <Pencil className="h-3 w-3 shrink-0 text-gray-500 group-hover/pseudo:text-brand-gold-dark" />
                 </button>
               </p>
@@ -951,7 +951,7 @@ function Salon({ moi, onBanni, onPseudoModifie }: {
             </>
           )}
           <div className="mt-1.5 flex items-center justify-between gap-3 px-1 text-[11px] text-gray-500">
-            <span className="truncate">
+            <span className="break-words">
               <kbd className="font-sans">Entrée</kbd> pour envoyer · <kbd className="font-sans">Maj+Entrée</kbd> pour aller à la ligne
               <span className="hidden sm:inline"> · Jouer comporte des risques : 09 74 75 13 13</span>
             </span>

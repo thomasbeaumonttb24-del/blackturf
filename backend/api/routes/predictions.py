@@ -182,6 +182,35 @@ class ValueBetOut(BaseModel):
     spi_score: Optional[float] = None
     actif: bool
     detecte_a: datetime
+    # Détail servi depuis le 2026-09-25 (cf. services.valuebets_lecture) : la page
+    # filtrait par discipline et affichait confiance, meilleure cote et mouvement
+    # sans que l'API les envoie.
+    casaque_image_url: Optional[str] = None
+    jockey: Optional[str] = None
+    entraineur: Optional[str] = None
+    musique: Optional[str] = None
+    hippodrome: Optional[str] = None
+    code: Optional[str] = None
+    nom_course: Optional[str] = None
+    discipline: Optional[str] = None
+    distance: Optional[int] = None
+    nb_partants: Optional[int] = None
+    est_quinte: bool = False
+    statut_course: Optional[str] = None
+    ev_pmu: Optional[float] = None
+    proba_top1: Optional[float] = None
+    proba_top1_low: Optional[float] = None
+    proba_top1_high: Optional[float] = None
+    proba_top3: Optional[float] = None
+    rang_predit: Optional[int] = None
+    confiance: Optional[float] = None
+    cote_juste: Optional[float] = None
+    cote_reference: Optional[float] = None
+    cote_betfair_exchange: Optional[float] = None
+    cote_max: Optional[float] = None
+    cote_max_source: Optional[str] = None
+    nb_sources: int = 0
+    mouvement_cote_pct: Optional[float] = None
 
 
 # ─────────────────────────────────────────────
@@ -753,39 +782,11 @@ async def get_value_bets_live(
     chargée (74 paris détectés le 2026-09-07) coupait la liste sans le dire, et
     un pari visible sur sa fiche manquait ici.
     """
+    from services.valuebets_lecture import ligne, requete
+
     filters = [ValueBet.niveau >= niveau_min, *_vb_filtres_sql(user.plan)]
-
-    q = (
-        select(ValueBet, Participation, Cheval, Course)
-        .join(Participation, Participation.participation_id == ValueBet.participation_id)
-        .join(Cheval, Cheval.cheval_id == Participation.cheval_id)
-        .join(Course, Course.course_id == ValueBet.course_id)
-        .where(and_(*filters))
-        .order_by(desc(ValueBet.ev_max))
-        .limit(limit)
-    )
-    rows = (await db.execute(q)).all()
-
-    return [
-        ValueBetOut(
-            vb_id=vb.vb_id,
-            course_id=vb.course_id,
-            participation_id=vb.participation_id,
-            nom_cheval=cheval.nom,
-            numero=part.numero,
-            hippodrome_nom=course.hippodrome_nom,
-            date_heure=course.date_heure,
-            ev_max=round(vb.ev_max, 4),
-            meilleure_source=vb.meilleure_source,
-            niveau=vb.niveau,
-            cote_pmu=part.cote_pmu,
-            spi_detected=vb.spi_detected,
-            spi_score=round(vb.spi_score, 3) if vb.spi_score else None,
-            actif=vb.actif,
-            detecte_a=vb.detecte_a,
-        )
-        for vb, part, cheval, course in rows
-    ]
+    rows = (await db.execute(requete(filters, limit))).all()
+    return [ValueBetOut(**ligne(*row)) for row in rows]
 
 
 @router.get("/value-bets/compteur")
@@ -955,8 +956,10 @@ async def get_pari_du_jour(
     cid = course.course_id
     # Code public R{réunion}C{course} : réunion = numExterne (numero_reunion) pour
     # matcher pmu.fr ; fallback sur le suffixe du course_id (numOfficiel) si absent.
-    if course.numero_reunion:
-        code = f"R{course.numero_reunion}C{part.numero}"
+    # Le « C » est le numéro de la COURSE : `part.numero` (le dossard) donnait « R1C7 »
+    # pour le cheval n°7, un code qui renvoie à une autre course sur pmu.fr.
+    if course.numero_reunion and course.numero:
+        code = f"R{course.numero_reunion}C{course.numero}"
     else:
         code = cid[8:] if len(cid) > 8 and "R" in cid[8:] else cid
     proba = float(pred.proba_top1 or 0)

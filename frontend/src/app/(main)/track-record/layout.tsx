@@ -17,7 +17,7 @@ import { PalmaresResume } from "@/components/seo/PalmaresResume";
  * serveur y remédie — il porte les chiffres en toutes lettres, reste lisible sans
  * JavaScript, et conserve du texte utile même si l'API ne répond pas.
  */
-export const revalidate = 900;
+export const revalidate = 60;
 
 // Le titre disait « algorithme » ; personne ne tape ce mot. Les requêtes qui amènent ici
 // sont « fiabilité pronostic IA », « taux de réussite IA hippique », « résultats pronostic

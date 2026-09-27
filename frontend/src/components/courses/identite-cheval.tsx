@@ -24,9 +24,14 @@ export function CasaqueNumero({ numero, imgUrl, courseId, nom, vertical = false 
     {url && failedUrl !== url && <img src={url} alt={"Casaque" + (number != null ? " du n°" + number : "")} width={30} height={30} loading="lazy" onError={() => setFailedUrl(url)} style={{ width: 30, height: 30, objectFit: "contain", background: "#fff", borderRadius: 4, flexShrink: 0 }} />}
   </span>;
 }
-export function IdentiteCheval({ numero, nom, courseId, imgUrl }: { numero?: number | null; nom: string; courseId?: string; imgUrl?: string | null }) {
+/** Numéro + nom. Le nom n'est JAMAIS coupé par « … » : il passe à la ligne, ou,
+ *  avec `numeroSeulMobile`, disparaît sous 640 px là où la place manque (le
+ *  numéro suffit à jouer ; un nom tronqué ne sert à rien). */
+export function IdentiteCheval({ numero, nom, courseId, imgUrl, numeroSeulMobile = false }: {
+  numero?: number | null; nom: string; courseId?: string; imgUrl?: string | null; numeroSeulMobile?: boolean;
+}) {
   return <span style={{ display: "inline-flex", alignItems: "center", gap: 6, minWidth: 0, maxWidth: "100%", verticalAlign: "middle" }}>
     <CasaqueNumero numero={numero} nom={nom} courseId={courseId} imgUrl={imgUrl} />
-    <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={nom}>{nom}</span>
+    {nom && <span className={numeroSeulMobile ? "hidden sm:inline" : undefined} style={{ minWidth: 0, overflowWrap: "break-word", lineHeight: 1.25 }}>{nom}</span>}
   </span>;
 }
