@@ -211,8 +211,6 @@ export function inclinerCarte(e: PointerEvent<HTMLElement>, force = 1) {
   const x = (e.clientX - r.left) / r.width, y = (e.clientY - r.top) / r.height;
   el.style.setProperty("--rx", `${((0.5 - y) * 6 * force).toFixed(2)}deg`);
   el.style.setProperty("--ry", `${((x - 0.5) * 7 * force).toFixed(2)}deg`);
-  el.style.setProperty("--mx", `${(x * 100).toFixed(1)}%`);
-  el.style.setProperty("--my", `${(y * 100).toFixed(1)}%`);
   el.style.setProperty("--lift", "-4px");
 }
 export function redresserCarte(e: PointerEvent<HTMLElement>) {
@@ -225,13 +223,6 @@ export function redresserCarte(e: PointerEvent<HTMLElement>) {
 /** Classes de la carte inclinable (à combiner avec useInclinaison). */
 export const INCLINABLE_CLS =
   "[transform:perspective(900px)_translateY(var(--lift,0px))_rotateX(var(--rx,0deg))_rotateY(var(--ry,0deg))] transition-[transform,box-shadow] duration-300 ease-out motion-reduce:transition-none";
-
-/** Reflet doré qui suit la souris, à placer dans une carte `relative group/reflet`. */
-export function Reflet() {
-  return (
-    <span aria-hidden="true" className="pointer-events-none absolute inset-0 rounded-[inherit] opacity-0 transition-opacity duration-300 group-hover/reflet:opacity-100 [background:radial-gradient(360px_circle_at_var(--mx,50%)_var(--my,50%),rgba(251,191,36,.16),transparent_50%)]" />
-  );
-}
 
 
 /* ────────────────────────────────────────────────────────────────────────── */
