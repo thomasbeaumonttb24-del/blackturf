@@ -25,7 +25,7 @@ import * as React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
-  AlertTriangle, ArrowLeft, Brain, CreditCard, Euro, Gauge, Loader2, Server, Users,
+  AlertTriangle, ArrowLeft, Brain, CreditCard, Euro, Gauge, Gift, Loader2, Server, Users,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useRequireAuth } from "@/hooks/useAuth";
@@ -83,6 +83,7 @@ const DESTINATIONS: Destination[] = [
   { href: "/admin", label: "Pilotage", court: "Pilotage", icone: Gauge },
   { href: "/admin/revenus", label: "Revenus", court: "Revenus", icone: Euro },
   { href: "/admin/abonnements", label: "Abonnements", court: "Abonnés", icone: CreditCard },
+  { href: "/admin/parrainages", label: "Parrainages", court: "Parrains", icone: Gift },
   { href: "/admin/comptes", label: "Comptes", court: "Comptes", icone: Users },
   { href: "/admin/algorithme", label: "Algorithme", court: "Algo", icone: Brain },
   {

@@ -386,6 +386,44 @@ async def get_user_detail(
         ],
         "nb_bets": nb_total,
         "bets": bets,
+        "parrainage": await _parrainage_du_compte(user, db),
+    }
+
+
+async def _parrainage_du_compte(user: User, db: AsyncSession) -> dict:
+    """Qui a parrainé ce compte, et qui il a parrainé — pour la fiche admin."""
+    from sqlalchemy.orm import aliased
+    from db.models import Parrainage
+    from services import parrainage as P
+
+    Autre = aliased(User)
+
+    def ligne(lien, autre):
+        etape = P._etape(lien, autre, False)
+        return {
+            "user_id": autre.user_id if autre else None,
+            "email": autre.email if autre else "compte supprimé",
+            "statut": lien.statut,
+            "etape_libelle": P.ETAPES_ADMIN.get(etape, etape),
+            "created_at": lien.created_at,
+            "valide_at": lien.valide_at,
+        }
+
+    recu = (await db.execute(
+        select(Parrainage, Autre).join(Autre, Autre.user_id == Parrainage.parrain_id, isouter=True)
+        .where(Parrainage.filleul_id == user.user_id)
+    )).first()
+    donnes = (await db.execute(
+        select(Parrainage, Autre).join(Autre, Autre.user_id == Parrainage.filleul_id, isouter=True)
+        .where(Parrainage.parrain_id == user.user_id).order_by(Parrainage.created_at.desc())
+    )).all()
+    valides = sum(1 for l, _ in donnes if l.statut == "valide")
+    return {
+        "code": user.code_parrain,
+        "parraine_par": ligne(*recu) if recu else None,
+        "filleuls": [ligne(l, a) for l, a in donnes],
+        "valides": valides,
+        "gagne_cents": valides * P.REMISE_CENTS,
     }
 
 

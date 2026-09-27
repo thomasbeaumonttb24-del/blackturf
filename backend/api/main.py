@@ -10,7 +10,7 @@ from api.config import get_settings
 from api.routes import auth, courses, predictions, bankroll, admin, ws
 from api.routes import assistant, stripe_routes, strategies, stats, notifications
 from api.routes import telegram, newsletter, integrations, presence, chat, pronostic_email
-from api.routes import parrainage as parrainage_routes
+from api.routes import parrainage as parrainage_routes, admin_parrainage
 from db.database import engine, Base
 from db.redis_client import get_redis, close_redis
 
@@ -152,6 +152,7 @@ app.include_router(courses.router, prefix="/api/v1", tags=["courses"])
 app.include_router(predictions.router, prefix="/api/v1", tags=["predictions"])
 app.include_router(bankroll.router, prefix="/api/v1", tags=["bankroll"])
 app.include_router(admin.router, prefix="/admin/api", tags=["admin"])
+app.include_router(admin_parrainage.router, prefix="/admin/api", tags=["admin"])
 app.include_router(ws.router, prefix="/ws", tags=["websocket"])
 app.include_router(assistant.router, prefix="/api/v1", tags=["assistant"])
 app.include_router(stripe_routes.router, prefix="/api/v1", tags=["stripe"])
