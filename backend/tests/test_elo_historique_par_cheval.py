@@ -110,3 +110,21 @@ def test_la_requete_elo_exclut_le_jour_et_la_course_calculee():
     assert "date_course < :today" in requete
     assert "course_id IS DISTINCT FROM :cid" in requete
     assert "date_heure" not in requete, "DATE comparée à l'heure de départ : fuite du jour"
+
+
+def test_l_ancien_chemin_par_partant_borne_aussi_l_elo():
+    """`compute_features_for_participation` (utilisé par `scripts/test_algos.py`)
+    lisait l'historique ELO sans borne et l'ELO courant du cheval : sur une course
+    passée, le résultat de la course elle-même. Même borne que le chargeur de lot."""
+    import inspect
+    src = "\n".join(l for l in inspect.getsource(
+        features.compute_features_for_participation).splitlines()
+        if not l.strip().startswith(("#", "--")))
+    requetes = src.split("FROM elo_historique")[1:]
+    assert len(requetes) == 2
+    for r in requetes:
+        r = r[:r.index("ORDER BY")]
+        assert "date_course < :today" in r
+        assert "course_id IS DISTINCT FROM :course" in r
+    assert "COALESCE(p.elo_avant_global, ch.elo_score_global)" in src
+    assert "ch.elo_score_global, ch.elo_score_plat" not in src

@@ -246,14 +246,22 @@ async def compute_signal_performance_by_profile(session: AsyncSession) -> dict:
                CASE WHEN pa.numero IN (
                     SELECT (e->>'numero')::int FROM jsonb_array_elements(r.classement)
                      WITH ORDINALITY a(e,o)
-                     WHERE o <= CASE WHEN c.nb_partants >= 8 THEN 3
-                                     WHEN c.nb_partants >= 4 THEN 2 ELSE 1 END
+                     WHERE o <= CASE WHEN nr.reels >= 8 THEN 3
+                                     WHEN nr.reels >= 4 THEN 2 ELSE 1 END
                 ) THEN 1 ELSE 0 END AS top3,
                r.rapports_detail, pa.numero
         FROM features_ml fm
         JOIN participations pa ON pa.participation_id = fm.participation_id
         JOIN courses c ON c.course_id = pa.course_id AND c.statut = 'termine'
         JOIN resultats r ON r.course_id = pa.course_id
+        -- Places payées sur les partants RÉELS : `c.nb_partants` compte les
+        -- non-partants. Un 3e d'un champ de 8 déclarés dont 7 courent n'est pas
+        -- placé ; compté placé sans rapport publié, il sortait de l'échantillon au
+        -- lieu de compter perdant (ROI du placé gonflé).
+        JOIN LATERAL (
+            SELECT COUNT(*) AS reels FROM participations p2
+            WHERE p2.course_id = c.course_id AND p2.non_partant = false
+        ) nr ON true
         JOIN LATERAL (
             SELECT cote FROM cotes_historique h
             WHERE h.participation_id = fm.participation_id AND h.source = 'pmu'

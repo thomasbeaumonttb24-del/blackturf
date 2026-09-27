@@ -485,6 +485,10 @@ async def run_backtest(
               AND pr.created_at < :course_time
               AND pr.is_replayable = true
         """), {"cid": course.course_id, "course_time": course.date_heure})
+        # Places payées sur les partants RÉELS (`nb_partants` compte les déclarés).
+        nb_reels = (await session.execute(text(
+            "SELECT COUNT(*) FROM participations WHERE course_id = :cid AND non_partant = false"),
+            {"cid": course.course_id})).scalar() or course.nb_partants
         partants = []
         for r in rows.fetchall():
             if r.proba_top3 is None:
@@ -520,7 +524,7 @@ async def run_backtest(
                 final = final_by_num.get(int(bet.numero))
                 if final and final > 1.0:
                     bet.cote = float(final)
-            sb = settle_bet(bet, arrivee, nb_partants=course.nb_partants, rapports=resultat.rapports)
+            sb = settle_bet(bet, arrivee, nb_partants=nb_reels, rapports=resultat.rapports)
             if sb is not None:   # None = non réglable (jamais estimé)
                 all_settled.append(sb)
 

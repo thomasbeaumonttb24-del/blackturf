@@ -2399,6 +2399,34 @@ async def _do_retraining(mois: int, label: str) -> dict:
 # ─────────────────────────────────────────────
 # Prédictions
 # ─────────────────────────────────────────────
+async def version_servie(session: AsyncSession, model) -> Optional[str]:
+    """`version_id` du modèle réellement chargé depuis `current_model.pkl`.
+
+    Les prédictions portaient la ligne `model_versions.est_actif`, qui peut ne pas
+    être le fichier servi (promotion en cours, retour arrière manuel) : des
+    prédictions de v545 ont été attribuées à v544. Le pickle connaît son numéro
+    depuis `BlackTurfEnsemble.save` ; les modèles plus anciens (numéro 0)
+    retombent sur `est_actif`.
+    """
+    num = int(getattr(model, "version_num", 0) or 0)
+    actif = (await session.execute(
+        select(ModelVersion).where(ModelVersion.est_actif == True)  # noqa: E712
+    )).scalars().first()
+    if num <= 0:
+        return actif.version_id if actif else None
+    if actif is not None and actif.version_num == num:
+        return actif.version_id
+    servi = (await session.execute(
+        select(ModelVersion).where(ModelVersion.version_num == num)
+    )).scalars().first()
+    log.warning("pipeline.predict.version_diverge", servi=num,
+                actif=actif.version_num if actif else None,
+                connue=servi is not None)
+    if servi is not None:
+        return servi.version_id
+    return actif.version_id if actif else None
+
+
 async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Optional[dict]:
     """
     Génère les prédictions + recommandations pour une course à venir.
@@ -2814,12 +2842,8 @@ async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Option
             {"cid": course_id},
         )
 
-        # Récupérer version modèle active
-        mv_result = await session.execute(
-            select(ModelVersion).where(ModelVersion.est_actif == True)
-        )
-        mv = mv_result.scalars().first()
-        mv_id = mv.version_id if mv else None
+        # Version du modèle QUI a produit ces probas (cf. `version_servie`).
+        mv_id = await version_servie(session, model)
 
         # Rang prédit = ordre par PROBABILITÉ finale (proba_top1 desc, tiebreak top3).
         # Doit être cohérent avec les probas affichées + le plan de mise. Calculé ICI
