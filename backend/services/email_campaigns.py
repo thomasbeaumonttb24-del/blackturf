@@ -214,7 +214,7 @@ async def build_week(session, now):
                         for p in totals.values() if p["n"]]}
 
 
-async def deliver(session, campaign, email, subject, html, plain, unsubscribe, now):
+async def deliver(session, campaign, email, subject, html, plain, unsubscribe, now, journal=None):
     from services.alerts import send_email
     address = email.strip().lower()
     suppressed = await session.scalar(select(EmailLivraison.cle).where(
@@ -253,8 +253,14 @@ async def deliver(session, campaign, email, subject, html, plain, unsubscribe, n
         row.erreur = getattr(result, "erreur", "Échec fournisseur")
     from services.alerts import _log_alerte
     user_id = await session.scalar(select(User.user_id).where(func.lower(User.email) == address))
-    await _log_alerte(session, user_id, "digest_matin" if campaign.startswith("jour-") else "weekly_best_vb",
-                      "email", {"campagne": campaign}, result, row.erreur)
+    if campaign.startswith("jour-"):
+        type_alerte = "digest_matin"
+    elif campaign.startswith("strategie-"):
+        type_alerte = "strategie_email"  # cf. services/alertes_strategies.py
+    else:
+        type_alerte = "weekly_best_vb"
+    await _log_alerte(session, user_id, type_alerte, "email", {"campagne": campaign, **(journal or {})},
+                      result, row.erreur, quand=now)
     await session.commit()
     return bool(result)
 

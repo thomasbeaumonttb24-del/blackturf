@@ -358,6 +358,20 @@ async def job_resolve_courses_sans_resultat() -> None:
         log.error("jobs.resolve_courses_sans_resultat.error", error=str(e))
 
 
+async def job_alertes_strategies() -> None:
+    """Toutes les 10 minutes — e-mail des stratégies dont un pari visible remplit
+    les critères (plan Expert, au plus un e-mail par 4 h, cf. services/alertes_strategies)."""
+    try:
+        from db.database import AsyncSessionLocal
+        from services.alertes_strategies import envoyer_alertes_strategies
+        async with AsyncSessionLocal() as session:
+            n = await envoyer_alertes_strategies(session)
+        if n:
+            log.info("jobs.alertes_strategies.done", envoyes=n)
+    except Exception as e:
+        log.error("jobs.alertes_strategies.error", error=str(e))
+
+
 async def job_vb_notify() -> None:
     """Toutes les 10 minutes — notifie nouveaux value bets non notifiés."""
     try:
@@ -534,6 +548,16 @@ def start_scheduler() -> None:
         job_vb_notify,
         CronTrigger(minute="*/10"),
         id="vb_notify",
+        replace_existing=True,
+        misfire_grace_time=120,
+    )
+
+    # Alertes e-mail des stratégies — toutes les 10 minutes, décalées de 5 min
+    # après vb_notify pour lire les paris du cycle qui vient d'être notifié.
+    scheduler.add_job(
+        job_alertes_strategies,
+        CronTrigger(minute="5-59/10"),
+        id="alertes_strategies",
         replace_existing=True,
         misfire_grace_time=120,
     )

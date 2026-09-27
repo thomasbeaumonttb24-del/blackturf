@@ -3,7 +3,7 @@ from pathlib import Path
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from services.email_templates import daily, weekly
+from services.email_templates import daily, weekly, alertes_strategies
 from services import email_compte
 
 out = Path(__file__).resolve().parents[2] / "docs" / "email-previews"
@@ -27,7 +27,9 @@ for name, rendered in (("quotidien", daily(items, "DÉMONSTRATION — données f
     html, plain = rendered
     (out / (name + ".html")).write_text(html, encoding="utf-8")
     (out / (name + ".txt")).write_text(plain, encoding="utf-8")
+strat_items = [dict(items[0], strategies=["Plat, EV ≥ 10 %", "Quinté du dimanche"])]
 for name, (html, plain) in (
+        ("alerte-strategie", alertes_strategies(strat_items, unsub)),
         ("confirmation-lettre", email_compte.confirmation_newsletter("https://blackturf.fr/newsletter")),
         ("verification-adresse", email_compte.verification_adresse("Prénom", "https://blackturf.fr/verifier-email")),
         ("mot-de-passe", email_compte.reinitialisation_mot_de_passe("Prénom", "https://blackturf.fr/reinitialiser-mot-de-passe")),

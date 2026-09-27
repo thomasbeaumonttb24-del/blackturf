@@ -76,6 +76,12 @@ def _carte_valeur(item, url):
              f'border:1px solid {C["orBord"]};color:{C["or"]};font-size:12px;line-height:15px;font-weight:800">&#9719; {e(item["heure"])}</span> ')
     nom_course = (f'<div style="margin-top:6px;font-size:12px;line-height:16px;color:{C["stone5"]}">{e(item["course_nom"])}</div>'
                   if item.get("course_nom") else "")
+    if item.get("strategies"):
+        # Alerte de stratégie : quelle(s) stratégie(s) ce signal a déclenchée(s).
+        nom_course += '<div style="margin-top:8px;line-height:24px">' + "".join(
+            f'<span style="display:inline-block;margin:0 4px 0 0;padding:2px 9px;border-radius:999px;background:{C["vertFond"]};'
+            f'border:1px solid {C["vertBord"]};color:{C["vert"]};font-size:11.5px;line-height:17px;font-weight:700">&#10003; {e(nom)}</span>'
+            for nom in item["strategies"]) + "</div>"
     tuiles = (
         D.tuile_chiffre("Valeur estimée", D.chiffre(e(ev_txt), C["vert"]))
         + D.tuile_chiffre("Cote", D.chiffre(e(f'{item["cote"]:.1f}'.replace(".", ",")) if item.get("cote") else "—"))
@@ -312,3 +318,43 @@ def weekly(data, unsubscribe=None, archive=None):
     if unsubscribe:
         text.append("Désabonnement : " + unsubscribe)
     return D.document(title, apercu, rangees, lien_web=archive), "\n\n".join(text)
+
+
+# ─── Alertes des stratégies (plan Expert) ───────────────────────────────────
+
+def alertes_strategies(items, unsubscribe):
+    """Signaux correspondant aux stratégies de l'abonné (services/alertes_strategies.py)."""
+    n = len(items)
+    title = "Vos stratégies ont un signal" if n == 1 else f"Vos stratégies ont {n} signaux"
+    intro = ("Des paris de valeur visibles correspondent aux critères de vos stratégies. "
+             "Les cotes et les signaux peuvent évoluer d’ici le départ.")
+    rangees_site = D.rangee_site(
+        D.titre_section("etoile", "Signaux de vos stratégies", "Détectés par le modèle, filtrés par vos critères"),
+        "18px 18px 4px")
+    text = [title, intro]
+    for item in items:
+        url = link("/courses/" + quote(str(item.get("course_id", "")), safe=""), "strategie")
+        rangees_site += _carte_valeur(item, url)
+        text.extend([f"{item['heure']} · {item['hippodrome']}", f"N° {item['numero']} — {item['nom_cheval']}",
+                     f"Valeur estimée : {item['ev'] * 100:+.1f} %".replace(".", ",") + f" · Niveau {int(item['niveau'])}/4",
+                     "Stratégie(s) : " + ", ".join(item.get("strategies") or []), url])
+    top = items[0] if items else None
+    apercu = f"{top['heure']} · {top['hippodrome']} — N° {top['numero']} {top['nom_cheval']}" if top else intro
+    rangees = (
+        D.barre_logo("&#9733; Alerte stratégie")
+        + D.entete("valeurs", "Vos stratégies", e(title), e(intro), lien=link("/value-bets", "strategie"))
+        + D.fenetre_site(SITE + "/value-bets", rangees_site)
+        + D.appel("Réglez vos alertes", "Activez ou coupez l’alerte e-mail de chaque stratégie depuis la page Stratégies.",
+                  "Gérer mes stratégies", link("/strategies", "strategie"),
+                  note="Au plus un e-mail toutes les 4 heures ; un même signal n’est jamais envoyé deux fois.")
+        + D.encart("Le repère",
+                   f"La {D.fort('valeur estimée')} compare une probabilité du modèle à une cote. Ce pourcentage "
+                   "n’est ni un gain promis ni une probabilité de gagner.")
+        + D.bloc_instagram()
+        + D.pied("Vous recevez cette alerte parce que vous l’avez activée sur une de vos stratégies BlackTurf. "
+                 + D.lien_pied("Couper les alertes", SITE + "/strategies") + " · "
+                 + D.lien_pied("Se désabonner de tous les e-mails", unsubscribe) + ".")
+    )
+    text.extend([link("/strategies", "strategie"), "La valeur estimée n’est pas une garantie de gain.", RESPONSABLE,
+                 "Désabonnement : " + unsubscribe])
+    return D.document(title, apercu, rangees), "\n\n".join(text)
