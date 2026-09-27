@@ -26,6 +26,12 @@ from db.models import User
 from services.course_resolution import STATUTS_NON_COURUES
 from services.temps_courses import jour_courses, PARIS
 from services.confiance_course import confiance_course as _confiance_course
+from services.cote_juste import cote_juste as _cote_juste, COTE_JUSTE_MAX
+
+# Seuil d'un « écart de prix » : le marché paie au moins 8 % au-dessus de la cote
+# juste du modèle. Même valeur que `ECART_MEILLEUR_PRIX` dans
+# frontend/src/components/courses/classement.tsx — les deux doivent rester égales.
+ECART_PRIX_MIN = 0.08
 from ml.portfolio import BetPortfolioEngine
 from ml.adaptive_learning import get_adaptive_learning
 from ml.monte_carlo import MonteCarloSimulator
@@ -1148,7 +1154,7 @@ async def get_programme_apercu(
 
     Ce qui est exposé, par course et RIEN de plus : le nombre de chevaux notés,
     la confiance du modèle sur son n°1, s'il place le favori des parieurs en
-    tête, et le NOMBRE d'écarts de prix (cote PMU au-dessus de l'exchange). Aucun numéro, aucun nom, aucune probabilité individuelle — exactement
+    tête, et le NOMBRE d'écarts de prix (chevaux payés au-dessus de leur chance). Aucun numéro, aucun nom, aucune probabilité individuelle — exactement
     la même règle que `/courses/{id}/apercu`, dont ceci est la version en lot.
     Une requête unique agrégée : 40 appels séparés sur une page de programme
     coûteraient plus cher que la page elle-même.
@@ -1174,7 +1180,6 @@ async def get_programme_apercu(
         SELECT pr.course_id      AS course_id,
                pa.numero         AS numero,
                pa.cote_pmu       AS cote_pmu,
-               pa.cote_betfair_exchange AS cote_exchange,
                pr.rang_predit    AS rang_predit,
                pr.proba_top1     AS proba_top1,
                pr.confidence_score AS confiance
@@ -1211,10 +1216,14 @@ async def get_programme_apercu(
             agg["numero_top1"] = r["numero"]
             agg["confiance"] = r["confiance"]
         cote = r["cote_pmu"]
-        # Écart de prix : même règle que `/courses/{id}/comparaison-cotes` (`is_value`),
-        # le PMU paie plus de 10 % au-dessus du marché d'échange. Seul le COMPTE sort.
-        exch = r["cote_exchange"]
-        if cote and exch and cote > exch * 1.10:
+        # Écart de prix : EXACTEMENT la tuile « Écarts de prix » de la fiche course
+        # (`ecartPrix` dans frontend/src/components/courses/classement.tsx) — cote du
+        # marché ÷ cote juste du modèle − 1, compté à partir de +8 %, cote juste
+        # plafonnée (999) écartée. Deux règles différentes sur deux pages faisaient
+        # annoncer « aucun écart » au programme pour une course qui en montrait cinq.
+        # Seul le COMPTE sort, jamais un numéro.
+        juste = _cote_juste(r["proba_top1"])
+        if cote and cote > 0 and juste and juste < COTE_JUSTE_MAX and cote / juste - 1 >= ECART_PRIX_MIN:
             agg["nb_ecarts_prix"] += 1
         if cote and cote > 1 and (agg["cote_favori"] is None or cote < agg["cote_favori"]):
             agg["cote_favori"] = cote
@@ -1244,7 +1253,9 @@ async def get_programme_apercu(
     }
     try:
         redis = await get_redis()
-        await redis.setex(cache_key, 120, json.dumps(resultat))
+        # 60 s : la page programme relit l'aperçu chaque minute le jour même, et les
+        # écarts de prix suivent les cotes.
+        await redis.setex(cache_key, 60, json.dumps(resultat))
     except Exception:
         pass
     return resultat
