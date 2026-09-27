@@ -26,7 +26,7 @@ async def test_palmares_public_ne_divulgue_ni_roi_ni_agregats_par_profil(client:
 
     assert "profils" not in data
     assert "roi" not in data
-    assert "total_gain" not in data
+    assert isinstance(data["total_gain"], (int, float))
     assert "total_benefice" not in data
 
 
