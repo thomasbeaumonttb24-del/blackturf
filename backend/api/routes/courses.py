@@ -362,7 +362,11 @@ async def _load_partants(course_id: str, db: AsyncSession) -> list[PartantOut]:
             # Musique / status
             musique=p.musique,
             non_partant=p.non_partant,
-            elo_global=ch.elo_score_global,
+            # ELO À LA DATE de la course (photo avant départ) : l'ELO courant d'une
+            # course passée intègre ses résultats et les suivants. Course à venir
+            # sans photo : l'ELO courant EST l'ELO d'avant course.
+            elo_global=(p.elo_avant_global if p.elo_avant_global is not None
+                        else ch.elo_score_global),
             # Équipement
             deferre=eq.deferre if eq else None,
             oeilleres=eq.oeilleres if eq else None,
