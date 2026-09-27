@@ -1054,6 +1054,10 @@ class Parrainage(Base):
     stripe_invoice_id: Mapped[str | None] = mapped_column(String(100), index=True)
     credit_cents: Mapped[int | None] = mapped_column(Integer)
     stripe_credit_txn_id: Mapped[str | None] = mapped_column(String(100))
+    # Crédit effectivement posé sur le solde Stripe du parrain. NULL sur un
+    # parrainage `valide` = crédit gagné mais REPORTÉ (plafond du mois atteint,
+    # ou Stripe injoignable) : il sera posé au mois suivant, rien n'est perdu.
+    credit_pose_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     valide_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

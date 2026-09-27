@@ -7,12 +7,33 @@
 | Ce qu'il obtient | 5 € de remise sur sa **première facture payante** (mensuelle ou annuelle) | 5 € de crédit, déduits **automatiquement** de sa prochaine mensualité ou de l'abonnement qu'il prendra |
 | Quand | au checkout, sans rien saisir | **uniquement** quand le paiement du filleul est encaissé (facture > 0 €) |
 | Essai gratuit | **aucun**, jamais (même après résiliation) | inchangé |
-| Plafond | — | illimité en nombre ; Stripe n'impute jamais plus qu'une facture, le reste est reporté |
+| Plafond | — | par mois de facturation, de quoi rendre la mensualité gratuite : **4 en Expert** (19 € − 20 € → 0 €), **3 en Standard** (12 € − 15 € → 0 €). Au-delà : crédit gagné mais **reporté au mois suivant**, jamais perdu |
 
 Aucun argent n'est versé : le crédit est posé sur le **solde client Stripe** du parrain
 (`customer balance`), que Stripe applique seul aux factures suivantes.
 
 Tout compte à l'adresse confirmée peut parrainer (abonné ou non).
+
+### Calcul de la mensualité du parrain
+
+Stripe impute le solde créditeur sur la facture jusqu'à 0 €, jamais en dessous ; le reste
+demeure pour la facture suivante. Une facture à 0 € est réglée sans aucun prélèvement.
+
+| Formule | Filleuls payants dans le mois | Prélevé | Reste au crédit |
+|---|---|---|---|
+| Expert 19 € | 3 | 19 − 15 = **4 €** | 0 € |
+| Expert 19 € | 4 (plafond) | **0 €** | 1 € (déduit le mois suivant) |
+| Expert 19 € | 6 | **0 €** | 1 € + 2 crédits reportés → mois suivant 19 − 11 = 8 € |
+| Standard 12 € | 3 (plafond) | **0 €** | 3 € |
+
+Le « mois » est la période de facturation Stripe pour un abonné mensuel, le mois civil sinon
+(annuel, offert, gratuit — plafond d'Expert). Les crédits reportés sont posés : au paiement de la
+facture du parrain (y compris à 0 €), à l'affichage de son suivi, et chaque nuit à 03 h 10
+(`job_credits_parrainage`).
+
+Parrain à l'abonnement **offert** (plan accordé à la main, ou code promo à 100 %) : il est crédité
+normalement, mais n'ayant aucune facture, ses crédits restent en réserve jusqu'à un abonnement payant.
+L'écran et l'e-mail le lui disent tel quel.
 
 ## Parcours
 
@@ -58,6 +79,9 @@ adresses réelles peut se parrainer une fois ; elle paie malgré tout son abonne
 ## Tests
 
 - `backend/tests/test_parrainage.py` — règles, anti-abus, suivi.
+- `backend/tests/test_parrainage_plafond.py` — plafond mensuel, report, montants réellement prélevés.
+- `backend/tests/test_parrainage_situations.py` — parrain offert (Victor), abonné, en essai, résilié,
+  gratuit, code promo 100 %, filleul lui-même parrain, chaîne, parrain désactivé, codes mal saisis.
 - `backend/tests/test_parrainage_parcours_stripe.py` — parcours complet par le vrai webhook signé.
 - `backend/tests/test_parrainage_stripe_mock.py` — appels Stripe validés contre la spécification
   officielle ; lancer `stripe-mock -http-port 12111` puis

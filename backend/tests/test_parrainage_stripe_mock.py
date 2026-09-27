@@ -52,3 +52,8 @@ async def test_checkout_filleul_avec_remise(db, stripe_mock, monkeypatch):
     # Session.create part réellement vers stripe-mock : discounts + pas de codes promo.
     res = await sr.create_checkout(sr.CheckoutRequest(plan="standard", periodicite="monthly"), db, filleul)
     assert res["remise_parrainage"] is True and res["essai"] is False and res["url"]
+
+
+def test_apercu_de_la_prochaine_facture(stripe_mock):
+    apercu = P._apercu_facture("cus_mock")
+    assert apercu is not None and "total_cents" in apercu and "a_payer_cents" in apercu

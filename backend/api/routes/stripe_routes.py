@@ -1058,6 +1058,16 @@ async def _handle_payment_succeeded(invoice: dict, db: AsyncSession):
     log.info("stripe.payment_succeeded", invoice_id=invoice.get("id"),
              sub=sub_id, montant_cents=montant)
     if montant <= 0:
+        # Facture soldée par le crédit du client : rien d'encaissé, mais la
+        # remise de parrainage d'un filleul est consommée.
+        client = await _find_user_by_customer(invoice.get("customer"), db)
+        if client is not None:
+            if (invoice.get("total") or 0) > 0:
+                await parrainage.sur_facture_reglee_par_credit(client, invoice, db)
+            # Facture d'un parrain réglée (0 € : entièrement couverte par ses
+            # crédits) : un nouveau mois commence, ses crédits reportés sont posés.
+            await parrainage.liberer_credits(client, db)
+            await db.commit()
         return
 
     user = await _find_user_by_customer(invoice.get("customer"), db)
@@ -1114,6 +1124,8 @@ async def _handle_payment_succeeded(invoice: dict, db: AsyncSession):
     # Premier vrai paiement d'un filleul : c'est lui, et lui seul, qui crédite le
     # parrain. Les factures à 0 € sont écartées plus haut.
     await parrainage.sur_paiement(user, invoice, db)
+    # Et si ce client est lui-même parrain : nouveau mois, crédits reportés posés.
+    await parrainage.liberer_credits(user, db)
     await db.commit()
     log.info("stripe.acces_retabli" if reprise else "stripe.paiement_encaisse",
              user_id=user.user_id, plan=user.plan, montant_cents=montant)

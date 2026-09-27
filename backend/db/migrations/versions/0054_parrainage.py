@@ -26,6 +26,7 @@ def upgrade():
         sa.Column("stripe_invoice_id", sa.String(100)),
         sa.Column("credit_cents", sa.Integer()),
         sa.Column("stripe_credit_txn_id", sa.String(100)),
+        sa.Column("credit_pose_at", sa.DateTime(timezone=True)),
         sa.Column("valide_at", sa.DateTime(timezone=True)),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),

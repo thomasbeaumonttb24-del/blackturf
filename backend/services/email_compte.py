@@ -158,11 +158,26 @@ def resiliation(via_stripe: bool) -> tuple[str, str]:
     return D.document("Résiliation enregistrée", "Votre demande de résiliation est bien prise en compte.", rangees), texte
 
 
-def parrainage_credite(prenom: Optional[str], prenom_filleul: Optional[str], lien: str) -> tuple[str, str]:
+# Où tombera le crédit, selon la situation du parrain (cf. services/parrainage.situation_credit).
+_OU_VA_LE_CREDIT = {
+    "facture": "ils seront déduits automatiquement de votre prochaine facture.",
+    "abonne": "ils seront déduits automatiquement de votre prochaine facture.",
+    "offert": "votre abonnement vous étant offert, ils restent en réserve et seront déduits "
+              "dès que vous aurez une facture à régler.",
+    "resilie": "votre abonnement s’arrêtant à l’échéance, ils restent en réserve et seront "
+               "déduits de votre prochain abonnement.",
+    "sans_abonnement": "ils seront déduits automatiquement de l’abonnement que vous prendrez.",
+    "reporte": "vous avez atteint le plafond de ce mois (votre mensualité est déjà entièrement "
+               "couverte) : ils sont mis de côté et seront déduits de la facture du mois suivant. "
+               "Rien n’est perdu.",
+}
+
+
+def parrainage_credite(prenom: Optional[str], prenom_filleul: Optional[str], lien: str,
+                       situation: str = "facture") -> tuple[str, str]:
     ami = (prenom_filleul or "").split(" ")[0] or "Votre filleul"
     detail = (f"{ami} vient de régler son premier abonnement. 5 € de crédit sont posés sur "
-              "votre compte : ils seront déduits automatiquement de votre prochaine "
-              "mensualité — ou de l’abonnement que vous prendrez si vous n’en avez pas encore.")
+              f"votre compte : {_OU_VA_LE_CREDIT.get(situation, _OU_VA_LE_CREDIT['facture'])}")
     carte = (
         D.surtitre("Comment ça marche ?")
         + f'<div style="font-size:14px;line-height:22px;color:{C["slate7"]}">{e(detail)}</div>'
@@ -185,7 +200,7 @@ def parrainage_credite(prenom: Optional[str], prenom_filleul: Optional[str], lie
         f"Votre lien de parrainage : {lien}\n\n{D.RESPONSABLE}"
     )
     return D.document("5 € offerts grâce à votre parrainage",
-                      "Votre filleul s'est abonné : 5 € déduits de votre prochaine mensualité.", rangees), texte
+                      "Votre filleul s'est abonné : 5 € de crédit sur votre compte.", rangees), texte
 
 
 def parrainage_inscrit(prenom: Optional[str], prenom_filleul: Optional[str], lien: str) -> tuple[str, str]:

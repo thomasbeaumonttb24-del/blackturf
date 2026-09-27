@@ -7,7 +7,7 @@ import { parrainageApi, type ResumeParrainage } from "@/lib/api";
 import { euros } from "@/lib/parrainage";
 import { cn } from "@/lib/utils";
 import { Reveal, Tilt } from "@/components/track-record/effets";
-import { Compteur } from "@/components/espace/kit";
+import { Anneau, Compteur } from "@/components/espace/kit";
 
 /**
  * Onglet « Parrainage » du profil.
@@ -28,12 +28,12 @@ type Etape = ResumeParrainage["filleuls"][number]["etape"];
 const ETAPES_SUIVI = ["Inscrit", "1er paiement", "5 € crédités"] as const;
 const AVANCEMENT: Record<Etape, number> = {
   email_a_confirmer: 1, attente_paiement: 1, paiement_en_cours: 1, verification: 2,
-  credite: 3, refuse: 1, parrain_inactif: 1, annule: 2,
+  credite: 3, reporte: 3, refuse: 1, parrain_inactif: 1, annule: 2,
 };
 const ECHEC: Etape[] = ["refuse", "parrain_inactif", "annule"];
 const COULEUR: Record<Etape, string> = {
   email_a_confirmer: "text-stone-600", attente_paiement: "text-amber-700", paiement_en_cours: "text-amber-700",
-  verification: "text-emerald-700", credite: "text-emerald-700",
+  verification: "text-emerald-700", credite: "text-emerald-700", reporte: "text-amber-700",
   refuse: "text-stone-500", parrain_inactif: "text-stone-500", annule: "text-stone-500",
 };
 
@@ -114,7 +114,8 @@ export function ParrainageSection() {
               </h3>
               <p className="mt-2.5 max-w-md text-sm leading-relaxed text-stone-300">
                 Votre ami paie {remise} de moins sur son premier abonnement. Dès que son paiement est
-                encaissé, {remise} sont déduits de votre prochaine mensualité. Sans limite d&apos;amis.
+                encaissé, {remise} de crédit s&apos;ajoutent à votre compte, déduits automatiquement de
+                vos factures. Sans limite d&apos;amis.
               </p>
             </div>
 
@@ -163,10 +164,14 @@ export function ParrainageSection() {
         <Tuile delai={160} label="Gagnés au total" accent="emerald">
           <Compteur valeur={data.gagne_cents / 100} suffixe=" €" />
         </Tuile>
-        <Tuile delai={240} label="Déduits de votre prochaine facture" accent="amber">
+        <Tuile delai={240} label="Crédit disponible" accent="amber">
           {credit === null ? "—" : <Compteur valeur={credit / 100} decimales={credit % 100 ? 2 : 0} suffixe=" €" />}
         </Tuile>
       </div>
+
+      <PlafondDuMois mois={data.mois} remise={data.remise_cents} situation={data.deduction.situation} />
+
+      <OuVaLeCredit deduction={data.deduction} credit={credit} remise={remise} />
 
       {/* ── Comment ça marche ── */}
       <div>
@@ -239,7 +244,8 @@ export function ParrainageSection() {
           {[
             "Les 5 € ne sont accordés qu'une fois le premier paiement de votre ami réellement encaissé. Une inscription seule ne rapporte rien.",
             "C'est une réduction sur votre abonnement BlackTurf, jamais un versement d'argent.",
-            "Vos crédits se cumulent. Au plus une mensualité est offerte par facture ; le reste est reporté sur les suivantes.",
+            "Vos crédits se cumulent jusqu'à rendre votre mensualité gratuite : 4 parrainages par mois en Expert (19 €), 3 en Standard (12 €). Au-delà, ils sont reportés au mois suivant, rien n'est perdu.",
+            "Quand vos crédits couvrent toute la facture, vous n'êtes pas prélevé ce mois-là ; le petit reste éventuel (1 € en Expert, 3 € en Standard) est déduit du mois suivant.",
             "Votre ami doit être un nouveau client, avec son propre compte et sa propre carte bancaire. Sa remise remplace l'essai gratuit.",
             "Si le paiement de votre ami est remboursé ou contesté, le crédit correspondant est annulé.",
           ].map((r) => (
@@ -251,6 +257,124 @@ export function ParrainageSection() {
         </ul>
       </details>
     </div>
+  );
+}
+
+/**
+ * Jauge du mois : crédits posés sur la période en cours, sur le plafond de la
+ * formule (celui qui rend la mensualité gratuite), et ce qui attend le mois
+ * suivant. Le calcul est écrit en toutes lettres : 19 € − 3 × 5 € = 4 €.
+ */
+function PlafondDuMois({ mois, remise, situation }: {
+  mois: ResumeParrainage["mois"];
+  remise: number;
+  situation: ResumeParrainage["deduction"]["situation"];
+}) {
+  const { plafond, poses, reportes, prix_cents: prix } = mois;
+  const reste = Math.max(0, plafond - poses);
+  const apres = Math.max(0, prix - poses * remise);
+  const formule = mois.formule === "standard" ? "Standard" : mois.formule === "expert" ? "Expert" : null;
+  const gratuit = poses >= plafond;
+  // Pas de mensualité à payer (offert, résilié) : les crédits du mois vont en réserve.
+  const reserve = situation === "offert" || situation === "resilie";
+  const phrase = reserve
+    ? `${poses} crédit${poses > 1 ? "s" : ""} gagné${poses > 1 ? "s" : ""} ce mois-ci, mis en réserve : vous n'avez pas de mensualité à payer pour l'instant.`
+    : gratuit
+      ? situation === "sans_abonnement"
+        ? "De quoi rendre gratuit le premier mois de votre futur abonnement."
+        : "Mensualité entièrement couverte : vous ne serez pas prélevé."
+      : situation === "sans_abonnement"
+        ? `Encore ${reste} ami${reste > 1 ? "s" : ""} abonné${reste > 1 ? "s" : ""} et votre premier mois d'abonnement sera gratuit.`
+        : `Encore ${reste} ami${reste > 1 ? "s" : ""} abonné${reste > 1 ? "s" : ""} et votre prochain mois est gratuit.`;
+  return (
+    <Reveal className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-stone-900 to-stone-800 p-4 sm:p-5 text-white shadow-[0_24px_48px_-28px_rgba(28,25,23,.8)]">
+      <span className="tr-shine" aria-hidden />
+      <div className="relative flex items-center gap-4 sm:gap-5">
+        <Anneau pct={(poses / plafond) * 100} taille={92} epaisseur={9} couleur={["#FCD34D", "#10B981"]}>
+          <span className="font-display text-2xl font-semibold leading-none">{poses}<span className="text-sm text-stone-400">/{plafond}</span></span>
+          <span className="mt-0.5 text-[9px] uppercase tracking-[0.15em] text-stone-400">ce mois</span>
+        </Anneau>
+        <div className="min-w-0 flex-1">
+          <p className="text-[11px] font-medium uppercase tracking-[0.18em] text-amber-300">Votre mois en cours</p>
+          <p className="mt-1 text-sm font-semibold leading-snug">{phrase}</p>
+          <p className={cn("mt-1.5 font-mono text-xs text-stone-300 tabular-nums", reserve && "hidden")}>
+            {euros(prix)} − {poses} × {euros(remise)} = <span className="font-semibold text-white">{euros(apres)}</span>
+            {formule && <span className="font-sans text-stone-400"> · formule {formule}</span>}
+          </p>
+        </div>
+      </div>
+      <p className="relative mt-3 border-t border-white/10 pt-3 text-[11px] leading-relaxed text-stone-400">
+        Plafond : {plafond} crédits par mois{formule ? ` en ${formule}` : ""}, de quoi rendre la mensualité gratuite.
+        {reportes > 0
+          ? ` ${reportes} crédit${reportes > 1 ? "s" : ""} de ${euros(remise)} ${reportes > 1 ? "attendent" : "attend"} le mois suivant : rien n'est perdu.`
+          : " Au-delà, vos crédits sont reportés au mois suivant : rien n'est perdu."}
+      </p>
+    </Reveal>
+  );
+}
+
+const jour = (iso: string | null | undefined) =>
+  iso ? new Date(iso).toLocaleDateString("fr-FR", { day: "numeric", month: "long" }) : null;
+
+/**
+ * Où tombera le crédit, dit précisément : la prochaine facture réelle calculée
+ * par Stripe quand il y en a une, sinon pourquoi le crédit attend en réserve.
+ */
+function OuVaLeCredit({ deduction, credit, remise }: {
+  deduction: ResumeParrainage["deduction"];
+  credit: number | null;
+  remise: string;
+}) {
+  const aDuCredit = (credit ?? 0) > 0;
+  let titre: string;
+  let texte: string;
+  let ticket: { avant: number; apres: number; date: string | null } | null = null;
+
+  switch (deduction.situation) {
+    case "facture":
+      titre = aDuCredit ? "Votre prochaine facture, crédit déduit" : "Votre prochaine facture";
+      texte = aDuCredit
+        ? `Stripe déduit automatiquement votre crédit le ${jour(deduction.date) ?? "jour du prélèvement"}. Au plus le montant de la facture : le reste passe à la suivante.`
+        : `Chaque ami abonné vous fait gagner ${remise}, déduits automatiquement de cette facture.`;
+      ticket = { avant: deduction.total_cents, apres: deduction.a_payer_cents, date: jour(deduction.date) };
+      break;
+    case "abonne":
+      titre = "Déduit de votre prochaine facture";
+      texte = `Votre crédit sera déduit automatiquement${jour(deduction.date) ? ` le ${jour(deduction.date)}` : ""}, sans rien faire.`;
+      break;
+    case "offert":
+      titre = "Votre abonnement vous est offert";
+      texte = "Vous n'avez aucune facture à régler : vos crédits restent en réserve sur votre compte et seront déduits automatiquement dès que vous aurez un abonnement payant.";
+      break;
+    case "resilie":
+      titre = "Crédit mis en réserve";
+      texte = `Votre abonnement s'arrête${jour(deduction.date) ? ` le ${jour(deduction.date)}` : " à l'échéance"} : vos crédits restent sur votre compte et seront déduits de votre prochain abonnement.`;
+      break;
+    default:
+      titre = "Déduit de votre futur abonnement";
+      texte = "Vous n'êtes pas encore abonné : vos crédits vous attendent et seront déduits automatiquement de l'abonnement que vous prendrez.";
+  }
+
+  return (
+    <Reveal className="esp-panneau flex flex-col gap-4 rounded-2xl p-4 sm:flex-row sm:items-center">
+      <div className="min-w-0 flex-1">
+        <p className="text-[11px] font-medium uppercase tracking-[0.18em] text-stone-500">Où vont vos crédits</p>
+        <p className="mt-1 text-sm font-semibold text-stone-900">{titre}</p>
+        <p className="mt-1 text-xs leading-relaxed text-stone-600">{texte}</p>
+      </div>
+      {ticket && (
+        <div className="relative shrink-0 rounded-xl bg-gradient-to-br from-stone-50 to-white px-4 py-3 text-right ring-1 ring-stone-200 shadow-[0_10px_20px_-14px_rgba(28,25,23,.5)]">
+          {ticket.date && <p className="text-[10px] uppercase tracking-[0.15em] text-stone-500">Le {ticket.date}</p>}
+          {ticket.avant !== ticket.apres && (
+            <p className="text-xs text-stone-400 line-through tabular-nums">{euros(ticket.avant)}</p>
+          )}
+          <p className="font-display text-xl font-semibold tabular-nums text-stone-900">{euros(ticket.apres)}</p>
+          {ticket.avant !== ticket.apres && (
+            <p className="text-[11px] font-semibold text-emerald-700">−{euros(ticket.avant - ticket.apres)} de crédit</p>
+          )}
+        </div>
+      )}
+    </Reveal>
   );
 }
 

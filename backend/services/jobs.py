@@ -746,6 +746,14 @@ def start_scheduler() -> None:
     # Renouvellement des jetons d'integration — 04:20 Paris, tous les jours. Le job ne
     # renouvelle qu'a l'approche de l'echeance ; passer tous les jours sert a absorber
     # plusieurs echecs consecutifs avant que le jeton n'expire pour de bon.
+    # Crédits de parrainage reportés — 03:10 Paris, tous les jours.
+    scheduler.add_job(
+        job_credits_parrainage,
+        CronTrigger(hour=3, minute=10, timezone="Europe/Paris"),
+        id="credits_parrainage",
+        replace_existing=True,
+        misfire_grace_time=7200,
+    )
     scheduler.add_job(
         job_renouveler_jetons,
         CronTrigger(hour=4, minute=20, timezone="Europe/Paris"),
@@ -1455,6 +1463,26 @@ async def job_surveillance_mosaique() -> None:
         log.info("jobs.mosaique.surveillance_alerte", jour=jour, envoye=bool(envoye))
     except Exception as e:  # noqa: BLE001
         log.warning("jobs.mosaique.surveillance_alerte_echec", jour=jour, err=str(e)[:200])
+
+
+async def job_credits_parrainage() -> None:
+    """1x/jour — pose les crédits de parrainage reportés.
+
+    Un parrain ne reçoit pas plus de crédits par mois que sa mensualité n'en
+    absorbe (4 en Expert, 3 en Standard) ; les suivants attendent le mois
+    d'après. Le paiement de sa facture les pose déjà ; ce passage quotidien
+    couvre les parrains sans facture (offerts, gratuits, annuels), dont le
+    « mois » est le mois civil.
+    """
+    try:
+        from db.database import AsyncSessionLocal
+        from services.parrainage import liberer_tous_les_credits
+
+        async with AsyncSessionLocal() as session:
+            poses = await liberer_tous_les_credits(session)
+        log.info("jobs.credits_parrainage.done", poses=poses)
+    except Exception as e:
+        log.error("jobs.credits_parrainage.error", error=str(e))
 
 
 async def job_renouveler_jetons() -> None:

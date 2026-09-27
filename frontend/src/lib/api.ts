@@ -122,7 +122,7 @@ export type ResumeParrainage = {
     statut: "en_attente" | "valide" | "refuse" | "annule";
     // Étape fine du suivi, et son libellé prêt à afficher.
     etape: "email_a_confirmer" | "attente_paiement" | "paiement_en_cours" | "verification"
-      | "credite" | "refuse" | "parrain_inactif" | "annule";
+      | "credite" | "reporte" | "refuse" | "parrain_inactif" | "annule";
     etape_libelle: string;
     depuis: string;
     credite_le: string | null;
@@ -134,6 +134,23 @@ export type ResumeParrainage = {
   // null : solde Stripe momentanément illisible.
   credit_disponible_cents: number | null;
   remise_filleul_disponible: boolean;
+  // Où et quand le crédit sera déduit (cf. services/parrainage.situation_credit).
+  deduction:
+    | { situation: "facture"; date: string | null; total_cents: number; a_payer_cents: number }
+    | { situation: "abonne"; date: string | null }
+    | { situation: "resilie"; date: string | null }
+    | { situation: "offert" }
+    | { situation: "sans_abonnement" };
+  // Plafond de la période de facturation en cours (4 en Expert, 3 en Standard).
+  mois: {
+    debut: string;
+    fin: string | null;
+    formule: "standard" | "expert" | null;
+    prix_cents: number;
+    plafond: number;
+    poses: number;
+    reportes: number;
+  };
 };
 
 export type CodeParrain =

@@ -279,9 +279,11 @@ async def test_cartes_illisibles_la_recompense_attend(db, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_credit_en_echec_retente_au_paiement_suivant(db, monkeypatch):
+async def test_credit_en_echec_repose_plus_tard(db, monkeypatch):
+    """Stripe injoignable au moment du paiement du filleul : les 5 € restent
+    GAGNÉS (le filleul a payé) et sont posés au passage suivant."""
     spy = _Stripe(monkeypatch)
-    _, filleul, lien = await _couple(db)
+    parrain, filleul, lien = await _couple(db)
     ok = P.stripe.Customer.create_balance_transaction
 
     def _panne(*a, **kw):
@@ -289,11 +291,14 @@ async def test_credit_en_echec_retente_au_paiement_suivant(db, monkeypatch):
 
     monkeypatch.setattr(P.stripe.Customer, "create_balance_transaction", _panne)
     await P.sur_paiement(filleul, _facture(), db)
-    assert lien.statut == "en_attente"
+    assert lien.statut == "valide" and lien.credit_pose_at is None
+    assert lien.motif == "credit_en_echec"
+    assert P._etape(lien, filleul, True) == "verification"
 
     monkeypatch.setattr(P.stripe.Customer, "create_balance_transaction", ok)
-    await P.sur_paiement(filleul, _facture(fid="in_2"), db)
-    assert lien.statut == "valide" and len(spy.soldes) == 1
+    assert await P.liberer_credits(parrain, db) == 1
+    assert lien.credit_pose_at is not None and len(spy.soldes) == 1
+    assert await P.liberer_credits(parrain, db) == 0
 
 
 @pytest.mark.asyncio
