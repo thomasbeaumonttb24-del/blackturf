@@ -208,6 +208,22 @@ async def job_resultats_poll() -> None:
         log.error("jobs.resultats_poll.error", error=str(e))
 
 
+async def job_commentaires_pmu() -> None:
+    """Chaque matin : relit les commentaires post-course des 7 derniers jours.
+
+    Le PMU les publie après l'arrivée et les efface au bout de 30 jours (cf.
+    `services.commentaires_pmu`) : sans cette relecture, l'historique des chevaux
+    n'en recevait aucun et les quatre features `commentaire_*` restaient à 0.
+    """
+    from datetime import date, timedelta
+    try:
+        from services.commentaires_pmu import relire_commentaires
+        hier = date.today() - timedelta(days=1)
+        await relire_commentaires(hier - timedelta(days=6), hier)
+    except Exception as e:  # noqa: BLE001
+        log.error("jobs.commentaires_pmu.error", error=str(e)[:200])
+
+
 async def job_expire_stale_value_bets() -> None:
     """
     Filet de sécurité — toutes les 15 minutes : désactive les value bets dont la
@@ -513,6 +529,15 @@ def start_scheduler() -> None:
         id="resultats_poll",
         replace_existing=True,
         misfire_grace_time=60,
+    )
+
+    # Commentaires post-course PMU — 07:10 UTC, fenêtre J-7..J-1 (effacés à J+30).
+    scheduler.add_job(
+        job_commentaires_pmu,
+        CronTrigger(hour=7, minute=10, timezone="UTC"),
+        id="commentaires_pmu",
+        replace_existing=True,
+        misfire_grace_time=7200,
     )
 
     # Value bet notifications — every 10 minutes

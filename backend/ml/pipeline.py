@@ -62,7 +62,12 @@ H2H_TOLERANCE = 0.002
 # promue, elle servait l'arrivée apprise. Au-delà de ce seuil, le modèle a appris
 # quelque chose que personne ne sait avant le départ : jamais promu, même en
 # remplacement structurel.
-FUITE_AVANCE_MARCHE_MAX = 0.08
+# 0,08 était trop large : le 25/09 au matin, un réentraînement sur des features
+# recalculées avec les statistiques de saison ACTUELLES (jockey, entraîneur,
+# carrière — qui comptent des courses postérieures) passait à +0,046, et même le
+# champion v544 remontait à +0,019 sur ce hold-out contre −0,018 à sa création.
+# Le seuil reste au-dessus du record honnête (+0,020), sans rien laisser au-delà.
+FUITE_AVANCE_MARCHE_MAX = 0.03
 
 
 def _fuite_suspectee(h2h: Optional[dict]) -> bool:

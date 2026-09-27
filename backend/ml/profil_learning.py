@@ -276,6 +276,7 @@ async def record_profil_runs(session: AsyncSession, course_id: str,
         ev_band_perf = None
 
     n_written = 0
+    plans_emis: dict[str, dict] = {}
     for profil in PROFILS:
         try:
             from ml.bet_performance import get_learned_type_weights
@@ -309,6 +310,7 @@ async def record_profil_runs(session: AsyncSession, course_id: str,
         nb_paris = sum(len(n.get("paris", [])) for n in plan_d.get("niveaux", []))
         if nb_paris == 0:
             continue
+        plans_emis[profil] = plan_d
         # Upsert idempotent — n'écrase JAMAIS un run déjà réglé.
         await session.execute(text("""
             INSERT INTO profil_run_log
@@ -341,6 +343,15 @@ async def record_profil_runs(session: AsyncSession, course_id: str,
             preds=preds, course_start_at=_date_heure,
         )
         n_written += 1
+    # Tous les candidats de la course, retenus ou non (observation, cf.
+    # ml/candidats_paris) : un échec ici ne coûte jamais les plans figés.
+    try:
+        from ml.candidats_paris import enregistrer_candidats
+        async with session.begin_nested():
+            await enregistrer_candidats(session, course_id, preds, course_info,
+                                        plans_emis, model_version_id)
+    except Exception as e:  # noqa: BLE001
+        log.warning("profil_learning.candidats_skip", course_id=course_id, err=str(e)[:140])
     await session.commit()
     if n_written:
         log.info("profil_learning.runs_recorded", course_id=course_id, n=n_written)
@@ -438,6 +449,13 @@ async def settle_profil_runs(session: AsyncSession, course_id: str) -> int:
             "st": statut, "id": log_id,
         })
         n_settled += 1
+    try:
+        from ml.candidats_paris import regler_candidats
+        async with session.begin_nested():
+            await regler_candidats(session, course_id)
+    except Exception as e:  # noqa: BLE001
+        log.warning("profil_learning.candidats_reglement_skip", course_id=course_id,
+                    err=str(e)[:140])
     await session.commit()
     if n_settled:
         log.info("profil_learning.runs_settled", course_id=course_id, n=n_settled)
@@ -494,6 +512,15 @@ async def settle_catchup(session: AsyncSession, timeout_days: int = CATCHUP_TIME
         "SELECT count(*) FROM profil_run_log WHERE statut IN ('pending','partial')"
     ))).scalar() or 0
     await session.commit()
+    # Candidats en observation (ml/candidats_paris) : même rattrapage, un rapport
+    # publié en retard règle aussi les candidats restés 'partial'.
+    try:
+        from ml.candidats_paris import regler_candidats_en_retard
+        _cand = await regler_candidats_en_retard(session, jours=int(timeout_days))
+        log.info("profil_learning.candidats_catchup", **_cand)
+    except Exception as e:  # noqa: BLE001
+        await session.rollback()
+        log.warning("profil_learning.candidats_catchup_failed", err=str(e)[:140])
     log.info("profil_learning.settle_catchup",
              resettled=resettled, expired=expired, remaining=remaining)
     return {"resettled": resettled, "expired": expired, "remaining": remaining}
