@@ -651,7 +651,11 @@ async def test_une_version_fuyante_ou_retiree_nest_pas_une_reference(mod, db, v5
         .where(*mod._reference_valable())
         .order_by(ModelVersion.walk_forward_auc.desc())
     )).scalars().first()
-    assert record == 546, "le modèle actif est le record, comme le dit le cliquet"
+    # v546 (+0,0465) avait appris sur des features recalculées le 24/09 avec des
+    # données postérieures aux courses (mesuré le 27/09 : en direct, ces variables
+    # retombent au niveau d'avant). Le seuil de fuite est passé à 0,03 : v546 n'est
+    # plus un record, v544 le redevient.
+    assert record == 544, "une version fuyante n'est pas un record"
 
 
 def test_le_seuil_de_fuite_du_rapport_suit_celui_du_pipeline(mod):
