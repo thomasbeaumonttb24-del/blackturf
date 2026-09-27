@@ -250,7 +250,19 @@ async def _etat_melange(session: AsyncSession) -> dict:
                 "pourquoi": "mélange jamais examiné — la chaîne d'avant est servie"}
     en_service = bool(service and service.get("retenu"))
     ref = examen or service or {}
+    # Covariables du marché (mouvement 30 min, cote Geny, favori) : servies seulement
+    # si l'examen les a retenues en plus du mélange à deux paramètres.
+    et_service = ((service or {}).get("etendu") or {}) if en_service else {}
+    et_examen = ref.get("etendu") or {}
     return {
+        "covariables_en_service": bool(et_service.get("retenu")),
+        "covariables_gammas": et_service.get("gammas") if et_service.get("retenu") else None,
+        "covariables_noms": et_examen.get("noms"),
+        "covariables_examen_retenu": bool(et_examen.get("retenu")),
+        "covariables_gain_vs_deux_parametres": et_examen.get("gain_logv_vs_deux_parametres"),
+        "covariables_gain_vs_deux_parametres_ic95":
+            et_examen.get("gain_logv_vs_deux_parametres_ic95"),
+        "covariables_raison": et_examen.get("raison"),
         "mesure_disponible": True,
         "en_service": en_service,
         "beta_modele": (service or {}).get("beta_modele") if en_service else None,

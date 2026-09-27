@@ -47,6 +47,37 @@ proba placé brute (+0,0366 au lieu de +0,0374), des interactions par discipline
 (+0,0364), un terme quadratique de cote (+0,0438 mais coefficients instables, de
 signe opposé d'une moitié à l'autre). Deux paramètres, donc.
 
+Les covariables du marché (2026-09-27)
+──────────────────────────────────────
+Le mélange à deux paramètres laissait trois défauts, mesurés hors échantillon sur
+2 096 courses figées ≤ 2 h avant le départ (18/08 → 27/09) :
+  - gros favoris (cote juste < 3) annoncés 46,2 %, réalisés 40,4 % (z −3,3) ;
+  - « sous-cotés » (cote PMU 1,2 à 1,5 × la cote juste) annoncés 7,1 %, réalisés
+    4,7 % : l'écart de prix affiché était du bruit ;
+  - tranche de cote juste 6-10 sous-estimée (+8 %).
+
+Trois termes, tous connus au moment du calcul, s'ajoutent au logit :
+
+    z_i = β_modèle·ln p̂_i + β_marché·ln q_i
+          + γ_mv·mouvement_30min_i        (cote qui s'allonge = argent qui part)
+          + γ_geny·ln q_geny_i            (2e source de cote, repli = cote PMU)
+          + γ_fav·[i = favori du marché]  (le public surjoue le favori)
+
+    gain sur le mélange à deux paramètres +0,0183 [+0,0100 ; +0,0267]
+    γ ≈ −0,27 / +0,24 / −0,33, mêmes signes et ordres de grandeur par moitié.
+    Écarts de prix 1,2-1,5 : annoncés 14,1 %, réalisés 14,7 % (marché T-10 9,5 %).
+
+Mesurés et ÉCARTÉS : traiter à part les écarts positifs et négatifs du modèle
+(−0,0004), le mouvement depuis l'ouverture (+0,0001), la cote Betfair Exchange
+(valeurs aberrantes). Les covariables ne sont servies que si elles battent, hors
+échantillon et IC entièrement positif, le mélange à deux paramètres de la même
+nuit, avec des γ de même signe sur les deux moitiés. Sinon : deux paramètres.
+
+Ce qu'elles ne font PAS : battre la cote de CLÔTURE. Le PMU paie la clôture, qui
+rachète l'essentiel de l'écart vu avant le départ (rendement des écarts 1,2-1,5
+au rapport de clôture ≈ 0). La cote juste dit vrai sur la chance ; elle ne promet
+pas un gain.
+
 Le classement affiché suit cette probabilité (cf. `ml.pipeline.predict_course`) :
 le rang 1 est le cheval dont la cote juste est la plus basse, sans exception.
 
@@ -114,6 +145,16 @@ BETA_MIN, BETA_MAX = 0.0, 2.0
 TOL_LOGV = 0.002
 TOL_AUC = 0.003
 
+# ── Covariables du marché (cf. docstring, 2026-09-27) ────────────────────────
+# Ordre des colonnes ajoutées à [ln p̂, ln q] ; les γ appris suivent cet ordre.
+COVARIABLES = ("mouvement_30min", "ln_q_geny", "favori_marche")
+# Le mouvement sur 30 min est une variation relative de cote : au-delà de ±100 %
+# ce n'est plus un signal mais une cote mal lue (même borne qu'à la mesure).
+MOUVEMENT_BORNE = 1.0
+# Borne DURE des γ : hors de ±3, un terme seul renverserait le classement du
+# marché. Hors bornes on refuse de servir, donc on refuse d'apprendre.
+GAMMA_MAX = 3.0
+
 _cache: Optional[dict] = None
 
 
@@ -130,9 +171,67 @@ def probas_marche(cotes: Sequence[float]) -> Optional[np.ndarray]:
     return q / q.sum()
 
 
+def _en_nombres(valeurs, n: int) -> np.ndarray:
+    """Tableau de n flottants, NaN pour ce qui manque ou ne se lit pas."""
+    out = np.full(n, np.nan)
+    if valeurs is None:
+        return out
+    try:
+        valeurs = list(valeurs)
+    except TypeError:
+        return out
+    if len(valeurs) != n:
+        return out
+    for i, v in enumerate(valeurs):
+        try:
+            out[i] = float(v)
+        except (TypeError, ValueError):
+            pass
+    return out
+
+
+def matrice_covariables(cotes: Sequence[float], mouvements=None,
+                        cotes_geny=None) -> Optional[np.ndarray]:
+    """Matrice n×3 des covariables du marché (ordre `COVARIABLES`). Fonction PURE.
+
+    None si la cote PMU manque pour un partant (l'étage entier ne s'applique pas).
+    Une covariable absente pour un cheval prend sa valeur NEUTRE, exactement comme
+    dans les features apprises : mouvement 0, cote Geny = cote PMU.
+    """
+    q = probas_marche(cotes)
+    if q is None:
+        return None
+    n = q.size
+    mv = np.clip(np.nan_to_num(_en_nombres(mouvements, n), nan=0.0),
+                 -MOUVEMENT_BORNE, MOUVEMENT_BORNE)
+    c = np.asarray(cotes, dtype=float)
+    g = _en_nombres(cotes_geny, n)
+    g = np.where(np.isfinite(g) & (g > 1.0), g, c)
+    qg = (1.0 / g) / float((1.0 / g).sum())
+    fav = np.zeros(n)
+    fav[int(np.argmax(q))] = 1.0          # ex æquo : le premier dans l'ordre reçu
+    return np.column_stack([mv, np.log(np.clip(qg, PLANCHER, None)), fav])
+
+
+def covariables_de_features(features: Sequence[dict],
+                            cotes: Sequence[float]) -> Optional[np.ndarray]:
+    """`matrice_covariables` à partir des vecteurs de features servis."""
+    return matrice_covariables(
+        cotes,
+        [f.get("mouvement_30min") for f in features],
+        [f.get("cote_geny") for f in features],
+    )
+
+
 def appliquer(p_modele: Sequence[float], cotes: Sequence[float],
-              beta_modele: float, beta_marche: float) -> Optional[np.ndarray]:
-    """p ∝ p̂^β_modèle · q^β_marché, Σ = 1. Fonction PURE.
+              beta_modele: float, beta_marche: float,
+              covariables: Optional[np.ndarray] = None,
+              gammas: Optional[Sequence[float]] = None) -> Optional[np.ndarray]:
+    """p ∝ p̂^β_modèle · q^β_marché · exp(Σ γ_k·x_k), Σ = 1. Fonction PURE.
+
+    Sans `gammas` : le mélange à deux paramètres, à l'identique. Avec `gammas`, les
+    `covariables` (n × len(gammas)) sont exigées : s'il en manque, None — l'appelant
+    retombe sur deux paramètres plutôt que de servir un logit tronqué.
 
     Renvoie None quand l'étage ne s'applique pas (cote manquante, proba modèle sans
     masse, coefficients hors bornes) : l'appelant garde alors sa chaîne. Elle ne lève
@@ -154,13 +253,27 @@ def appliquer(p_modele: Sequence[float], cotes: Sequence[float],
         return None
     p = np.clip(p / p.sum(), PLANCHER, None)
     z = bm * np.log(p) + bk * np.log(np.clip(q, PLANCHER, None))
+    if gammas is not None:
+        try:
+            gm = np.asarray(gammas, dtype=float).reshape(-1)
+            x = np.asarray(covariables, dtype=float)
+        except (TypeError, ValueError):
+            return None
+        if (x.ndim != 2 or x.shape != (p.size, gm.size) or not np.isfinite(x).all()
+                or not np.isfinite(gm).all() or (np.abs(gm) > GAMMA_MAX).any()):
+            return None
+        z = z + x @ gm
     z = z - z.max()
     e = np.exp(z)
     return e / e.sum()
 
 
 def en_service() -> Optional[tuple[float, float]]:
-    """(β_modèle, β_marché) retenus et en cache, ou None. Sans accès base."""
+    """(β_modèle, β_marché) du mélange À DEUX PARAMÈTRES retenu, ou None.
+
+    C'est la référence des mesures (contrôle de promotion, avantage servi, bancs) et
+    le repli de `predict_course` quand les covariables ne se calculent pas.
+    """
     d = _cache or {}
     if not d.get("retenu"):
         return None
@@ -170,13 +283,30 @@ def en_service() -> Optional[tuple[float, float]]:
         return None
 
 
+def en_service_etendu() -> Optional[tuple[float, float, tuple[float, ...]]]:
+    """(β_modèle, β_marché, γ) du mélange AVEC covariables retenu, ou None."""
+    d = _cache or {}
+    e = d.get("etendu") or {}
+    if not d.get("retenu") or not e.get("retenu"):
+        return None
+    try:
+        gammas = tuple(float(v) for v in e["gammas"])
+        if len(gammas) != len(COVARIABLES) or list(e.get("noms") or []) != list(COVARIABLES):
+            return None
+        return float(e["beta_modele"]), float(e["beta_marche"]), gammas
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # L'ajustement (fonctions pures)
 # ──────────────────────────────────────────────────────────────────────────────
-# Une course = dict(x=matrice n×2 [ln p̂, ln q], g=index du gagnant, servi=proba
-# servie normalisée). Ordre chronologique.
+# Une course = dict(x=matrice n×(2+k) [ln p̂, ln q, covariables…], g=index du
+# gagnant, servi=proba servie normalisée). Ordre chronologique. Les deux premières
+# colonnes suffisent au mélange à deux paramètres (`k=2`).
 
-def _vers_course(p_brut, cotes, gagnant: int, p_servi) -> Optional[dict]:
+def _vers_course(p_brut, cotes, gagnant: int, p_servi,
+                 covariables: Optional[np.ndarray] = None) -> Optional[dict]:
     p = np.asarray(p_brut, dtype=float)
     q = probas_marche(cotes)
     s = np.asarray(p_servi, dtype=float)
@@ -186,30 +316,44 @@ def _vers_course(p_brut, cotes, gagnant: int, p_servi) -> Optional[dict]:
         return None
     x = np.column_stack([np.log(np.clip(p / p.sum(), PLANCHER, None)),
                          np.log(np.clip(q, PLANCHER, None))])
+    if covariables is not None:
+        cv = np.asarray(covariables, dtype=float)
+        if cv.ndim != 2 or cv.shape[0] != p.size or not np.isfinite(cv).all():
+            return None
+        x = np.column_stack([x, cv])
     return {"x": x, "g": int(gagnant), "servi": s / s.sum(), "q": q}
 
 
 def _log_proba(beta: np.ndarray, x: np.ndarray) -> np.ndarray:
-    z = x @ beta
+    z = x[:, :beta.size] @ beta
     z = z - z.max()
     return z - math.log(float(np.exp(z).sum()))
 
 
-def ajuster_beta(courses: Sequence[dict], iterations: int = 50) -> np.ndarray:
+def _borner(beta: np.ndarray) -> np.ndarray:
+    b = beta.copy()
+    b[:2] = np.clip(b[:2], BETA_MIN, BETA_MAX)
+    b[2:] = np.clip(b[2:], -GAMMA_MAX, GAMMA_MAX)
+    return b
+
+
+def ajuster_beta(courses: Sequence[dict], iterations: int = 50, k: int = 2) -> np.ndarray:
     """Maximum de vraisemblance du logit conditionnel, par Newton-Raphson.
 
-    La vraisemblance est concave en β : Newton converge en quelques pas depuis
-    n'importe quel point raisonnable. Une petite régularisation vers (0, 1) — « le
-    marché seul » — tient lieu de garde-fou quand l'échantillon est dégénéré.
+    `k` = nombre de colonnes de `x` utilisées : 2 pour le mélange modèle × marché,
+    2 + len(COVARIABLES) avec les covariables. La vraisemblance est concave en β :
+    Newton converge en quelques pas depuis n'importe quel point raisonnable. Une
+    petite régularisation vers « le marché seul » (0, 1, 0…) tient lieu de
+    garde-fou quand l'échantillon est dégénéré.
     """
-    beta = np.array([0.3, 0.7])
-    prior = np.array([0.0, 1.0])
+    beta = np.array([0.3, 0.7] + [0.0] * (k - 2))
+    prior = np.array([0.0, 1.0] + [0.0] * (k - 2))
     ridge = 1e-3
     for _ in range(iterations):
         grad = -ridge * (beta - prior)
-        hess = -ridge * np.eye(2)
+        hess = -ridge * np.eye(k)
         for c in courses:
-            x = c["x"]
+            x = c["x"][:, :k]
             p = np.exp(_log_proba(beta, x))
             moy = p @ x
             grad += x[c["g"]] - moy
@@ -221,7 +365,7 @@ def ajuster_beta(courses: Sequence[dict], iterations: int = 50) -> np.ndarray:
         beta = beta - pas
         if float(np.abs(pas).max()) < 1e-7:
             break
-    return np.clip(beta, BETA_MIN, BETA_MAX)
+    return _borner(beta)
 
 
 def _auc_course(scores: np.ndarray, g: int) -> float:
@@ -242,45 +386,109 @@ def _moy_ic(valeurs: Sequence[float]) -> tuple[float, float, float]:
     return m, m - 1.96 * se, m + 1.96 * se
 
 
+def _validation_croisee(courses: list[dict], k: int) -> dict:
+    """Validation croisée chronologique en deux moitiés, `k` colonnes.
+
+    Par course, dans l'ordre d'entrée : −ln p(gagnant) et AUC intra-course, chaque
+    course notée avec des coefficients appris sur l'AUTRE moitié.
+    """
+    n = len(courses)
+    moitie = n // 2
+    ll = np.empty(n)
+    auc = np.empty(n)
+    plis = []
+    for app, val in ((range(0, moitie), range(moitie, n)), (range(moitie, n), range(0, moitie))):
+        b = ajuster_beta([courses[i] for i in app], k=k)
+        plis.append([round(float(v), 4) for v in b])
+        for i in val:
+            c = courses[i]
+            lp = _log_proba(b, c["x"][:, :k])
+            ll[i] = -float(lp[c["g"]])
+            auc[i] = _auc_course(lp, c["g"])
+    return {"ll": ll, "auc": auc, "plis": plis}
+
+
+def _ic(valeurs) -> tuple[float, list[float]]:
+    m, bas, haut = _moy_ic(valeurs)
+    return round(m, 5), [round(bas, 5), round(haut, 5)]
+
+
+def _examiner_etendu(courses: list[dict], base: dict, ll_marche: np.ndarray,
+                     ll_servi: np.ndarray, auc_servi: np.ndarray) -> dict:
+    """Le mélange AVEC covariables face au mélange à deux paramètres de la même nuit.
+
+    Retenu seulement s'il bat ce mélange hors échantillon (IC entièrement positif),
+    avec des γ de même signe sur les deux moitiés, sans annoncer ni classer moins
+    bien que ce qui est servi.
+    """
+    k = 2 + len(COVARIABLES)
+    cv = _validation_croisee(courses, k)
+    gain_base, gain_base_ic = _ic(base["ll"] - cv["ll"])
+    gm, gm_ic = _ic(ll_marche - cv["ll"])
+    gs, _gs_ic = _ic(ll_servi - cv["ll"])
+    da, da_ic = _ic(cv["auc"] - auc_servi)
+    final = ajuster_beta(courses, k=k)
+    g1, g2 = np.asarray(cv["plis"][0][2:]), np.asarray(cv["plis"][1][2:])
+    stables = bool(np.all(np.sign(g1) == np.sign(g2)) and np.all(g1 != 0))
+    verdict = {
+        "noms": list(COVARIABLES),
+        "beta_modele": round(float(final[0]), 4),
+        "beta_marche": round(float(final[1]), 4),
+        "gammas": [round(float(v), 4) for v in final[2:]],
+        "coefs_par_moitie": cv["plis"],
+        "gain_logv_vs_deux_parametres": gain_base,
+        "gain_logv_vs_deux_parametres_ic95": gain_base_ic,
+        "gain_logv_vs_marche": gm,
+        "gain_logv_vs_marche_ic95": gm_ic,
+        "gain_logv_vs_servi": gs,
+        "delta_auc_vs_servi": da,
+        "delta_auc_vs_servi_ic95": da_ic,
+        "auc_melange": round(float(np.mean(cv["auc"])), 4),
+    }
+    if not gain_base_ic[0] > 0:
+        return {"retenu": False, "raison": "ne bat pas le mélange à deux paramètres", **verdict}
+    if not stables:
+        return {"retenu": False, "raison": "coefficients instables d'une moitié à l'autre",
+                **verdict}
+    if gs < -TOL_LOGV:
+        return {"retenu": False, "raison": "annonce moins juste que ce qui est servi", **verdict}
+    if da < -TOL_AUC:
+        return {"retenu": False, "raison": "classerait moins bien que ce qui est servi",
+                **verdict}
+    return {"retenu": True, **verdict}
+
+
 def evaluer(courses: Sequence[dict]) -> dict:
     """Validation croisée chronologique en deux moitiés + ajustement final.
 
     Fonction PURE. Chaque course est jugée avec des coefficients appris sur l'AUTRE
     moitié : aucune n'a servi à choisir les paramètres qui la notent.
+
+    Quand les courses portent les covariables (x à plus de deux colonnes), le
+    mélange étendu est examiné aussi (clé `etendu`). Les critères « pas moins juste,
+    pas moins bien classé que ce qui est servi » s'appliquent à ce qui SERA servi :
+    le mélange étendu s'il est retenu, sinon celui à deux paramètres. Sans cette
+    règle, une fois les covariables en service, le mélange à deux paramètres
+    échouerait chaque nuit face à elles et plus rien ne se réapprendrait.
     """
     courses = list(courses)
     n = len(courses)
     if n < 2:
         return {"retenu": False, "raison": "échantillon vide", "n_courses": n}
-    moitie = n // 2
-    plis = [(courses[:moitie], courses[moitie:]), (courses[moitie:], courses[:moitie])]
-    gain_marche, gain_servi, delta_auc, betas_plis = [], [], [], []
-    auc_melange, auc_servi, auc_marche = [], [], []
-    for apprentissage, validation in plis:
-        b = ajuster_beta(apprentissage)
-        betas_plis.append([round(float(b[0]), 4), round(float(b[1]), 4)])
-        for c in validation:
-            lp = _log_proba(b, c["x"])
-            g = c["g"]
-            ll = -float(lp[g])
-            ll_marche = -math.log(max(float(c["q"][g]), 1e-15))
-            ll_servi = -math.log(max(float(c["servi"][g]), 1e-15))
-            gain_marche.append(ll_marche - ll)
-            gain_servi.append(ll_servi - ll)
-            a_m, a_s = _auc_course(lp, g), _auc_course(c["servi"], g)
-            delta_auc.append(a_m - a_s)
-            auc_melange.append(a_m)
-            auc_servi.append(a_s)
-            auc_marche.append(_auc_course(c["q"], g))
+    base = _validation_croisee(courses, 2)
+    ll_marche = np.array([-math.log(max(float(c["q"][c["g"]]), 1e-15)) for c in courses])
+    ll_servi = np.array([-math.log(max(float(c["servi"][c["g"]]), 1e-15)) for c in courses])
+    auc_servi = np.array([_auc_course(c["servi"], c["g"]) for c in courses])
+    auc_marche = np.array([_auc_course(c["q"], c["g"]) for c in courses])
 
-    gm, gm_bas, gm_haut = _moy_ic(gain_marche)
-    gs, gs_bas, gs_haut = _moy_ic(gain_servi)
-    da, da_bas, da_haut = _moy_ic(delta_auc)
+    gm, gm_bas, gm_haut = _moy_ic(ll_marche - base["ll"])
+    gs, gs_bas, gs_haut = _moy_ic(ll_servi - base["ll"])
+    da, da_bas, da_haut = _moy_ic(base["auc"] - auc_servi)
     final = ajuster_beta(courses)
     verdict = {
         "beta_modele": round(float(final[0]), 4),
         "beta_marche": round(float(final[1]), 4),
-        "betas_par_moitie": betas_plis,
+        "betas_par_moitie": base["plis"],
         "n_courses": n,
         "gain_logv_vs_marche": round(gm, 5),
         "gain_logv_vs_marche_ic95": [round(gm_bas, 5), round(gm_haut, 5)],
@@ -288,7 +496,7 @@ def evaluer(courses: Sequence[dict]) -> dict:
         "gain_logv_vs_servi_ic95": [round(gs_bas, 5), round(gs_haut, 5)],
         "delta_auc_vs_servi": round(da, 5),
         "delta_auc_vs_servi_ic95": [round(da_bas, 5), round(da_haut, 5)],
-        "auc_melange": round(float(np.mean(auc_melange)), 4),
+        "auc_melange": round(float(np.mean(base["auc"])), 4),
         "auc_servi": round(float(np.mean(auc_servi)), 4),
         "auc_marche": round(float(np.mean(auc_marche)), 4),
     }
@@ -297,6 +505,12 @@ def evaluer(courses: Sequence[dict]) -> dict:
     if not gm_bas > 0:
         return {"retenu": False, "raison": "ne bat pas la cote seule hors échantillon",
                 **verdict}
+    etendu = None
+    if all(c["x"].shape[1] >= 2 + len(COVARIABLES) for c in courses):
+        etendu = _examiner_etendu(courses, base, ll_marche, ll_servi, auc_servi)
+        verdict["etendu"] = etendu
+    if etendu is not None and etendu.get("retenu"):
+        return {"retenu": True, **verdict}
     if gs < -TOL_LOGV:
         return {"retenu": False, "raison": "annonce moins juste que ce qui est servi",
                 **verdict}
@@ -319,9 +533,13 @@ async def _charger_courses(session: AsyncSession) -> list[dict]:
     gagnant identifié. Une course à moitié présente fausserait la normalisation.
     """
     depuis = datetime.now(timezone.utc) - timedelta(days=FENETRE_JOURS)
-    rows = (await session.execute(text("""
+    # Les covariables se lisent dans le vecteur de features FIGÉ avec la prédiction
+    # (jamais dans `features_ml`, que les recalculs réécrivent après la course).
+    mv, geny = _extraits_features(session)
+    rows = (await session.execute(text(f"""
         SELECT pe.course_id, pa.numero, pe.proba_top1_raw, pe.cote_figee,
-               pe.proba_top1, r.classement, c.date_heure, pe.created_at, np.n
+               pe.proba_top1, r.classement, c.date_heure, pe.created_at, np.n,
+               pe.features IS NOT NULL AS a_features, {mv} AS mv30, {geny} AS geny
         FROM prediction_evaluation pe
         JOIN participations pa ON pa.participation_id = pe.participation_id
         JOIN courses c         ON c.course_id         = pe.course_id
@@ -346,16 +564,19 @@ async def _charger_courses(session: AsyncSession) -> list[dict]:
     # type d'horodatage (cf. `learning_steps._vers_datetime`).
     fraicheur = timedelta(minutes=FRAICHEUR_MAX_MIN)
     par_course: dict[str, dict] = {}
-    for course_id, numero, brut, cote, servi, classement, dh, cree, n_partants in rows:
+    for (course_id, numero, brut, cote, servi, classement, dh, cree, n_partants,
+         a_features, mv30, cote_geny) in rows:
         d = par_course.setdefault(course_id, {"lignes": [], "classement": classement,
                                               "n_partants": int(n_partants or 0)})
         depart, calcul = _vers_datetime(dh), _vers_datetime(cree)
         if depart is None or calcul is None or depart - calcul > fraicheur:
             d["perimee"] = True
             continue
+        if not a_features:
+            d["sans_features"] = True
         d["lignes"].append((int(numero), float(brut),
                             float(cote) if cote is not None else float("nan"),
-                            float(servi)))
+                            float(servi), mv30, cote_geny))
 
     out: list[dict] = []
     for d in par_course.values():
@@ -380,11 +601,37 @@ async def _charger_courses(session: AsyncSession) -> list[dict]:
         numeros = [ligne[0] for ligne in lignes]
         if gagnant is None or gagnant not in numeros:
             continue
-        c = _vers_course([ligne[1] for ligne in lignes], [ligne[2] for ligne in lignes],
-                         numeros.index(gagnant), [ligne[3] for ligne in lignes])
+        # Sans vecteur figé, les covariables ne sont pas celles qui ont été servies :
+        # la course sort de l'échantillon (legacy d'avant les instantanés, 17/08).
+        if d.get("sans_features"):
+            continue
+        cotes = [ligne[2] for ligne in lignes]
+        cov = matrice_covariables(cotes, [ligne[4] for ligne in lignes],
+                                  [ligne[5] for ligne in lignes])
+        if cov is None:
+            continue
+        c = _vers_course([ligne[1] for ligne in lignes], cotes,
+                         numeros.index(gagnant), [ligne[3] for ligne in lignes], cov)
         if c is not None:
             out.append(c)
     return out
+
+
+def _extraits_features(session: AsyncSession) -> tuple[str, str]:
+    """Expressions SQL lisant mouvement_30min et cote_geny dans `pe.features`.
+
+    Extraites en base plutôt que de rapatrier 90 jours de vecteurs entiers (~200
+    clés par partant). PostgreSQL et SQLite n'ont pas la même syntaxe JSON.
+    """
+    try:
+        dialecte = session.bind.dialect.name
+    except AttributeError:
+        dialecte = "postgresql"
+    if dialecte == "sqlite":
+        return ("json_extract(pe.features, '$.mouvement_30min')",
+                "json_extract(pe.features, '$.cote_geny')")
+    return ("(pe.features::jsonb ->> 'mouvement_30min')",
+            "(pe.features::jsonb ->> 'cote_geny')")
 
 
 _DDL = """
@@ -459,13 +706,17 @@ async def calculer_et_persister(session: AsyncSession) -> dict:
         log.warning("melange_arrivees.trace_examen_ignoree", err=str(e)[:140])
     if not verdict.get("retenu"):
         log.info("melange_arrivees.valeur_conservee", **{k: v for k, v in verdict.items()
-                                                          if k != "betas_par_moitie"})
+                                                          if k not in ("betas_par_moitie",
+                                                                       "etendu")})
         return {"status": "valeur_conservee", **verdict}
     donnees = {**examen, "applique_depuis": datetime.now(timezone.utc).isoformat()}
     await _ecrire(session, _ID_SERVICE, donnees)
     _cache = donnees
+    _et = verdict.get("etendu") or {}
     log.info("melange_arrivees.ajuste", beta_modele=verdict["beta_modele"],
              beta_marche=verdict["beta_marche"], n_courses=verdict["n_courses"],
+             etendu=bool(_et.get("retenu")), gammas=_et.get("gammas"),
+             gain_etendu=_et.get("gain_logv_vs_deux_parametres"),
              gain_logv_vs_marche=verdict["gain_logv_vs_marche"],
              gain_logv_vs_servi=verdict["gain_logv_vs_servi"])
     return {"status": "ok", **donnees}

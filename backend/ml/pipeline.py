@@ -2790,14 +2790,29 @@ async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Option
         # ci-dessus, +0,011 sur la cote seule, classement à parité. Remplace la
         # proba de victoire servie quand des paramètres sont retenus ET que tous les
         # partants sont cotés ; sinon la chaîne ci-dessus reste servie telle quelle.
+        #
+        # COVARIABLES DU MARCHÉ (2026-09-27) : mouvement de cote sur 30 min, cote Geny,
+        # favori du marché, lus dans les features de CE calcul. Servies seulement si
+        # le nocturne les a retenues (elles battent les deux paramètres hors
+        # échantillon) ; sinon, ou si elles ne se calculent pas, deux paramètres.
         _melange_applique = False
+        _melange_etendu = False
         try:
             from ml.algo_flags import FLAGS as _AFma
             if _AFma.melange_arrivees:
-                from ml.melange_arrivees import appliquer as _ma_appliquer, en_service as _ma_params
-                _ma = _ma_params()
+                from ml import melange_arrivees as _ma_mod
+                _ma = _ma_mod.en_service()
                 if _ma is not None:
-                    _p_ma = _ma_appliquer(_raw_p1_snap, cotes_pmu, *_ma)
+                    _p_ma = None
+                    _ext = _ma_mod.en_service_etendu() if _AFma.melange_covariables else None
+                    if _ext is not None:
+                        _cov = _ma_mod.covariables_de_features(features_list, cotes_pmu)
+                        if _cov is not None:
+                            _p_ma = _ma_mod.appliquer(_raw_p1_snap, cotes_pmu, _ext[0], _ext[1],
+                                                      covariables=_cov, gammas=_ext[2])
+                            _melange_etendu = _p_ma is not None
+                    if _p_ma is None:
+                        _p_ma = _ma_mod.appliquer(_raw_p1_snap, cotes_pmu, *_ma)
                     if _p_ma is not None:
                         probas_top1 = _p_ma
                         _melange_applique = True
@@ -3380,7 +3395,8 @@ async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Option
             log.warning("pipeline.markowitz.failed", error=str(e))
 
         log.info("pipeline.predict.done", course_id=course_id, nb_predictions=len(predictions),
-                 melange_arrivees=_melange_applique, source_victoire=_source_victoire,
+                 melange_arrivees=_melange_applique, melange_etendu=_melange_etendu,
+                 source_victoire=_source_victoire,
                  placement_technique=_placement_technique)
         return fiche
 

@@ -169,3 +169,123 @@ async def test_des_poids_en_base_sont_relus_par_le_rafraichissement(db):
     # Dans le délai : aucune relecture.
     assert await reglages_appris.rafraichir(db) is False
     ma._cache = None
+
+
+# ── Les covariables du marché (2026-09-27) ───────────────────────────────────
+# Mesure en production, 2 096 courses : +0,018 de log-vraisemblance sur le mélange à
+# deux paramètres ; gros favoris annoncés 46 % pour 40 % réalisés et « sous-cotés »
+# annoncés 7,1 % pour 4,7 % avant elles, calibrés après.
+
+def test_sans_gammas_rien_ne_change_et_gammas_nuls_rendent_deux_parametres():
+    p, cotes = [0.5, 0.3, 0.2], [2.0, 4.0, 5.0]
+    cov = ma.matrice_covariables(cotes, [0.1, -0.2, 0.0], [2.2, 3.5, 6.0])
+    deux = ma.appliquer(p, cotes, 0.3, 0.7)
+    assert np.allclose(ma.appliquer(p, cotes, 0.3, 0.7, covariables=cov,
+                                    gammas=[0.0, 0.0, 0.0]), deux)
+
+
+def test_gammas_sans_covariables_ou_hors_bornes_ne_servent_rien():
+    p, cotes = [0.5, 0.3, 0.2], [2.0, 4.0, 5.0]
+    assert ma.appliquer(p, cotes, 0.3, 0.7, gammas=[0.1, 0.1, 0.1]) is None
+    cov = ma.matrice_covariables(cotes)
+    assert ma.appliquer(p, cotes, 0.3, 0.7, covariables=cov, gammas=[0.1, 0.1]) is None
+    assert ma.appliquer(p, cotes, 0.3, 0.7, covariables=cov,
+                        gammas=[ma.GAMMA_MAX + 1, 0, 0]) is None
+
+
+def test_covariables_absentes_prennent_la_valeur_neutre_des_features():
+    cotes = [3.0, 2.0, 8.0]
+    cov = ma.matrice_covariables(cotes, [None, "x", 5.0], [None, 0.0, float("nan")])
+    assert cov.shape == (3, 3)
+    assert list(cov[:, 0]) == [0.0, 0.0, ma.MOUVEMENT_BORNE]        # borné
+    assert np.allclose(cov[:, 1], np.log(ma.probas_marche(cotes)))  # Geny = PMU
+    assert list(cov[:, 2]) == [0.0, 1.0, 0.0]                        # favori = plus petite cote
+    assert ma.matrice_covariables([3.0, None, 8.0]) is None
+
+
+def test_un_gamma_favori_negatif_allonge_la_cote_juste_du_favori():
+    p, cotes = [0.5, 0.3, 0.2], [2.0, 4.0, 5.0]
+    cov = ma.matrice_covariables(cotes)
+    deux = ma.appliquer(p, cotes, 0.3, 0.7)
+    avec = ma.appliquer(p, cotes, 0.3, 0.7, covariables=cov, gammas=[0.0, 0.0, -0.3])
+    assert avec[0] < deux[0] and abs(avec.sum() - 1) < 1e-12
+
+
+def test_les_covariables_se_lisent_dans_les_features_servies():
+    feats = [{"mouvement_30min": 0.2, "cote_geny": 2.5}, {"cote_geny": 4.0}, {}]
+    cov = ma.covariables_de_features(feats, [2.0, 4.0, 5.0])
+    assert cov[0, 0] == pytest.approx(0.2) and cov[1, 0] == 0.0
+    assert cov[2, 1] == pytest.approx(np.log(ma.probas_marche([2.5, 4.0, 5.0])[2]))
+
+
+def _simuler_cov(n_courses: int, gammas=(-0.3, 0.25, -0.35), seed: int = 5,
+                 servi_vrai: bool = False) -> list[dict]:
+    """Courses dont le gagnant suit le logit AVEC covariables `gammas`."""
+    rng = np.random.default_rng(seed)
+    g = np.asarray(gammas, dtype=float)
+    courses = []
+    for _ in range(n_courses):
+        k = int(rng.integers(6, 15))
+        fm = rng.normal(0, 1.0, k)
+        q = np.exp(fm) / np.exp(fm).sum()
+        sig = rng.normal(0, 1.0, k)
+        m = np.exp(sig) / np.exp(sig).sum()
+        cotes = 1.0 / (q * 1.15)
+        mv = rng.normal(0, 0.25, k)
+        geny = cotes * np.exp(rng.normal(0, 0.3, k))
+        cov = ma.matrice_covariables(cotes, mv, geny)
+        if cov is None:                             # favori écrasant : cote ≤ 1
+            continue
+        z = 0.35 * np.log(m) + 0.7 * np.log(q) + cov @ g
+        vrai = np.exp(z - z.max())
+        vrai /= vrai.sum()
+        gagnant = int(rng.choice(k, p=vrai))
+        servi = vrai if servi_vrai else 0.5 * m + 0.5 * q
+        c = ma._vers_course(m, cotes, gagnant, servi, cov)
+        assert c is not None and c["x"].shape == (k, 5)
+        courses.append(c)
+    return courses
+
+
+def test_des_covariables_informatives_sont_retenues_et_retrouvees():
+    v = ma.evaluer(_simuler_cov(2500))
+    assert v["retenu"] is True
+    e = v["etendu"]
+    assert e["retenu"] is True, e
+    assert e["gain_logv_vs_deux_parametres_ic95"][0] > 0
+    assert e["gammas"][0] == pytest.approx(-0.3, abs=0.15)
+    assert e["gammas"][2] == pytest.approx(-0.35, abs=0.15)
+    ma._cache = {"retenu": True, "beta_modele": v["beta_modele"],
+                 "beta_marche": v["beta_marche"], "etendu": e}
+    bm, bk, gm = ma.en_service_etendu()
+    assert len(gm) == len(ma.COVARIABLES) and ma.en_service() == (v["beta_modele"],
+                                                                  v["beta_marche"])
+    ma._cache = None
+
+
+def test_des_covariables_sans_information_ne_sont_pas_servies():
+    v = ma.evaluer(_simuler_cov(1500, gammas=(0.0, 0.0, 0.0), seed=9))
+    assert v["retenu"] is True
+    assert v["etendu"]["retenu"] is False
+    assert v["etendu"]["raison"] in ("ne bat pas le mélange à deux paramètres",
+                                     "coefficients instables d'une moitié à l'autre")
+    ma._cache = {"retenu": True, "beta_modele": 0.3, "beta_marche": 0.7,
+                 "etendu": v["etendu"]}
+    assert ma.en_service_etendu() is None
+    ma._cache = None
+
+
+def test_une_fois_les_covariables_servies_le_reapprentissage_ne_se_fige_pas():
+    """La proba servie EST le mélange étendu : deux paramètres échouent face à elle
+    (critère b), mais le mélange étendu, lui, doit rester retenu la nuit suivante."""
+    v = ma.evaluer(_simuler_cov(4000, servi_vrai=True, seed=13))
+    assert v["gain_logv_vs_servi"] < -ma.TOL_LOGV
+    assert v["etendu"]["retenu"] is True
+    assert v["retenu"] is True
+
+
+def test_les_anciens_appelants_a_deux_colonnes_sont_inchanges():
+    """modele_technique, les bancs et le contrôle de promotion passent des courses à
+    deux colonnes : pas de clé `etendu`, même verdict qu'avant."""
+    v = ma.evaluer(_simuler(1500))
+    assert "etendu" not in v and v["retenu"] is True
