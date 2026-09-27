@@ -162,7 +162,7 @@ export default function FicheCompte({ userId, onClose }: { userId: string; onClo
                       <span className="text-muted-foreground">A parrainé : </span>
                       <b className="font-semibold">{data.parrainage.filleuls.length} personne{data.parrainage.filleuls.length > 1 ? "s" : ""}</b>
                       <span className="text-muted-foreground">
-                        {" "}· {data.parrainage.valides} abonnée{data.parrainage.valides > 1 ? "s" : ""} · {formatEuro(data.parrainage.gagne_cents / 100)} de crédits gagnés
+                        {" "}· {data.parrainage.valides} abonné{data.parrainage.valides > 1 ? "s" : ""} · {formatEuro(data.parrainage.gagne_cents / 100)} de crédits gagnés
                       </span>
                     </div>
                     {data.parrainage.filleuls.length > 0 && (

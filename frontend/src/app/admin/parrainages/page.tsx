@@ -59,9 +59,15 @@ function Compte({ email, detail, userId, onOuvrir }: {
 
 function Evolution({ data }: { data: ParrainagesData["evolution"] }) {
   const max = Math.max(1, ...data.map((m) => m.inscrits));
+  const aucun = data.every((m) => m.inscrits === 0);
   return (
     <div>
-      <div className="flex h-40 items-end gap-2 sm:gap-4">
+      <div className="relative flex h-40 items-end gap-2 sm:gap-4">
+        {aucun && (
+          <p className="absolute inset-x-0 top-1/3 text-center text-[13px] text-muted-foreground">
+            Aucun filleul sur ces six mois.
+          </p>
+        )}
         {data.map((m) => {
           const [, mm] = m.mois.split("-");
           return (
