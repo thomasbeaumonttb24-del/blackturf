@@ -520,8 +520,8 @@ interface ApercuCourse {
   nb_ecartes: number;
   confiance: number | null;
   accord_marche: boolean | null;
-  /* Nombre de chevaux dont la cote PMU dépasse l'exchange de plus de 10 %.
-     Absent tant que l'API déployée ne le fournit pas. */
+  /* Nombre de chevaux payés au moins 8 % au-dessus de leur chance (cote PMU ÷
+     cote juste du modèle − 1) : la tuile « Écarts de prix » de la fiche course. */
   nb_ecarts_prix?: number;
 }
 
@@ -687,11 +687,11 @@ function TimelineRow({ course, reunionNum, vbCount, apercu, delay, onOuvrir }: {
             )}
             {nbEcarts > 0 && (
               <span
-                title="La cote PMU dépasse d'au moins 10 % celle du marché d'échange sur au moins un cheval de cette course"
+                title={`${nbEcarts} cheva${nbEcarts > 1 ? "ux payés" : "l payé"} au moins 8 % au-dessus de ${nbEcarts > 1 ? "leur" : "sa"} chance selon le modèle — même lecture que la fiche course`}
                 className="inline-flex items-center gap-1 rounded-full bg-sky-50 px-2 py-0.5 text-[11px] font-semibold text-sky-800 ring-1 ring-inset ring-sky-200"
               >
                 <ArrowLeftRight className="h-3 w-3" aria-hidden />
-                Écart de prix{nbEcarts > 1 ? <b className="font-bold tabular-nums"> ×{nbEcarts}</b> : null}
+                <b className="font-bold tabular-nums">{nbEcarts}</b> écart{nbEcarts > 1 ? "s" : ""} de prix
               </span>
             )}
             {apercu?.analysee && apercu.confiance != null && (
@@ -834,7 +834,7 @@ export default function ProgrammeClient({
   const { data: valueBets } = useSWR(
     isPaid && isToday ? "/value-bets-programme" : null,
     () => predictionsApi.valueBets(1).then((r) => r.data),
-    { refreshInterval: 120000 },
+    { refreshInterval: 60000 },
   );
   const vbByCourse = useMemo(() => {
     if (!valueBets) return {} as Record<string, number>;
@@ -849,7 +849,9 @@ export default function ProgrammeClient({
   const { data: apercuJour } = useSWR(
     `/programme-apercu/${format(selectedDate, "yyyy-MM-dd")}`,
     () => coursesApi.programmeApercu(format(selectedDate, "yyyy-MM-dd")).then((r) => r.data),
-    { refreshInterval: 300000, revalidateOnFocus: false },
+    // Chaque minute le jour même : les écarts de prix suivent les cotes, un aperçu
+    // de cinq minutes contredisait la fiche course ouverte au même moment.
+    { refreshInterval: isToday ? 60000 : 0, revalidateOnFocus: isToday },
   );
   const apercuByCourse = (apercuJour as { courses?: Record<string, ApercuCourse> } | undefined)?.courses ?? {};
 
