@@ -22,6 +22,7 @@ import { CasaqueNumero, IdentiteCheval } from "@/components/courses/identite-che
 import { Reveal, Tilt, useReveal } from "@/components/track-record/effets";
 import { Anneau, Compteur, CourbeCapital, Etoiles, Plan3D, SectionTitre, nf } from "@/components/espace/kit";
 import { useRequireAuth } from "@/hooks/useAuth";
+import { ParrainageAppel } from "@/components/billing/ParrainageAppel";
 import { bankrollApi, predictionsApi, coursesApi, statsApi } from "@/lib/api";
 import { RUBRIQUES } from "@/lib/navigation";
 import { cn, planLabel } from "@/lib/utils";
@@ -360,6 +361,13 @@ export default function DashboardPage() {
             </div>
           </section>
         )}
+
+        {/* ══ Parrainage ══════════════════════════════════════════════ */}
+        <section>
+          <Reveal>
+            <ParrainageAppel contexte="espace" />
+          </Reveal>
+        </section>
 
         {/* ══ Capital + outils ════════════════════════════════════════ */}
         <section className="grid grid-cols-1 gap-6 lg:grid-cols-5">

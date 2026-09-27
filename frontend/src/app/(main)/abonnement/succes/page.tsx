@@ -8,6 +8,7 @@ import { CheckCircle, Loader2, ArrowRight, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { useAuth } from "@/hooks/useAuth";
+import { ParrainageAppel } from "@/components/billing/ParrainageAppel";
 
 function AbonnementSuccesContent() {
   const searchParams = useSearchParams();
@@ -106,6 +107,9 @@ function AbonnementSuccesContent() {
                 <Link href="/value-bets">Paris de valeur</Link>
               </Button>
             </div>
+
+            {/* Le moment où l'abonné est le plus convaincu : c'est là qu'il invite. */}
+            <ParrainageAppel contexte="bienvenue" />
 
             <p className="text-xs text-muted-foreground">
               Gérez votre abonnement à tout moment depuis{" "}

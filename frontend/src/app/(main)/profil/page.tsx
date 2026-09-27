@@ -146,7 +146,10 @@ export default function ProfilPage() {
 
   // Lien direct vers l'onglet (e-mail « 5 € offerts » → /profil#parrainage).
   useEffect(() => {
-    if (window.location.hash === "#parrainage") setActiveSection("parrainage");
+    const suivre = () => { if (window.location.hash === "#parrainage") setActiveSection("parrainage"); };
+    suivre();
+    window.addEventListener("hashchange", suivre);
+    return () => window.removeEventListener("hashchange", suivre);
   }, []);
 
   const { register, handleSubmit, watch, setValue, reset, formState: { errors } } = useForm<ProfileForm>({
