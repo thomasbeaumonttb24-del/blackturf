@@ -19,8 +19,10 @@ fois ou pas du tout. Ici :
    `elo_historique`, rejoue les courses terminées entre-temps, et remplace
    ratings, historique et snapshots `participations.elo_avant_*`. Tout ou rien.
 
-Après application : `scripts/recompute_features_prerace.py`, puis le retrain de
-nuit (gate champion/challenger) — les features stockées portent encore l'ancien ELO.
+Après application : `scripts/patch_features_elo.py` (deltas ELO des vecteurs stockés),
+puis le retrain de nuit. JAMAIS `recompute_features_prerace.py` : il relit l'état
+actuel de la base et fait fuir le résultat dans l'historique (24/09/2026). Les
+niveaux ELO déjà stockés (elo_discipline, elo_vs_*) gardent la version précédente.
 """
 import argparse
 import asyncio
@@ -418,7 +420,7 @@ async def main(appliquer: bool):
             await s.execute(text(sql))
         await s.commit()
         print(f"[elo] APPLIQUÉ : {len(items)} chevaux notés, {n_hist} lignes d'historique."
-              " Étape suivante : scripts/recompute_features_prerace.py", flush=True)
+              " Étape suivante : scripts/patch_features_elo.py (jamais recompute_features_prerace)", flush=True)
 
 
 if __name__ == "__main__":
