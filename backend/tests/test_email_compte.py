@@ -7,7 +7,7 @@ def _commun(html, texte, lien):
     assert html.count(lien) >= 2                     # bouton + lien en clair
     assert lien in texte
     assert "09 74 75 13 13" in html                  # jeu responsable
-    assert "logo-nuit.png" in html and "viewport" in html
+    assert "logo-medaillon.png" in html and "viewport" in html
 
 
 def test_confirmation_newsletter():
