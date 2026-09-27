@@ -33,7 +33,7 @@ import { coursesApi, predictionsApi } from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
 import { formatTime, cn } from "@/lib/utils";
 import { jourParis } from "@/lib/seo";
-import { BandeauOnglet, CARTE_CLS, IconeTuile, Pastille, PastilleDirect, SG } from "@/components/courses/course-ui";
+import { BandeauOnglet, IconeTuile, Pastille, PastilleDirect, SG } from "@/components/courses/course-ui";
 
 /* ─── Types ─────────────────────────────────────────────── */
 interface CourseSummary {
@@ -148,9 +148,9 @@ function useCompteur(cible: number, dureeMs = 900): number {
 function TuileCompteur({ n, libelle, ton }: { n: number; libelle: string; ton?: string }) {
   const v = useCompteur(n);
   return (
-    // Tuile de verre sur le bandeau noir : reflet en haut, tranche sombre en bas —
+    // Tuile de verre sur le bandeau noir : reflet en haut, ombre douce en bas —
     // elle se lit comme un bloc posé, pas comme un aplat.
-    <div className="bt-pop bt-tuile relative overflow-hidden rounded-2xl bg-gradient-to-b from-white/[.10] to-white/[.03] px-2.5 py-2.5 ring-1 ring-inset ring-white/10 shadow-[inset_0_1px_0_rgba(255,255,255,.14),0_3px_0_rgba(0,0,0,.55),0_16px_26px_-16px_rgba(0,0,0,.9)] backdrop-blur sm:px-4 sm:py-3">
+    <div className="bt-pop bt-tuile relative overflow-hidden rounded-2xl bg-gradient-to-b from-white/[.10] to-white/[.03] px-2.5 py-2.5 ring-1 ring-inset ring-white/10 shadow-[inset_0_1px_0_rgba(255,255,255,.14),0_1px_0_rgba(0,0,0,.55),0_16px_26px_-16px_rgba(0,0,0,.9)] backdrop-blur sm:px-4 sm:py-3">
       <span aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-amber-200/50 to-transparent" />
       <div className={cn("text-[22px] font-bold leading-none tabular-nums text-white sm:text-[28px]", ton)} style={SG}>{v}</div>
       <div className="mt-1 text-[11px] font-medium text-stone-400 sm:text-xs">{libelle}</div>
@@ -319,14 +319,14 @@ function DayStrip({ selected, jourCourant, onSelect }: { selected: Date; jourCou
             key={key}
             onClick={() => onSelect(d)}
             className={cn(
-              // Touches en relief : une tranche de 3 px sous chaque jour, qui s'écrase
-              // quand on appuie. Le jour choisi est noir, tranche dorée.
-              "group mb-1 flex min-w-[58px] shrink-0 flex-col items-center justify-center rounded-2xl px-3.5 py-2.5 ring-1 transition-all duration-150 hover:-translate-y-0.5 active:translate-y-[2px]",
+              // Jours en léger relief : un liseré sous chaque jour, qui s'efface quand
+              // on appuie. Le jour choisi est noir, liseré doré.
+              "group mb-1 flex min-w-[58px] shrink-0 flex-col items-center justify-center rounded-2xl px-3.5 py-2.5 ring-1 transition-all duration-150 hover:-translate-y-0.5 active:translate-y-px",
               isSel
-                ? "bg-gradient-to-b from-stone-800 to-stone-950 text-white ring-stone-900 shadow-[inset_0_1px_0_rgba(255,255,255,.14),0_3px_0_#B45309,0_12px_20px_-10px_rgba(17,24,39,.8)] active:shadow-[inset_0_1px_0_rgba(255,255,255,.14),0_1px_0_#B45309]"
+                ? "bg-gradient-to-b from-stone-800 to-stone-950 text-white ring-stone-900 shadow-[inset_0_1px_0_rgba(255,255,255,.14),0_1px_0_#B45309,0_12px_20px_-10px_rgba(17,24,39,.8)] active:shadow-[inset_0_1px_0_rgba(255,255,255,.14),0_1px_0_#B45309]"
                 : isToday
-                ? "bg-gradient-to-b from-white to-[#FBF8F1] text-gray-800 ring-amber-300 shadow-[inset_0_1px_0_#fff,0_3px_0_#F5D48A,0_10px_18px_-12px_rgba(146,64,14,.5)] active:shadow-[inset_0_1px_0_#fff,0_1px_0_#F5D48A]"
-                : "bg-gradient-to-b from-white to-[#FBF8F1] text-gray-700 ring-[#ECE7DC] shadow-[inset_0_1px_0_#fff,0_3px_0_#E6DFD0,0_10px_18px_-12px_rgba(17,24,39,.35)] hover:ring-stone-300 active:shadow-[inset_0_1px_0_#fff,0_1px_0_#E6DFD0]",
+                ? "bg-gradient-to-b from-white to-[#FBF8F1] text-gray-800 ring-amber-300 shadow-[inset_0_1px_0_#fff,0_1px_0_#F5D48A,0_10px_18px_-12px_rgba(146,64,14,.5)] active:shadow-[inset_0_1px_0_#fff,0_1px_0_#F5D48A]"
+                : "bg-gradient-to-b from-white to-[#FBF8F1] text-gray-700 ring-[#ECE7DC] shadow-[inset_0_1px_0_#fff,0_1px_0_#E6DFD0,0_10px_18px_-12px_rgba(17,24,39,.35)] hover:ring-stone-300 active:shadow-[inset_0_1px_0_#fff,0_1px_0_#E6DFD0]",
             )}
           >
             <span className={cn("text-[10px] font-bold uppercase tracking-wide leading-none", isSel ? "text-amber-300" : isToday ? "text-amber-700" : "text-gray-600")}>
@@ -424,7 +424,7 @@ function NextRaceBanner({ item }: { item: { course: CourseSummary; reunionNum: n
         </div>
         <Link
           href={fiche}
-          className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-xl bg-gradient-to-b from-amber-300 via-amber-400 to-amber-600 px-3.5 py-2.5 text-[13px] font-bold text-stone-900 shadow-[inset_0_1px_0_rgba(255,255,255,.55),0_3px_0_#92400E,0_12px_22px_-10px_rgba(245,158,11,.75)] transition-all hover:-translate-y-0.5 active:translate-y-[2px] active:shadow-[inset_0_1px_0_rgba(255,255,255,.55),0_1px_0_#92400E] max-[479px]:w-full max-[479px]:justify-center"
+          className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-xl bg-gradient-to-b from-amber-300 via-amber-400 to-amber-600 px-3.5 py-2.5 text-[13px] font-bold text-stone-900 shadow-[inset_0_1px_0_rgba(255,255,255,.55),0_1px_0_#92400E,0_12px_22px_-10px_rgba(245,158,11,.75)] transition-all hover:-translate-y-0.5 active:translate-y-px active:shadow-[inset_0_1px_0_rgba(255,255,255,.55),0_1px_0_#92400E] max-[479px]:w-full max-[479px]:justify-center"
         >
           Voir la course <ChevronRight className="h-4 w-4" />
         </Link>
@@ -494,7 +494,7 @@ function NextRaceBanner({ item }: { item: { course: CourseSummary; reunionNum: n
             <Link
               key={cle}
               href={`${fiche}#${cle}`}
-              className="group flex flex-col items-center gap-1 rounded-xl bg-gradient-to-b from-[#FFFBF2] to-amber-50 px-2 py-2.5 text-center ring-1 ring-inset ring-amber-200 shadow-[inset_0_1px_0_#fff,0_3px_0_#F3D9A4,0_10px_16px_-12px_rgba(146,64,14,.45)] transition-all duration-150 hover:-translate-y-0.5 hover:bg-amber-50 active:translate-y-[2px] active:shadow-[inset_0_1px_0_#fff,0_1px_0_#F3D9A4] md:flex-row md:gap-2.5 md:px-3 md:py-2 md:text-left"
+              className="group flex flex-col items-center gap-1 rounded-xl bg-gradient-to-b from-[#FFFBF2] to-amber-50 px-2 py-2.5 text-center ring-1 ring-inset ring-amber-200 shadow-[inset_0_1px_0_#fff,0_1px_0_#F3D9A4,0_10px_16px_-12px_rgba(146,64,14,.45)] transition-all duration-150 hover:-translate-y-0.5 hover:bg-amber-50 active:translate-y-px active:shadow-[inset_0_1px_0_#fff,0_1px_0_#F3D9A4] md:flex-row md:gap-2.5 md:px-3 md:py-2 md:text-left"
             >
               <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-gradient-to-b from-stone-800 to-stone-950 shadow-[inset_0_1px_0_rgba(255,255,255,.15),0_2px_0_#B45309]">
                 <Icone className="h-3.5 w-3.5 text-amber-300" aria-hidden />
@@ -565,16 +565,66 @@ interface ApercuCourse {
   accord_marche: boolean | null;
 }
 
+/* Tuile discipline : la silhouette propre à chaque discipline (plat, attelé, monté,
+ * obstacle), posée sur un galet teinté. Reflet en haut, ombre portée sous le cheval
+ * et léger pivot 3D au survol de la ligne : du volume, sans bibliothèque. */
+function TuileDiscipline({ discipline, className }: { discipline: string; className?: string }) {
+  const m = discMeta(discipline);
+  return (
+    <span
+      aria-hidden
+      className={cn("relative h-11 w-11 flex-shrink-0 items-center justify-center overflow-hidden rounded-2xl [perspective:420px] sm:h-14 sm:w-14", className)}
+      style={{
+        background: `radial-gradient(120% 95% at 30% 0%,#FFFFFF 0%,${m.bg} 55%,${m.ring} 135%)`,
+        boxShadow: `inset 0 1px 0 #fff, inset 0 -8px 14px -8px ${m.ring}, 0 10px 20px -12px ${m.color}73`,
+      }}
+    >
+      {/* reflet de verre sur le haut du galet, sous le cheval */}
+      <span className="pointer-events-none absolute inset-x-1 top-0.5 h-2/5 rounded-t-[14px] bg-gradient-to-b from-white/60 to-transparent" />
+      {/* sol : une ombre douce sous les sabots */}
+      <span className="absolute bottom-[7px] left-1/2 h-1.5 w-8 -translate-x-1/2 rounded-[50%] bg-stone-900/15 blur-[2px]" />
+      <span className="relative block transition-transform duration-500 ease-out [transform-style:preserve-3d] group-hover:[transform:rotateY(-16deg)_translateZ(10px)_scale(1.08)]">
+        <span className="absolute inset-0 translate-x-[2px] translate-y-[3px] opacity-[.16] blur-[2px]">
+          <DiscIcon discipline={discipline} w={38} h={28} color="#1C1917" />
+        </span>
+        <span className="relative block drop-shadow-[0_1px_0_rgba(255,255,255,.8)]">
+          <DiscIcon discipline={discipline} w={38} h={28} />
+        </span>
+      </span>
+    </span>
+  );
+}
+
+/* Noms lisibles : le PMU envoie hippodromes et courses EN CAPITALES. Sur une liste de
+ * quarante lignes, ces capitales criaient et se lisaient mal. Un nom déjà en casse
+ * mixte est laissé tel quel ; les sigles connus restent en capitales. */
+const PETITS_MOTS = new Set(["de", "du", "des", "la", "le", "les", "et", "sur", "en", "au", "aux", "d", "l"]);
+const SIGLES = new Set(["PMU", "PDV", "PX", "GNT", "II", "III", "IV", "UK", "USA"]);
+function joliNom(s: string | null | undefined): string {
+  if (!s) return "";
+  if (s !== s.toUpperCase()) return s;
+  let premier = true;
+  return s.toLowerCase().replace(/[a-zà-öø-ÿ0-9]+/g, (mot) => {
+    const debut = premier;
+    premier = false;
+    if (SIGLES.has(mot.toUpperCase())) return mot.toUpperCase();
+    if (!debut && PETITS_MOTS.has(mot)) return mot;
+    return mot.charAt(0).toUpperCase() + mot.slice(1);
+  });
+}
+/* « HIPPODROME DE SAINT MALO » → « Saint Malo » : dans une liste, le mot
+ * « hippodrome » répété sur chaque ligne n'apprend rien. */
+function hippodromeCourt(s: string | null | undefined): string {
+  const nom = (s ?? "").replace(/^\s*hippodrome\s+(de\s+la\s+|de\s+l['’]\s*|du\s+|des\s+|de\s+|d['’]\s*)?/i, "");
+  return joliNom(nom || s);
+}
+
 function TimelineRow({ course, reunionNum, vbCount, apercu, delay, onOuvrir }: { course: CourseSummary; reunionNum: number; vbCount?: number; apercu?: ApercuCourse; delay: number; onOuvrir?: () => void }) {
   const m = discMeta(course.discipline);
   const isLive = course.statut === "en_cours";
   const isDone = course.statut === "termine" || course.statut === "annule";
   const countdown = useCountdown(course.date_heure, course.statut);
-  const codeCls = isDone
-    ? "text-gray-600 bg-gray-100/70 ring-gray-200"
-    : course.est_quinte
-    ? "text-amber-700 bg-amber-50 ring-amber-200"
-    : isLive ? "text-emerald-700 bg-emerald-50 ring-emerald-200" : "text-gray-700 bg-gray-100 ring-gray-200";
+  const pari = course.est_quinte ? "Quinté+" : course.est_quarte ? "Quarté+" : course.est_tierce ? "Tiercé" : null;
   return (
     <Link
       href={`/courses/${course.course_id}`}
@@ -583,85 +633,108 @@ function TimelineRow({ course, reunionNum, vbCount, apercu, delay, onOuvrir }: {
       id={`course-${course.course_id}`}
       onClick={onOuvrir}
       className={cn(
-        "bt-apparition bt-relief group relative flex scroll-mt-28 items-center gap-2.5 overflow-hidden rounded-2xl px-3 py-3 no-underline ring-1 transition-all duration-200 active:scale-[.99] sm:gap-3 sm:px-4",
+        "bt-apparition group relative flex scroll-mt-28 items-center gap-3 rounded-[20px] px-3.5 py-3.5 no-underline transition-[transform,box-shadow,background-color] duration-300 ease-out active:scale-[.995] sm:gap-4 sm:px-5 sm:py-4",
         isDone
-          ? "ring-[#E9E6DC] hover:ring-stone-300"
-          : "ring-[#ECE7DC] shadow-[inset_0_1px_0_#fff,0_2px_0_#EEE8DB,0_12px_28px_-22px_rgba(17,24,39,.45)] hover:ring-amber-300 hover:shadow-[inset_0_1px_0_#fff,0_3px_0_#F3D9A4,0_26px_44px_-24px_rgba(146,64,14,.5)]",
+          ? "bg-white/55 ring-1 ring-inset ring-stone-200/70 hover:bg-white"
+          : isLive
+          ? "bg-gradient-to-r from-emerald-50 via-white to-white ring-1 ring-inset ring-emerald-200/80 shadow-[0_1px_2px_rgba(28,25,23,.04),0_10px_28px_-16px_rgba(5,150,105,.35)]"
+          : "bg-white ring-1 ring-inset ring-stone-900/[.05] shadow-[0_1px_2px_rgba(28,25,23,.04),0_10px_28px_-18px_rgba(28,25,23,.18)] hover:-translate-y-0.5 hover:shadow-[0_2px_4px_rgba(28,25,23,.04),0_20px_40px_-20px_rgba(146,64,14,.28)]",
       )}
-      style={{ background: isLive ? "#F0FDF8" : isDone ? "#F5F4EF" : "#FFFFFF", ["--bt-delai" as string]: `${delay}s` }}
+      style={{ ["--bt-delai" as string]: `${delay}s` }}
     >
-      <span className="absolute inset-y-3 left-0 w-1 rounded-r-full" style={{ background: isLive ? "linear-gradient(180deg,#34D399,#059669)" : !isDone && course.est_quinte ? "linear-gradient(180deg,#FCD34D,#D97706)" : "transparent" }} />
-      <div className="flex w-10 flex-shrink-0 flex-col items-center sm:w-11">
-        <span className={cn("text-base font-bold leading-none tabular-nums", isLive ? "text-emerald-700" : isDone ? "text-gray-600 line-through decoration-gray-300" : "text-gray-900")} style={{ fontFamily: "var(--font-space-grotesk), sans-serif" }}>
+      {/* Heure, et le temps restant quand le départ approche */}
+      <div className="flex w-[46px] flex-shrink-0 flex-col items-center gap-1 sm:w-[52px]">
+        <span className={cn("text-[16px] font-bold leading-none tracking-tight tabular-nums sm:text-[17px]", isLive ? "text-emerald-700" : isDone ? "text-stone-400 line-through decoration-stone-300" : "text-stone-900")} style={SG}>
           {formatTime(course.date_heure)}
         </span>
-        {countdown && <span className="mt-1 text-center text-[9px] font-bold leading-tight text-amber-700">{countdown}</span>}
+        {countdown && (
+          <span className="whitespace-nowrap rounded-full bg-amber-50 px-1.5 py-px text-[9.5px] font-semibold leading-tight text-amber-700 tabular-nums">{countdown.replace(/^dans /, "")}</span>
+        )}
       </div>
       {/* La pastille garde la couleur de la discipline même course finie : en gris
           délavé (1,8:1 de contraste) jambes et driver se noyaient dans le fond et
           le cheval paraissait amputé. L'heure barrée et le badge « Terminée »
           suffisent à marquer le passé. */}
-      <span className="hidden h-[42px] w-[50px] flex-shrink-0 items-center justify-center rounded-xl transition-transform duration-300 group-hover:-translate-y-0.5 group-hover:scale-105 min-[400px]:flex" style={{ background: `linear-gradient(180deg,#fff 0%,${m.bg} 70%)`, border: `1px solid ${m.ring}`, boxShadow: `inset 0 1px 0 #fff, 0 2px 0 ${m.ring}, 0 8px 14px -10px ${m.color}` }}>
-        <DiscIcon discipline={course.discipline} />
-      </span>
+      <TuileDiscipline discipline={course.discipline} className={cn("hidden min-[360px]:flex", isDone && "opacity-70 saturate-[.8]")} />
       <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-center gap-1.5">
-          <span className={cn("inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-bold tabular-nums ring-1", codeCls)} style={{ fontFamily: "var(--font-space-grotesk), sans-serif" }}>
+        {/* Où : réunion, hippodrome, discipline — en petit, c'est le contexte */}
+        <div className="flex min-w-0 items-center gap-x-1.5 gap-y-0.5 text-[12px] text-stone-500 sm:flex-wrap">
+          <span className={cn("flex-shrink-0 rounded-md px-1.5 py-px text-[10.5px] font-bold tabular-nums", isLive ? "bg-emerald-100/80 text-emerald-800" : "bg-stone-100 text-stone-600")} style={SG}>
             R{reunionNum}C{course.numero}
           </span>
-          <span className={cn("min-w-0 break-words text-sm font-semibold", isDone ? "text-gray-600" : "text-gray-800")}>
-            <span className="text-gray-600">{course.hippodrome_nom}</span>
-            <span className="text-gray-300"> · </span>
-            {course.nom || `Course ${course.numero}`}
-          </span>
-          {course.est_quinte ? (
-            <span className="rounded-full border border-amber-200 bg-amber-50 px-1.5 text-[9px] font-bold uppercase tracking-wide text-amber-700">Quinté+</span>
-          ) : course.est_quarte ? (
-            <span className="rounded-full border border-amber-200 bg-amber-50 px-1.5 text-[9px] font-bold uppercase tracking-wide text-amber-700">Quarté+</span>
-          ) : course.est_tierce ? (
-            <span className="rounded-full border border-yellow-200 bg-yellow-50 px-1.5 text-[9px] font-bold uppercase tracking-wide text-yellow-700">Tiercé</span>
-          ) : null}
+          <span className="min-w-0 truncate font-medium text-stone-600">{hippodromeCourt(course.hippodrome_nom)}</span>
+          <span aria-hidden className="text-stone-300">·</span>
+          <span className="whitespace-nowrap font-semibold" style={{ color: m.color }}>{titleCase(course.discipline)}</span>
+          {/* Sur téléphone, statut et paris de valeur montent ici : dans une colonne à
+              droite ils volaient la largeur du titre, qui passait sur quatre lignes. */}
+          {((vbCount !== undefined && vbCount > 0) || isLive || isDone) && (
+            <span className="ml-auto flex flex-shrink-0 items-center gap-1 pl-1 sm:hidden">
+              {vbCount !== undefined && vbCount > 0 && (
+                <span className="inline-flex items-center gap-0.5 rounded-full bg-amber-50 px-1.5 py-px text-[10px] font-bold text-amber-700 tabular-nums"><Zap className="h-2.5 w-2.5" />{vbCount}</span>
+              )}
+              {isLive ? (
+                // La ligne est déjà verte : un point qui bat suffit, le mot reste lu à l'écran.
+                <span className="relative flex h-2 w-2" title="En direct">
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-70" />
+                  <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
+                  <span className="sr-only">En direct</span>
+                </span>
+              ) : (
+                <StatutBadge statut={course.statut} />
+              )}
+            </span>
+          )}
         </div>
-        <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-gray-600">
-          <span className="font-semibold" style={{ color: m.color }}>{titleCase(course.discipline)}</span>
-          <span className="text-gray-300">·</span><span>{course.distance} m</span>
-          <span className="text-gray-300">·</span><span>{course.nb_partants} partants</span>
-        </div>
-        {/* Ce que le modèle dit de CETTE course. Rien d'identifiant : une
+        {/* Quoi : le nom de la course, le vrai titre de la ligne */}
+        <p className={cn("m-0 mt-1 line-clamp-2 text-[14.5px] font-semibold leading-snug sm:text-[15px]", isDone ? "text-stone-500" : "text-stone-900")}>
+          {joliNom(course.nom) || `Course ${course.numero}`}
+          {pari && (
+            <span className="ml-2 inline-flex translate-y-[-1px] items-center rounded-full bg-gradient-to-r from-amber-100 to-amber-50 px-2 py-px align-middle text-[10px] font-bold uppercase tracking-wide text-amber-800">{pari}</span>
+          )}
+        </p>
+        {/* Détails et ce que le modèle dit de CETTE course. Rien d'identifiant : une
             confiance, et le fait qu'il suive ou non le favori des parieurs.
             Pas de pastille « Analysée » : toutes les courses le sont, elle
             n'apprenait rien et volait la place des deux chiffres qui varient. */}
-        {apercu?.analysee && (
-          <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-            {apercu.confiance != null && (
-              <span
-                className="rounded-full border border-gray-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-gray-600 tabular-nums"
-                title="Accord des 3 modèles (entre eux et avec le marché) sur le n°1 de cette course. Ce n'est pas sa chance de gagner."
-              >
-                <span className="sm:hidden">accord {apercu.confiance}/100</span>
-                <span className="hidden sm:inline">accord des modèles {apercu.confiance}/100</span>
+        <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1.5 text-[12px] text-stone-500 sm:gap-x-2.5">
+          <span className="tabular-nums">{course.distance.toLocaleString("fr-FR")} m</span>
+          <span aria-hidden className="text-stone-300">·</span>
+          <span className="tabular-nums">{course.nb_partants} partants</span>
+          {apercu?.analysee && apercu.confiance != null && (
+            <span
+              className="inline-flex items-center gap-1.5 rounded-full bg-stone-100/80 py-0.5 pl-2 pr-2.5 text-[11px] font-medium text-stone-600"
+              title="Accord des 3 modèles (entre eux et avec le marché) sur le n°1 de cette course. Ce n'est pas sa chance de gagner."
+            >
+              <span className="sm:hidden">Accord</span>
+              <span className="hidden sm:inline">Accord des modèles</span>
+              <span aria-hidden className="h-1 w-8 overflow-hidden rounded-full bg-stone-200">
+                <span className="block h-full rounded-full bg-gradient-to-r from-amber-400 to-emerald-500" style={{ width: `${Math.max(0, Math.min(100, apercu.confiance))}%` }} />
               </span>
-            )}
-            {apercu.accord_marche === false && (
-              <span
-                title="Le n°1 du modèle n'est pas le favori des parieurs sur cette course"
-                className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700"
-              >
-                <span className="sm:hidden">≠ marché</span>
-                <span className="hidden sm:inline">ne suit pas le marché</span>
-              </span>
-            )}
-          </div>
-        )}
+              <b className="font-semibold tabular-nums text-stone-800">{apercu.confiance}</b>
+            </span>
+          )}
+          {apercu?.analysee && apercu.accord_marche === false && (
+            <span
+              title="Le n°1 du modèle n'est pas le favori des parieurs sur cette course"
+              className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2.5 py-0.5 text-[11px] font-medium text-amber-800"
+            >
+              <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+              <span className="sm:hidden">≠ marché</span>
+              <span className="hidden sm:inline">Ne suit pas le marché</span>
+            </span>
+          )}
+        </div>
       </div>
-      <div className="flex flex-shrink-0 items-center gap-1.5">
+      <div className="hidden flex-shrink-0 items-center gap-2 sm:flex">
         {vbCount !== undefined && vbCount > 0 && (
-          <span className="inline-flex items-center gap-0.5 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-700 tabular-nums">
+          <span className="inline-flex items-center gap-0.5 rounded-full bg-amber-50 px-2 py-0.5 text-[10.5px] font-bold text-amber-700 tabular-nums">
             <Zap className="h-2.5 w-2.5" />{vbCount}
           </span>
         )}
         <StatutBadge statut={course.statut} />
-        <ChevronRight className="hidden h-3.5 w-3.5 flex-shrink-0 text-gray-300 sm:block" />
+        <span className="hidden h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-stone-50 text-stone-400 transition-colors duration-300 group-hover:bg-amber-50 group-hover:text-amber-600 sm:flex">
+          <ChevronRight className="h-4 w-4 transition-transform duration-300 group-hover:translate-x-0.5" />
+        </span>
       </div>
     </Link>
   );
@@ -1050,19 +1123,19 @@ export default function ProgrammeClient({
      `anime` est coupé pour le bloc replié — l'animation d'entrée se rejouerait à
      chaque ouverture, sur des dizaines de lignes d'un coup. */
   const rendreGroupes = (groupes: Array<[string, ItemCourse[]]>, anime: boolean) => (
-    <div className="space-y-7">
+    <div className="space-y-6">
       {groupes.map(([hour, items]) => (
         <div key={hour} className="relative">
-          <div className="mb-3.5 flex items-center gap-3.5">
-            <div
-              className="relative z-[2] flex h-10 w-10 items-center justify-center rounded-xl text-[13px] font-bold text-white sm:h-[46px] sm:w-[46px] sm:rounded-2xl sm:text-[15px]"
-              style={{ fontFamily: "var(--font-space-grotesk), sans-serif", background: "linear-gradient(180deg,#FCD34D 0%,#F59E0B 45%,#D97706 100%)", boxShadow: "inset 0 1px 0 rgba(255,255,255,.55), inset 0 -2px 0 rgba(146,64,14,.35), 0 3px 0 #92400E, 0 10px 18px -8px rgba(217,119,6,.7)", textShadow: "0 1px 0 rgba(120,53,15,.45)" }}
-            >
+          {/* Repère horaire : une pastille légère et un filet qui s'efface, plutôt
+              qu'un gros jeton — la liste respire et l'œil va aux courses. */}
+          <div className="mb-3 flex items-center gap-3">
+            <span className="inline-flex items-center rounded-full bg-amber-50 px-3 py-1 text-[13px] font-bold tabular-nums text-amber-800 ring-1 ring-inset ring-amber-200/70" style={SG}>
               {hour}
-            </div>
-            <span className="text-xs font-semibold text-gray-600">{items.length} course{items.length > 1 ? "s" : ""}</span>
+            </span>
+            <span className="text-[12px] font-medium text-stone-500">{items.length} course{items.length > 1 ? "s" : ""}</span>
+            <span aria-hidden className="h-px flex-1 bg-gradient-to-r from-stone-200 to-transparent" />
           </div>
-          <div className="ml-0 sm:ml-[62px] flex flex-col gap-2.5">
+          <div className="flex flex-col gap-2.5">
             {items.map(({ course, reunionNum }, i) => (
               <TimelineRow
                 key={course.course_id}
@@ -1215,14 +1288,16 @@ export default function ProgrammeClient({
 
         {/* ── Contrôles ── */}
         {programme && programme.nb_courses > 0 && (
-          <div className={cn(CARTE_CLS, "space-y-3 p-3.5 sm:p-4")}>
+          <div className="space-y-4 rounded-[24px] bg-white/80 p-4 ring-1 ring-inset ring-stone-900/[.05] shadow-[0_1px_2px_rgba(28,25,23,.04),0_16px_40px_-24px_rgba(28,25,23,.22)] backdrop-blur sm:p-5">
             <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-2.5">
-                <IconeTuile icone={Filter} />
+                <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-amber-50 text-amber-700">
+                  <Filter className="h-4 w-4" aria-hidden />
+                </span>
                 <h2 className="m-0 text-[15px] font-bold text-stone-900" style={SG}>Filtrer les courses</h2>
               </div>
               {(discFilter !== "Tous" || reunionFilter !== "all" || hippoSearch || vbOnly) && (
-                <button onClick={resetFilters} className="text-[12px] font-semibold text-amber-700 hover:underline">Tout effacer</button>
+                <button onClick={resetFilters} className="rounded-full px-2.5 py-1 text-[12px] font-semibold text-amber-700 transition-colors hover:bg-amber-50">Tout effacer</button>
               )}
             </div>
             {/* Recherche + valeur */}
@@ -1230,84 +1305,107 @@ export default function ProgrammeClient({
               {isPaid && isToday && (
                 <button
                   onClick={() => setVbOnly((v) => !v)}
+                  aria-pressed={vbOnly}
                   className={cn(
-                    "inline-flex items-center gap-1.5 rounded-full px-3.5 py-2 text-[13px] font-semibold transition-all",
-                    vbOnly ? "bg-amber-500 text-brand-dark shadow-sm shadow-amber-200" : "border border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100",
+                    "inline-flex items-center gap-1.5 rounded-full px-4 py-2.5 text-[13px] font-semibold transition-all duration-200",
+                    vbOnly ? "bg-gradient-to-b from-amber-400 to-amber-500 text-stone-900 shadow-[0_6px_16px_-8px_rgba(217,119,6,.7)]" : "bg-amber-50 text-amber-800 hover:bg-amber-100",
                   )}
                 >
                   <Zap className="h-3.5 w-3.5" /> Valeur
                 </button>
               )}
               <div className="relative min-w-[190px] flex-1">
-                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-600" />
+                <Search className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-400" />
                 <input
                   value={hippoSearch}
                   onChange={(e) => setHippoSearch(e.target.value)}
                   placeholder="Rechercher un hippodrome…"
-                  className="w-full rounded-xl border border-[#E6DCC6] bg-[#FCFAF5] py-2.5 pl-9 pr-8 text-[13px] outline-none transition-all focus:border-amber-400 focus:bg-white focus:ring-2 focus:ring-amber-100"
+                  aria-label="Rechercher un hippodrome"
+                  className="w-full rounded-full border-0 bg-stone-100/70 py-2.5 pl-10 pr-9 text-[13.5px] text-stone-800 outline-none ring-1 ring-inset ring-transparent transition-all placeholder:text-stone-400 focus:bg-white focus:ring-amber-300 focus:shadow-[0_0_0_4px_rgba(251,191,36,.15)]"
                 />
                 {hippoSearch && (
-                  <button onClick={() => setHippoSearch("")} className="absolute right-3 top-1/2 -translate-y-1/2">
-                    <X className="h-3.5 w-3.5 text-gray-600" />
+                  <button onClick={() => setHippoSearch("")} aria-label="Effacer la recherche" className="absolute right-3 top-1/2 -translate-y-1/2 rounded-full p-0.5 hover:bg-stone-200/60">
+                    <X className="h-3.5 w-3.5 text-stone-500" />
                   </button>
                 )}
               </div>
             </div>
 
-            {/* Filtre par réunion */}
-            {/* Sur ordinateur les réunions passent à la ligne : en défilement horizontal,
-                la dernière était coupée net par le bord de la carte. Sur mobile le
-                défilement reste, avec un fondu à droite qui signale la suite. */}
+            {/* Filtre par réunion. Nom court (« Paris-Vincennes ») : les capitales
+                « HIPPODROME DE … » répétées sur douze boutons remplissaient la carte.
+                Sur ordinateur les réunions passent à la ligne ; sur mobile elles
+                défilent, avec un fondu à droite qui signale la suite. */}
             {reunionOptions.length > 1 && (
-              <div className={cn("flex gap-2 overflow-x-auto pb-1.5 pr-6 [mask-image:linear-gradient(to_right,#000_calc(100%-2rem),transparent)] sm:flex-wrap sm:overflow-visible sm:pr-0 sm:[mask-image:none]", HIDE_SCROLLBAR)}>
-                <button
-                  onClick={() => setReunionFilter("all")}
-                  className={cn("inline-flex flex-shrink-0 items-center gap-1.5 rounded-xl border px-3.5 py-2 text-[13px] font-semibold transition-all hover:-translate-y-0.5",
-                    reunionFilter === "all" ? "border-gray-900 bg-gray-900 text-white" : "border-gray-200 bg-white text-gray-600 hover:border-gray-300")}
-                  style={{ fontFamily: "var(--font-space-grotesk), sans-serif" }}
-                >
-                  Toutes
-                </button>
-                {reunionOptions.map((r) => {
-                  const active = reunionFilter === r.numero;
+              <div className="space-y-2">
+                <p className="m-0 text-[10.5px] font-bold uppercase tracking-[.14em] text-stone-400">Réunions</p>
+                <div className={cn("-mx-4 flex gap-1.5 overflow-x-auto px-4 pb-1 pr-8 [mask-image:linear-gradient(to_right,#000_calc(100%-2rem),transparent)] sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0 sm:pr-0 sm:[mask-image:none]", HIDE_SCROLLBAR)}>
+                  {[{ numero: "all" as const, hippodrome: "Toutes" }, ...reunionOptions].map((r) => {
+                    const active = reunionFilter === r.numero;
+                    const tout = r.numero === "all";
+                    return (
+                      <button
+                        key={String(r.numero)}
+                        onClick={() => setReunionFilter(r.numero)}
+                        aria-pressed={active}
+                        className={cn(
+                          "inline-flex flex-shrink-0 items-center gap-1.5 rounded-full px-3.5 py-2 text-[13px] transition-all duration-200",
+                          active
+                            ? "bg-stone-900 text-white shadow-[0_6px_14px_-8px_rgba(28,25,23,.7)]"
+                            : "bg-stone-100/70 text-stone-600 hover:bg-stone-200/60 hover:text-stone-900",
+                        )}
+                      >
+                        {!tout && (
+                          <span className={cn("text-[11.5px] font-bold tabular-nums", active ? "text-amber-300" : "text-stone-400")} style={SG}>R{r.numero}</span>
+                        )}
+                        {/* Pas d'`opacity-75` ici : un gris passé à 75 % tombait sous 4,5:1. */}
+                        <span className={cn("whitespace-nowrap", tout ? "font-semibold" : "font-medium")}>{tout ? r.hippodrome : hippodromeCourt(r.hippodrome)}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Filtre par discipline : la silhouette de chaque discipline, sur un galet */}
+            <div className="space-y-2">
+              <p className="m-0 text-[10.5px] font-bold uppercase tracking-[.14em] text-stone-400">Disciplines</p>
+              <div className={cn("-mx-4 flex gap-2 overflow-x-auto px-4 pb-1 sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0", HIDE_SCROLLBAR)}>
+                {["Tous", ...Object.keys(discCounts).sort((a, b) => discCounts[b] - discCounts[a])].map((d) => {
+                  const count = d === "Tous" ? allCourses.length : (discCounts[d] ?? 0);
+                  if (d !== "Tous" && count === 0) return null;
+                  const active = discFilter === d;
+                  const dm = discMeta(d);
                   return (
                     <button
-                      key={r.numero}
-                      onClick={() => setReunionFilter(r.numero)}
-                      className={cn("inline-flex flex-shrink-0 items-center gap-1.5 rounded-xl border px-3.5 py-2 text-[13px] font-semibold transition-all hover:-translate-y-0.5",
-                        active ? "border-gray-900 bg-gray-900 text-white" : "border-gray-200 bg-white text-gray-600 hover:border-gray-300")}
+                      key={d}
+                      onClick={() => setDiscFilter(d)}
+                      aria-pressed={active}
+                      className={cn(
+                        "group inline-flex flex-shrink-0 items-center gap-2 rounded-full py-1.5 pr-3 text-[13px] font-semibold transition-all duration-200",
+                        d === "Tous" ? "pl-3.5" : "pl-1.5",
+                        active
+                          ? "bg-stone-900 text-white shadow-[0_6px_14px_-8px_rgba(28,25,23,.7)]"
+                          : "bg-white text-stone-700 ring-1 ring-inset ring-stone-200/80 hover:-translate-y-px hover:shadow-[0_8px_16px_-12px_rgba(28,25,23,.35)]",
+                      )}
                     >
-                      <span style={{ fontFamily: "var(--font-space-grotesk), sans-serif", fontWeight: 700 }}>R{r.numero}</span>
-                      {/* Pas d'`opacity-75` ici : le gris du bouton passé à 75 % donne
-                          #78808A sur blanc, soit 3,99:1 — dernier échec de contraste du
-                          site. La hiérarchie visuelle tient déjà sans lui : « R1 » est en
-                          graisse 700, le nom de l'hippodrome en `font-medium`. */}
-                      <span className="whitespace-nowrap font-medium">{r.hippodrome}</span>
+                      {d !== "Tous" && (
+                        <span
+                          aria-hidden
+                          className="flex h-8 w-10 items-center justify-center rounded-full transition-transform duration-300 group-hover:scale-105"
+                          style={{
+                            background: active ? "rgba(255,255,255,.12)" : `radial-gradient(120% 100% at 30% 0%,#FFFFFF 0%,${dm.bg} 60%,${dm.ring} 140%)`,
+                            boxShadow: active ? "inset 0 1px 0 rgba(255,255,255,.15)" : `inset 0 1px 0 #fff, 0 4px 10px -6px ${dm.color}80`,
+                          }}
+                        >
+                          <DiscIcon discipline={d} w={30} h={21} color={active ? "#FFFFFF" : dm.color} />
+                        </span>
+                      )}
+                      {titleCase(d)}
+                      <span className={cn("rounded-full px-1.5 text-[11px] font-bold tabular-nums", active ? "bg-white/15 text-white" : "bg-stone-100 text-stone-500")}>{count}</span>
                     </button>
                   );
                 })}
               </div>
-            )}
-
-            {/* Filtre par discipline */}
-            <div className={cn("flex gap-2 overflow-x-auto pb-1.5 sm:flex-wrap sm:overflow-visible", HIDE_SCROLLBAR)}>
-              {["Tous", ...Object.keys(discCounts).sort((a, b) => discCounts[b] - discCounts[a])].map((d) => {
-                const count = d === "Tous" ? allCourses.length : (discCounts[d] ?? 0);
-                if (d !== "Tous" && count === 0) return null;
-                const active = discFilter === d;
-                return (
-                  <button
-                    key={d}
-                    onClick={() => setDiscFilter(d)}
-                    className={cn("inline-flex flex-shrink-0 items-center gap-1.5 rounded-full border px-3.5 py-2 text-[13px] font-semibold transition-all hover:-translate-y-0.5",
-                      active ? "border-gray-900 bg-gray-900 text-white" : "border-gray-200 bg-white text-gray-600 hover:border-gray-300 hover:text-gray-900")}
-                  >
-                    {d !== "Tous" && <DiscIcon discipline={d} w={34} h={24} color={active ? "#FFFFFF" : discMeta(d).color} />}
-                    {titleCase(d)}
-                    <span className={cn("rounded-full px-1.5 text-[11px] font-bold tabular-nums", active ? "bg-white/20 text-white" : "bg-gray-100 text-gray-600")}>{count}</span>
-                  </button>
-                );
-              })}
             </div>
           </div>
         )}
@@ -1382,9 +1480,10 @@ export default function ProgrammeClient({
                   onClick={() => setTerminesOuverts((v) => !v)}
                   aria-expanded={terminesOuverts}
                   aria-controls="courses-terminees"
-                  className={cn(CARTE_CLS, "flex w-full items-center justify-between gap-3 px-4 py-3 text-left text-[13px] font-semibold text-gray-700 transition-transform active:scale-[.99]")}
+                  className="flex w-full items-center justify-between gap-3 rounded-[18px] bg-white/70 px-4 py-3 text-left text-[13px] font-semibold text-stone-700 ring-1 ring-inset ring-stone-200/70 transition-colors hover:bg-white active:scale-[.995]"
                 >
-                  <span>
+                  <span className="inline-flex items-center gap-2.5">
+                    <span aria-hidden className="flex h-6 w-6 items-center justify-center rounded-full bg-stone-100 text-[10px] text-stone-500">✓</span>
                     {flatTermines.length} course{flatTermines.length > 1 ? "s" : ""} déjà courue{flatTermines.length > 1 ? "s" : ""}
                   </span>
                   <span className="inline-flex items-center gap-1 text-[12px] font-medium text-amber-700">
