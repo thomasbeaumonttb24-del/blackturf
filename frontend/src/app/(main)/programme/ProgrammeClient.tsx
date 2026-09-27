@@ -65,11 +65,6 @@ const titleCase = (s: string) => (s ? s.charAt(0).toUpperCase() + s.slice(1).toL
 
 const cap = (s: string) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s);
 
-const enjeux = (v: number | null) => {
-  if (v == null || v <= 0) return null;
-  return v >= 1_000_000 ? `${(v / 1_000_000).toFixed(1)}M€` : `${Math.round(v / 1_000)}k€`;
-};
-
 /* ─── Palette des disciplines (couleur + silhouette détourée) ── */
 type DiscMeta = { color: string; bg: string; ring: string; mask: string };
 // `color` sert aussi de couleur de TEXTE au nom de la discipline sur la carte de course.
@@ -153,9 +148,12 @@ function useCompteur(cible: number, dureeMs = 900): number {
 function TuileCompteur({ n, libelle, ton }: { n: number; libelle: string; ton?: string }) {
   const v = useCompteur(n);
   return (
-    <div className="bt-pop rounded-2xl bg-white/85 px-2.5 py-2.5 ring-1 ring-[#E6DCC6] shadow-[inset_0_1px_0_#fff,0_1px_2px_rgba(17,24,39,.05),0_10px_22px_-18px_rgba(146,64,14,.5)] backdrop-blur sm:px-4 sm:py-3">
-      <div className={cn("text-[22px] font-bold leading-none tabular-nums text-stone-900 sm:text-[28px]", ton)} style={SG}>{v}</div>
-      <div className="mt-1 text-[11px] font-medium text-stone-500 sm:text-xs">{libelle}</div>
+    // Tuile de verre sur le bandeau noir : reflet en haut, tranche sombre en bas —
+    // elle se lit comme un bloc posé, pas comme un aplat.
+    <div className="bt-pop bt-tuile relative overflow-hidden rounded-2xl bg-gradient-to-b from-white/[.10] to-white/[.03] px-2.5 py-2.5 ring-1 ring-inset ring-white/10 shadow-[inset_0_1px_0_rgba(255,255,255,.14),0_3px_0_rgba(0,0,0,.55),0_16px_26px_-16px_rgba(0,0,0,.9)] backdrop-blur sm:px-4 sm:py-3">
+      <span aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-amber-200/50 to-transparent" />
+      <div className={cn("text-[22px] font-bold leading-none tabular-nums text-white sm:text-[28px]", ton)} style={SG}>{v}</div>
+      <div className="mt-1 text-[11px] font-medium text-stone-400 sm:text-xs">{libelle}</div>
     </div>
   );
 }
@@ -321,15 +319,17 @@ function DayStrip({ selected, jourCourant, onSelect }: { selected: Date; jourCou
             key={key}
             onClick={() => onSelect(d)}
             className={cn(
-              "group flex min-w-[58px] shrink-0 flex-col items-center justify-center rounded-2xl px-3.5 py-2.5 ring-1 transition-all hover:-translate-y-0.5 active:scale-[.97]",
+              // Touches en relief : une tranche de 3 px sous chaque jour, qui s'écrase
+              // quand on appuie. Le jour choisi est noir, tranche dorée.
+              "group mb-1 flex min-w-[58px] shrink-0 flex-col items-center justify-center rounded-2xl px-3.5 py-2.5 ring-1 transition-all duration-150 hover:-translate-y-0.5 active:translate-y-[2px]",
               isSel
-                ? "bg-stone-900 text-white ring-stone-900 shadow-[0_8px_18px_-10px_rgba(17,24,39,.7)]"
+                ? "bg-gradient-to-b from-stone-800 to-stone-950 text-white ring-stone-900 shadow-[inset_0_1px_0_rgba(255,255,255,.14),0_3px_0_#B45309,0_12px_20px_-10px_rgba(17,24,39,.8)] active:shadow-[inset_0_1px_0_rgba(255,255,255,.14),0_1px_0_#B45309]"
                 : isToday
-                ? "bg-white text-gray-800 ring-amber-300 shadow-[inset_0_1px_0_#fff,0_1px_2px_rgba(17,24,39,.05),0_8px_18px_-14px_rgba(146,64,14,.5)]"
-                : "bg-white text-gray-700 ring-[#ECE7DC] shadow-[inset_0_1px_0_#fff,0_1px_2px_rgba(17,24,39,.05),0_8px_18px_-14px_rgba(17,24,39,.4)] hover:ring-stone-300",
+                ? "bg-gradient-to-b from-white to-[#FBF8F1] text-gray-800 ring-amber-300 shadow-[inset_0_1px_0_#fff,0_3px_0_#F5D48A,0_10px_18px_-12px_rgba(146,64,14,.5)] active:shadow-[inset_0_1px_0_#fff,0_1px_0_#F5D48A]"
+                : "bg-gradient-to-b from-white to-[#FBF8F1] text-gray-700 ring-[#ECE7DC] shadow-[inset_0_1px_0_#fff,0_3px_0_#E6DFD0,0_10px_18px_-12px_rgba(17,24,39,.35)] hover:ring-stone-300 active:shadow-[inset_0_1px_0_#fff,0_1px_0_#E6DFD0]",
             )}
           >
-            <span className={cn("text-[10px] font-bold uppercase tracking-wide leading-none", isSel ? "text-white/70" : isToday ? "text-amber-700" : "text-gray-600")}>
+            <span className={cn("text-[10px] font-bold uppercase tracking-wide leading-none", isSel ? "text-amber-300" : isToday ? "text-amber-700" : "text-gray-600")}>
               {topLabel}
             </span>
             <span className="text-xl font-extrabold tabular-nums leading-none mt-1.5" style={{ fontFamily: "var(--font-space-grotesk), sans-serif" }}>{format(d, "d")}</span>
@@ -339,6 +339,47 @@ function DayStrip({ selected, jourCourant, onSelect }: { selected: Date; jourCou
           </button>
         );
       })}
+    </div>
+  );
+}
+
+/* ─── Piste en perspective (décor des bandeaux noirs) ─────
+ * Une piste vue de biais, inclinée en CSS 3D, sur laquelle tournent quelques
+ * chevaux-lumière. Du CSS pur : aucune bibliothèque 3D à charger, et la règle
+ * `prefers-reduced-motion` de la page fige les chevaux. Décor uniquement. */
+const CHEVAUX_PISTE: Array<{ duree: number; decalage: number; couloir: string; couleur: string }> = [
+  { duree: 15, decalage: 0, couloir: "7%", couleur: "#FBBF24" },
+  { duree: 15.6, decalage: -1.2, couloir: "10%", couleur: "#34D399" },
+  { duree: 16.2, decalage: -2.6, couloir: "8%", couleur: "#D6CFC2" },
+  { duree: 16.8, decalage: -4.4, couloir: "11%", couleur: "#D6CFC2" },
+  { duree: 17.4, decalage: -6.1, couloir: "9%", couleur: "#F59E0B" },
+  { duree: 18, decalage: -8.3, couloir: "12%", couleur: "#D6CFC2" },
+];
+function PisteRelief({ className }: { className?: string }) {
+  return (
+    <div aria-hidden className={cn("pointer-events-none absolute -z-10 aspect-square [perspective:800px]", className)}>
+      <div className="absolute inset-0 [transform:rotateX(64deg)_rotateZ(-12deg)] [transform-style:preserve-3d]">
+        {/* lice extérieure, lumineuse */}
+        <div className="absolute inset-0 rounded-full border border-amber-300/60 shadow-[0_0_28px_rgba(245,158,11,.35),inset_0_0_28px_rgba(245,158,11,.18)]" />
+        {/* la piste */}
+        <div className="absolute inset-[4%] rounded-full border-[18px] border-amber-400/[.07]" />
+        <div className="absolute inset-[16%] rounded-full border border-amber-200/30" />
+        <div className="absolute inset-[10%] rounded-full border border-dashed border-white/10" />
+        {/* poteau d'arrivée */}
+        <div className="absolute left-1/2 top-0 h-[16%] w-[3px] -translate-x-1/2 bg-amber-200 shadow-[0_0_10px_#FBBF24]" />
+        {CHEVAUX_PISTE.map((c, i) => (
+          <div
+            key={i}
+            className="absolute rounded-full [animation-iteration-count:infinite] [animation-name:btTour] [animation-timing-function:linear]"
+            style={{ inset: c.couloir, animationDuration: `${c.duree}s`, animationDelay: `${c.decalage}s` }}
+          >
+            <span
+              className="absolute left-1/2 top-0 h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full"
+              style={{ background: c.couleur, boxShadow: `0 0 10px ${c.couleur}, 0 0 2px #fff inset` }}
+            />
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -354,7 +395,6 @@ function NextRaceBanner({ item }: { item: { course: CourseSummary; reunionNum: n
   // Anneau : plein à une heure du départ, vide au départ.
   const R = 44, C = 2 * Math.PI * R;
   const part = minutes == null ? (isLive ? 1 : 0) : Math.max(0.02, Math.min(1, minutes / 60));
-  const pool = enjeux(course.pool_total_eur);
   const ACCES: Array<[string, string, string, typeof Timer]> = [
     ["synthese", "Pronostic", "le classement de l'IA", Sparkles],
     ["partants", "Partants", "la fiche de chaque cheval", Users],
@@ -366,22 +406,25 @@ function NextRaceBanner({ item }: { item: { course: CourseSummary; reunionNum: n
     // d'épaisseur égale partout, seul le reflet clair se déplace.
     <div className="bt-lisere relative rounded-[18px] p-[2px] shadow-[0_22px_44px_-26px_rgba(146,64,14,.6)]">
     <section aria-label="Prochaine course" className="overflow-hidden rounded-[16px] bg-white">
-      {/* Bandeau doré : il porte l'identité de la course et l'action principale */}
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-2.5 bg-gradient-to-r from-amber-400 via-amber-300 to-amber-200 px-4 py-3 sm:px-5">
-        <IconeTuile icone={Timer} className="bg-white from-white to-white ring-white/80" />
+      {/* Bandeau noir : il porte l'identité de la course et l'action principale. Noir
+          et or plutôt que l'aplat jaune d'avant, trop criard en haut de page ; la piste
+          en perspective derrière rappelle l'hippodrome sans prendre de place. */}
+      <div className="relative isolate flex flex-wrap items-center gap-x-3 gap-y-2.5 overflow-hidden bg-[radial-gradient(120%_140%_at_100%_0%,rgba(245,158,11,.22)_0%,transparent_55%),linear-gradient(160deg,#241D14_0%,#0E0C09_70%)] px-4 py-3 sm:px-5">
+        <PisteRelief className="right-[-6%] top-[-70%] w-[46%] opacity-70 max-[479px]:w-[80%] max-[479px]:opacity-40" />
+        <IconeTuile icone={Timer} className="from-amber-300 to-amber-500 text-stone-900 ring-amber-200/60 shadow-[inset_0_1px_0_rgba(255,255,255,.6),0_2px_0_#92400E,0_8px_14px_-6px_rgba(245,158,11,.6)]" />
         <div className="min-w-0 flex-1">
-          <p className="m-0 flex items-center gap-2 text-[10.5px] font-bold uppercase tracking-[.14em] text-amber-950/70">
+          <p className="m-0 flex items-center gap-2 text-[10.5px] font-bold uppercase tracking-[.14em] text-amber-300">
             Prochaine course
             {isLive && <PastilleDirect libelle="En piste" />}
           </p>
-          <h2 className="m-0 mt-0.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[17px] font-bold leading-tight text-stone-900 sm:text-[19px]" style={SG}>
-            <span className="rounded-md bg-stone-900 px-1.5 py-0.5 text-[11.5px] font-bold tabular-nums text-white">R{reunionNum}C{course.numero}</span>
+          <h2 className="m-0 mt-0.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[17px] font-bold leading-tight text-white sm:text-[19px]" style={SG}>
+            <span className="rounded-md bg-gradient-to-b from-amber-300 to-amber-500 px-1.5 py-0.5 text-[11.5px] font-bold tabular-nums text-stone-900 shadow-[inset_0_1px_0_rgba(255,255,255,.55),0_2px_0_#92400E]">R{reunionNum}C{course.numero}</span>
             <span className="min-w-0">{course.hippodrome_nom}</span>
           </h2>
         </div>
         <Link
           href={fiche}
-          className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-xl bg-stone-900 px-3.5 py-2.5 text-[13px] font-bold text-white shadow-[inset_0_1px_0_rgba(255,255,255,.15),0_8px_18px_-8px_rgba(17,24,39,.6)] transition-transform hover:-translate-y-0.5 active:scale-[.98] max-[479px]:w-full max-[479px]:justify-center"
+          className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-xl bg-gradient-to-b from-amber-300 via-amber-400 to-amber-600 px-3.5 py-2.5 text-[13px] font-bold text-stone-900 shadow-[inset_0_1px_0_rgba(255,255,255,.55),0_3px_0_#92400E,0_12px_22px_-10px_rgba(245,158,11,.75)] transition-all hover:-translate-y-0.5 active:translate-y-[2px] active:shadow-[inset_0_1px_0_rgba(255,255,255,.55),0_1px_0_#92400E] max-[479px]:w-full max-[479px]:justify-center"
         >
           Voir la course <ChevronRight className="h-4 w-4" />
         </Link>
@@ -398,7 +441,10 @@ function NextRaceBanner({ item }: { item: { course: CourseSummary; reunionNum: n
             aria-live="off"
             aria-label={secondes != null ? `Départ dans ${formatRebours(secondes)}` : isLive ? "Course en piste" : `Départ à ${formatTime(course.date_heure)}`}
           >
-            <svg viewBox="0 0 104 104" className="absolute inset-0 h-full w-full -rotate-90" aria-hidden>
+            {/* Socle : l'anneau est posé sur un disque en relief qui projette son ombre */}
+            <span aria-hidden className="absolute inset-[3%] rounded-full bg-gradient-to-b from-white to-[#EFE9DC] shadow-[inset_0_2px_0_#fff,inset_0_-6px_12px_rgba(146,64,14,.12),0_14px_24px_-12px_rgba(17,24,39,.45)]" />
+            <span aria-hidden className="absolute -bottom-2 left-1/2 h-3 w-[70%] -translate-x-1/2 rounded-[50%] bg-stone-900/20 blur-md" />
+            <svg viewBox="0 0 104 104" className="absolute inset-0 h-full w-full -rotate-90 drop-shadow-[0_0_6px_rgba(245,158,11,.45)]" aria-hidden>
               <defs>
                 <linearGradient id="bt-anneau" x1="0" y1="0" x2="1" y2="1">
                   <stop offset="0%" stopColor={isLive ? "#34D399" : "#FCD34D"} />
@@ -409,7 +455,7 @@ function NextRaceBanner({ item }: { item: { course: CourseSummary; reunionNum: n
               <circle cx="52" cy="52" r={R} fill="none" stroke="url(#bt-anneau)" strokeWidth="6" strokeLinecap="round"
                 strokeDasharray={`${part * C} ${C}`} className="transition-[stroke-dasharray] duration-1000 ease-out" />
             </svg>
-            <div className="relative flex h-[78%] w-[78%] flex-col items-center justify-center rounded-full bg-gradient-to-b from-white to-stone-50 shadow-[inset_0_1px_0_#fff,0_6px_14px_-8px_rgba(17,24,39,.35)]">
+            <div className="relative flex h-[76%] w-[76%] flex-col items-center justify-center rounded-full bg-gradient-to-b from-white via-white to-stone-100 shadow-[inset_0_1px_0_#fff,inset_0_-3px_6px_rgba(17,24,39,.06),0_2px_0_#E4DCCB,0_10px_18px_-8px_rgba(17,24,39,.45)]">
               {secondes != null ? (
                 <>
                   <span className="text-[10.5px] font-semibold text-stone-500">départ dans</span>
@@ -434,8 +480,8 @@ function NextRaceBanner({ item }: { item: { course: CourseSummary; reunionNum: n
               <span className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-[12px] font-semibold" style={{ color: m.color, background: m.bg, boxShadow: `inset 0 0 0 1px ${m.ring}` }}>
                 <DiscIcon discipline={course.discipline} w={26} h={18} />{titleCase(course.discipline)}
               </span>
-              {[`${course.distance} m`, `${course.nb_partants} partants`, ...(pool ? [`Enjeux ${pool}`] : [])].map((t) => (
-                <span key={t} className="inline-flex items-center rounded-lg bg-white px-2.5 py-1 text-[12px] font-semibold tabular-nums text-stone-700 ring-1 ring-inset ring-[#ECE7DC]">{t}</span>
+              {[`${course.distance} m`, `${course.nb_partants} partants`].map((t) => (
+                <span key={t} className="inline-flex items-center rounded-lg bg-gradient-to-b from-white to-[#FAF7F0] px-2.5 py-1 text-[12px] font-semibold tabular-nums text-stone-700 ring-1 ring-inset ring-[#ECE7DC] shadow-[0_2px_0_#ECE5D6]">{t}</span>
               ))}
               {course.est_quinte && <Pastille className="bg-amber-50 text-amber-800 ring-amber-200">Quinté+</Pastille>}
             </div>
@@ -448,9 +494,11 @@ function NextRaceBanner({ item }: { item: { course: CourseSummary; reunionNum: n
             <Link
               key={cle}
               href={`${fiche}#${cle}`}
-              className="group flex flex-col items-center gap-1 rounded-xl bg-amber-50/70 px-2 py-2.5 text-center ring-1 ring-inset ring-amber-200 shadow-[inset_0_1px_0_#fff,0_1px_2px_rgba(146,64,14,.1)] transition-all hover:-translate-y-0.5 hover:bg-amber-50 md:flex-row md:gap-2.5 md:px-3 md:py-2 md:text-left"
+              className="group flex flex-col items-center gap-1 rounded-xl bg-gradient-to-b from-[#FFFBF2] to-amber-50 px-2 py-2.5 text-center ring-1 ring-inset ring-amber-200 shadow-[inset_0_1px_0_#fff,0_3px_0_#F3D9A4,0_10px_16px_-12px_rgba(146,64,14,.45)] transition-all duration-150 hover:-translate-y-0.5 hover:bg-amber-50 active:translate-y-[2px] active:shadow-[inset_0_1px_0_#fff,0_1px_0_#F3D9A4] md:flex-row md:gap-2.5 md:px-3 md:py-2 md:text-left"
             >
-              <Icone className="h-4 w-4 shrink-0 text-amber-700" aria-hidden />
+              <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-gradient-to-b from-stone-800 to-stone-950 shadow-[inset_0_1px_0_rgba(255,255,255,.15),0_2px_0_#B45309]">
+                <Icone className="h-3.5 w-3.5 text-amber-300" aria-hidden />
+              </span>
               <span className="min-w-0 md:flex-1">
                 <span className="block text-[12.5px] font-bold text-amber-900">{lib}</span>
                 <span className="hidden text-[11px] leading-tight text-stone-500 md:block">{desc}</span>
@@ -535,10 +583,10 @@ function TimelineRow({ course, reunionNum, vbCount, apercu, delay, onOuvrir }: {
       id={`course-${course.course_id}`}
       onClick={onOuvrir}
       className={cn(
-        "bt-apparition group relative flex scroll-mt-28 items-center gap-2.5 overflow-hidden rounded-2xl px-3 py-3 no-underline ring-1 transition-all duration-200 active:scale-[.99] sm:gap-3 sm:px-4",
+        "bt-apparition bt-relief group relative flex scroll-mt-28 items-center gap-2.5 overflow-hidden rounded-2xl px-3 py-3 no-underline ring-1 transition-all duration-200 active:scale-[.99] sm:gap-3 sm:px-4",
         isDone
           ? "ring-[#E9E6DC] hover:ring-stone-300"
-          : "ring-[#ECE7DC] shadow-[inset_0_1px_0_#fff,0_1px_2px_rgba(17,24,39,.05),0_12px_28px_-22px_rgba(17,24,39,.45)] hover:-translate-y-0.5 hover:ring-amber-300 hover:shadow-[inset_0_1px_0_#fff,0_2px_4px_rgba(17,24,39,.05),0_22px_40px_-24px_rgba(146,64,14,.45)]",
+          : "ring-[#ECE7DC] shadow-[inset_0_1px_0_#fff,0_2px_0_#EEE8DB,0_12px_28px_-22px_rgba(17,24,39,.45)] hover:ring-amber-300 hover:shadow-[inset_0_1px_0_#fff,0_3px_0_#F3D9A4,0_26px_44px_-24px_rgba(146,64,14,.5)]",
       )}
       style={{ background: isLive ? "#F0FDF8" : isDone ? "#F5F4EF" : "#FFFFFF", ["--bt-delai" as string]: `${delay}s` }}
     >
@@ -553,7 +601,7 @@ function TimelineRow({ course, reunionNum, vbCount, apercu, delay, onOuvrir }: {
           délavé (1,8:1 de contraste) jambes et driver se noyaient dans le fond et
           le cheval paraissait amputé. L'heure barrée et le badge « Terminée »
           suffisent à marquer le passé. */}
-      <span className="hidden h-[42px] w-[50px] flex-shrink-0 items-center justify-center rounded-xl min-[400px]:flex" style={{ background: m.bg, border: `1px solid ${m.ring}` }}>
+      <span className="hidden h-[42px] w-[50px] flex-shrink-0 items-center justify-center rounded-xl transition-transform duration-300 group-hover:-translate-y-0.5 group-hover:scale-105 min-[400px]:flex" style={{ background: `linear-gradient(180deg,#fff 0%,${m.bg} 70%)`, border: `1px solid ${m.ring}`, boxShadow: `inset 0 1px 0 #fff, 0 2px 0 ${m.ring}, 0 8px 14px -10px ${m.color}` }}>
         <DiscIcon discipline={course.discipline} />
       </span>
       <div className="min-w-0 flex-1">
@@ -578,7 +626,6 @@ function TimelineRow({ course, reunionNum, vbCount, apercu, delay, onOuvrir }: {
           <span className="font-semibold" style={{ color: m.color }}>{titleCase(course.discipline)}</span>
           <span className="text-gray-300">·</span><span>{course.distance} m</span>
           <span className="text-gray-300">·</span><span>{course.nb_partants} partants</span>
-          {enjeux(course.pool_total_eur) && (<><span className="text-gray-300">·</span><span className="font-medium text-gray-600 tabular-nums">Enjeux {enjeux(course.pool_total_eur)}</span></>)}
         </div>
         {/* Ce que le modèle dit de CETTE course. Rien d'identifiant : une
             confiance, et le fait qu'il suive ou non le favori des parieurs.
@@ -1009,7 +1056,7 @@ export default function ProgrammeClient({
           <div className="mb-3.5 flex items-center gap-3.5">
             <div
               className="relative z-[2] flex h-10 w-10 items-center justify-center rounded-xl text-[13px] font-bold text-white sm:h-[46px] sm:w-[46px] sm:rounded-2xl sm:text-[15px]"
-              style={{ fontFamily: "var(--font-space-grotesk), sans-serif", background: "linear-gradient(180deg,#FBBF24,#D97706)", boxShadow: "inset 0 1px 0 rgba(255,255,255,.45), 0 6px 14px -6px rgba(217,119,6,.6)" }}
+              style={{ fontFamily: "var(--font-space-grotesk), sans-serif", background: "linear-gradient(180deg,#FCD34D 0%,#F59E0B 45%,#D97706 100%)", boxShadow: "inset 0 1px 0 rgba(255,255,255,.55), inset 0 -2px 0 rgba(146,64,14,.35), 0 3px 0 #92400E, 0 10px 18px -8px rgba(217,119,6,.7)", textShadow: "0 1px 0 rgba(120,53,15,.45)" }}
             >
               {hour}
             </div>
@@ -1043,7 +1090,8 @@ export default function ProgrammeClient({
     >
       {/* @keyframes local (fadeUp) */}
       <style>{`
-@keyframes fadeUp{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:none}}
+/* translate et non transform : avec un remplissage « both », une animation de transform écraserait la bascule au survol de .bt-relief. */
+@keyframes fadeUp{from{opacity:0;translate:0 20px}to{opacity:1;translate:none}}
 @keyframes btDerive1{0%,100%{transform:translate(0,0) scale(1)}50%{transform:translate(40px,18px) scale(1.12)}}
 @keyframes btDerive2{0%,100%{transform:translate(0,0) scale(1)}50%{transform:translate(-36px,-14px) scale(1.08)}}
 @keyframes btDerive3{0%,100%{transform:translate(0,0)}50%{transform:translate(24px,-20px)}}
@@ -1054,7 +1102,10 @@ export default function ProgrammeClient({
 .bt-halo-a{animation:btDerive1 14s ease-in-out infinite}
 .bt-halo-b{animation:btDerive2 17s ease-in-out infinite}
 .bt-halo-c{animation:btDerive3 12s ease-in-out infinite}
-.bt-brillance{background-image:linear-gradient(90deg,#92400E 0%,#D97706 25%,#F59E0B 50%,#D97706 75%,#92400E 100%);background-size:200% 100%;animation:btBrille 6s linear infinite}
+.bt-brillance-nuit{background-image:linear-gradient(90deg,#D97706 0%,#FBBF24 25%,#FEF3C7 50%,#FBBF24 75%,#D97706 100%);background-size:200% 100%;animation:btBrille 6s linear infinite}
+/* Relief des lignes : légère bascule en perspective au survol (souris uniquement). */
+.bt-relief{transition:transform .25s cubic-bezier(.16,1,.3,1),box-shadow .25s ease}
+@media (hover:hover){.bt-relief:hover{transform:perspective(900px) rotateX(3deg) translateY(-3px)}}
 .bt-pop{animation:btPop .6s cubic-bezier(.16,1,.3,1) both}
 .bt-lisere{isolation:isolate;overflow:hidden}
 .bt-lisere::before{content:"";position:absolute;left:50%;top:50%;width:200vmax;height:200vmax;margin:-100vmax 0 0 -100vmax;z-index:-1;background:conic-gradient(from 0deg,#FDE68A,#F59E0B 18%,#D97706 30%,#FBBF24 45%,#FFF7D6 50%,#FBBF24 55%,#D97706 70%,#F59E0B 82%,#FDE68A);animation:btTour 6s linear infinite}
@@ -1068,17 +1119,20 @@ export default function ProgrammeClient({
 
       <div className="mx-auto max-w-4xl space-y-5 px-4 py-6 sm:space-y-6 sm:px-6 sm:py-8 lg:px-8">
 
-        {/* ── EN-TÊTE : panneau teinté et plat, comme les bandeaux de la fiche course ── */}
-        <header className="relative isolate overflow-hidden rounded-[22px] bg-[#F3EDE0] px-4 pb-4 pt-5 ring-1 ring-inset ring-[#E6DCC6] sm:px-6 sm:pb-5 sm:pt-6">
-          {/* Halos dorés qui dérivent lentement : de la vie, sans fond sombre. */}
-          <span aria-hidden className="bt-halo-a pointer-events-none absolute -left-16 -top-20 -z-10 h-56 w-56 rounded-full bg-amber-300/45 blur-3xl" />
-          <span aria-hidden className="bt-halo-b pointer-events-none absolute -bottom-24 right-10 -z-10 h-60 w-60 rounded-full bg-orange-200/60 blur-3xl" />
-          <span aria-hidden className="bt-halo-c pointer-events-none absolute left-1/3 top-6 -z-10 h-40 w-40 rounded-full bg-yellow-200/50 blur-3xl" />
+        {/* ── EN-TÊTE : bandeau noir et or, piste en perspective en fond ── */}
+        <header className="relative isolate overflow-hidden rounded-[22px] bg-[linear-gradient(160deg,#261F16_0%,#12100C_55%,#0B0907_100%)] px-4 pb-4 pt-5 ring-1 ring-inset ring-amber-500/25 shadow-[inset_0_1px_0_rgba(255,255,255,.08),0_26px_48px_-28px_rgba(17,12,5,.85)] sm:px-6 sm:pb-5 sm:pt-6">
+          {/* Halos dorés qui dérivent lentement, atténués sur le noir. */}
+          <span aria-hidden className="bt-halo-a pointer-events-none absolute -left-16 -top-20 -z-10 h-56 w-56 rounded-full bg-amber-500/20 blur-3xl" />
+          <span aria-hidden className="bt-halo-b pointer-events-none absolute -bottom-24 right-10 -z-10 h-60 w-60 rounded-full bg-orange-600/20 blur-3xl" />
+          <span aria-hidden className="bt-halo-c pointer-events-none absolute left-1/3 top-6 -z-10 h-40 w-40 rounded-full bg-yellow-400/10 blur-3xl" />
+          {/* Quadrillage discret qui s'efface vers le bas : donne de la profondeur au noir. */}
+          <span aria-hidden className="pointer-events-none absolute inset-0 -z-10 bg-[linear-gradient(rgba(255,255,255,.035)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,.035)_1px,transparent_1px)] bg-[size:26px_26px] [mask-image:linear-gradient(180deg,#000,transparent_80%)]" />
+          <PisteRelief className="right-[-4%] top-[-38%] w-[44%] max-[479px]:right-[-35%] max-[479px]:top-[-30%] max-[479px]:w-[95%] max-[479px]:opacity-50" />
           <span
             aria-hidden
             className="pointer-events-none absolute max-[479px]:hidden"
             style={{
-              right: 26, top: 14, width: 150, height: 92, opacity: 0.1, background: "#92400E",
+              right: 26, top: 14, width: 150, height: 92, opacity: 0.14, background: "#FBBF24",
               WebkitMaskImage: "url(/img/logo-horse.png)", maskImage: "url(/img/logo-horse.png)",
               WebkitMaskRepeat: "no-repeat", maskRepeat: "no-repeat",
               WebkitMaskPosition: "center", maskPosition: "center",
@@ -1087,7 +1141,7 @@ export default function ProgrammeClient({
           />
           <div className="relative">
             <div className="mb-2.5 flex items-center justify-between gap-3">
-              <div className="inline-flex items-center gap-2 text-[11px] font-bold uppercase tracking-[.16em] text-amber-700">
+              <div className="inline-flex items-center gap-2 text-[11px] font-bold uppercase tracking-[.16em] text-amber-300">
                 <span className="h-1.5 w-1.5 rounded-full bg-amber-500 animate-pulse" />
                 Programme PMU
               </div>
@@ -1107,7 +1161,7 @@ export default function ProgrammeClient({
             {format(selectedDate, "yyyy-MM-dd") < jourCourant && (
               <a
                 href={`/resultats/${format(selectedDate, "yyyy-MM-dd")}`}
-                className="mb-3 inline-flex items-center gap-1.5 rounded-lg bg-white px-3 py-1.5 text-[12.5px] font-semibold text-amber-800 ring-1 ring-inset ring-amber-200 transition-colors hover:bg-amber-50"
+                className="mb-3 inline-flex items-center gap-1.5 rounded-lg bg-white/10 px-3 py-1.5 text-[12.5px] font-semibold text-amber-200 ring-1 ring-inset ring-amber-300/30 transition-colors hover:bg-white/15"
               >
                 Arrivées et rapports du {format(selectedDate, "d MMMM yyyy", { locale: fr })} →
               </a>
@@ -1118,8 +1172,8 @@ export default function ProgrammeClient({
                 les internautes, reste dans le `<title>` et le sur-titre juste au-dessus.
                 Un autre jour que celui-ci devient « Courses du mardi 23 septembre ». */}
             <h1 className="text-[26px] font-bold leading-[1.08] tracking-tight sm:text-[34px] sm:leading-[1.04]" style={SG}>
-              <span className="bt-brillance bg-clip-text text-transparent">{isToday ? "Courses du jour" : "Courses"}</span>
-              <span className="text-stone-800">{isToday ? " — " : " du "}{dayName.toLowerCase()} {restDate}</span>
+              <span className="bt-brillance-nuit bg-clip-text text-transparent">{isToday ? "Courses du jour" : "Courses"}</span>
+              <span className="text-stone-100">{isToday ? " — " : " du "}{dayName.toLowerCase()} {restDate}</span>
             </h1>
 
             {programme && programme.nb_courses > 0 && (() => {
@@ -1129,8 +1183,8 @@ export default function ProgrammeClient({
                 { n: programme.nb_courses, l: "Courses" },
                 { n: programme.reunions.length, l: "Réunions" },
                 ...(isToday ? [
-                  { n: enDirect, l: "En direct", ton: enDirect > 0 ? "text-emerald-700" : undefined },
-                  { n: aVenir, l: "À venir", ton: "text-amber-700" },
+                  { n: enDirect, l: "En direct", ton: enDirect > 0 ? "text-emerald-400" : undefined },
+                  { n: aVenir, l: "À venir", ton: "text-amber-400" },
                 ] : []),
               ];
               return (
