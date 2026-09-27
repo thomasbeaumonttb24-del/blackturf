@@ -339,6 +339,14 @@ export interface UserDetail {
   par_type: Array<{ type_pari: string; nb: number; mise: number; net: number; nb_gagnes: number; roi: number | null }>;
   subscriptions: Array<{ sub_id: string; plan: string; periodicite: string; statut: string; periode_debut: string | null; periode_fin: string | null }>;
   nb_bets: number;
+  /** Absent sur une API antérieure au parrainage. */
+  parrainage?: {
+    code: string | null;
+    parraine_par: LienFiche | null;
+    filleuls: LienFiche[];
+    valides: number;
+    gagne_cents: number;
+  };
   bets: Array<{
     entry_id: string; date: string; type_pari: string; chevaux: string | null;
     mise: number; cote: number | null; resultat: string | null; gain_perte: number | null;
@@ -438,3 +446,80 @@ export const PROFIL_NET_LABELS: Record<string, string> = {
  *  projet (4 scrapers « ok » à zéro donnée pendant des semaines). Il reste rouge. */
 export const SCRAPERS_SAINS = ["ok", "ok_avec_echecs"];
 export const scraperSain = (statut: string) => SCRAPERS_SAINS.includes(statut);
+
+
+/* ───────────────────────────── parrainage ───────────────────────────── */
+
+export interface LienFiche {
+  user_id: string | null;
+  email: string;
+  statut: StatutParrainage;
+  etape_libelle: string;
+  created_at: string;
+  valide_at: string | null;
+}
+
+export type StatutParrainage = "en_attente" | "valide" | "refuse" | "annule";
+
+export interface CompteParrainage {
+  user_id: string | null;
+  email: string | null;
+  prenom: string | null;
+  plan: string | null;
+}
+
+export interface LienParrainage {
+  parrainage_id: string;
+  created_at: string;
+  parrain: CompteParrainage;
+  filleul: CompteParrainage;
+  statut: StatutParrainage;
+  etape: string;
+  etape_libelle: string;
+  motif: string | null;
+  motif_libelle: string | null;
+  remise_filleul_at: string | null;
+  valide_at: string | null;
+  credit_pose_at: string | null;
+  stripe_invoice_id: string | null;
+  paye_filleul_cents: number;
+}
+
+export interface ParrainClassement {
+  user_id: string;
+  email: string | null;
+  prenom: string | null;
+  plan: string | null;
+  code: string | null;
+  filleuls: number;
+  en_attente: number;
+  valides: number;
+  reportes: number;
+  refuses: number;
+  annules: number;
+  gagne_cents: number;
+  ca_filleuls_cents: number;
+  dernier_filleul_at: string | null;
+}
+
+export interface ParrainagesData {
+  resume: {
+    liens_generes: number;
+    parrains_actifs: number;
+    filleuls: number;
+    en_attente: number;
+    valides: number;
+    reportes: number;
+    refuses: number;
+    annules: number;
+    taux_conversion: number | null;
+    credits_parrains_cents: number;
+    remises_filleuls_cents: number;
+    cout_total_cents: number;
+    ca_filleuls_cents: number;
+    rendement: number | null;
+  };
+  parrains: ParrainClassement[];
+  liens: LienParrainage[];
+  evolution: Array<{ mois: string; inscrits: number; valides: number }>;
+}

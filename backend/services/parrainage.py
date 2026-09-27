@@ -613,6 +613,21 @@ ETAPES = {
 }
 
 
+# Mêmes étapes, vues par l'exploitant (console d'administration) : ni « votre
+# compte » ni « votre filleul », qui n'ont de sens que pour le parrain.
+ETAPES_ADMIN = {
+    "email_a_confirmer": "Inscrit — adresse e-mail à confirmer",
+    "attente_paiement": "Inscrit — en attente du premier paiement",
+    "paiement_en_cours": "Abonnement en cours de paiement",
+    "verification": "A payé — crédit du parrain en cours de pose",
+    "credite": "Abonné — parrain crédité de 5 €",
+    "reporte": "Abonné — crédit du parrain reporté (plafond du mois)",
+    "refuse": "Non éligible",
+    "parrain_inactif": "Non éligible — parrain inactif",
+    "annule": "Annulé — paiement remboursé ou contesté",
+}
+
+
 def _etape(lien: Parrainage, filleul: Optional[User], abonne: bool) -> str:
     from services.email_verification import email_confirme
     if lien.statut == "valide":
