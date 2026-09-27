@@ -343,47 +343,6 @@ function DayStrip({ selected, jourCourant, onSelect }: { selected: Date; jourCou
   );
 }
 
-/* ─── Piste en perspective (décor des bandeaux noirs) ─────
- * Une piste vue de biais, inclinée en CSS 3D, sur laquelle tournent quelques
- * chevaux-lumière. Du CSS pur : aucune bibliothèque 3D à charger, et la règle
- * `prefers-reduced-motion` de la page fige les chevaux. Décor uniquement. */
-const CHEVAUX_PISTE: Array<{ duree: number; decalage: number; couloir: string; couleur: string }> = [
-  { duree: 15, decalage: 0, couloir: "7%", couleur: "#FBBF24" },
-  { duree: 15.6, decalage: -1.2, couloir: "10%", couleur: "#34D399" },
-  { duree: 16.2, decalage: -2.6, couloir: "8%", couleur: "#D6CFC2" },
-  { duree: 16.8, decalage: -4.4, couloir: "11%", couleur: "#D6CFC2" },
-  { duree: 17.4, decalage: -6.1, couloir: "9%", couleur: "#F59E0B" },
-  { duree: 18, decalage: -8.3, couloir: "12%", couleur: "#D6CFC2" },
-];
-function PisteRelief({ className }: { className?: string }) {
-  return (
-    <div aria-hidden className={cn("pointer-events-none absolute -z-10 aspect-square [perspective:800px]", className)}>
-      <div className="absolute inset-0 [transform:rotateX(64deg)_rotateZ(-12deg)] [transform-style:preserve-3d]">
-        {/* lice extérieure, lumineuse */}
-        <div className="absolute inset-0 rounded-full border border-amber-300/60 shadow-[0_0_28px_rgba(245,158,11,.35),inset_0_0_28px_rgba(245,158,11,.18)]" />
-        {/* la piste */}
-        <div className="absolute inset-[4%] rounded-full border-[18px] border-amber-400/[.07]" />
-        <div className="absolute inset-[16%] rounded-full border border-amber-200/30" />
-        <div className="absolute inset-[10%] rounded-full border border-dashed border-white/10" />
-        {/* poteau d'arrivée */}
-        <div className="absolute left-1/2 top-0 h-[16%] w-[3px] -translate-x-1/2 bg-amber-200 shadow-[0_0_10px_#FBBF24]" />
-        {CHEVAUX_PISTE.map((c, i) => (
-          <div
-            key={i}
-            className="absolute rounded-full [animation-iteration-count:infinite] [animation-name:btTour] [animation-timing-function:linear]"
-            style={{ inset: c.couloir, animationDuration: `${c.duree}s`, animationDelay: `${c.decalage}s` }}
-          >
-            <span
-              className="absolute left-1/2 top-0 h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full"
-              style={{ background: c.couleur, boxShadow: `0 0 10px ${c.couleur}, 0 0 2px #fff inset` }}
-            />
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
 /* ─── Bandeau "Prochaine course" ────────────────────────── */
 function NextRaceBanner({ item }: { item: { course: CourseSummary; reunionNum: number } }) {
   const { course, reunionNum } = item;
@@ -407,10 +366,8 @@ function NextRaceBanner({ item }: { item: { course: CourseSummary; reunionNum: n
     <div className="bt-lisere relative rounded-[18px] p-[2px] shadow-[0_22px_44px_-26px_rgba(146,64,14,.6)]">
     <section aria-label="Prochaine course" className="overflow-hidden rounded-[16px] bg-white">
       {/* Bandeau noir : il porte l'identité de la course et l'action principale. Noir
-          et or plutôt que l'aplat jaune d'avant, trop criard en haut de page ; la piste
-          en perspective derrière rappelle l'hippodrome sans prendre de place. */}
+          et or plutôt que l'aplat jaune d'avant, trop criard en haut de page. */}
       <div className="relative isolate flex flex-wrap items-center gap-x-3 gap-y-2.5 overflow-hidden bg-[radial-gradient(120%_140%_at_100%_0%,rgba(245,158,11,.22)_0%,transparent_55%),linear-gradient(160deg,#241D14_0%,#0E0C09_70%)] px-4 py-3 sm:px-5">
-        <PisteRelief className="right-[-6%] top-[-70%] w-[46%] opacity-70 max-[479px]:w-[80%] max-[479px]:opacity-40" />
         <IconeTuile icone={Timer} className="from-amber-300 to-amber-500 text-stone-900 ring-amber-200/60 shadow-[inset_0_1px_0_rgba(255,255,255,.6),0_2px_0_#92400E,0_8px_14px_-6px_rgba(245,158,11,.6)]" />
         <div className="min-w-0 flex-1">
           <p className="m-0 flex items-center gap-2 text-[10.5px] font-bold uppercase tracking-[.14em] text-amber-300">
@@ -563,8 +520,8 @@ interface ApercuCourse {
   nb_ecartes: number;
   confiance: number | null;
   accord_marche: boolean | null;
-  /* Nombre de chevaux dont la cote PMU dépasse l'exchange de plus de 10 %.
-     Absent tant que l'API déployée ne le fournit pas. */
+  /* Nombre de chevaux payés au moins 8 % au-dessus de leur chance (cote PMU ÷
+     cote juste du modèle − 1) : la tuile « Écarts de prix » de la fiche course. */
   nb_ecarts_prix?: number;
 }
 
@@ -730,11 +687,11 @@ function TimelineRow({ course, reunionNum, vbCount, apercu, delay, onOuvrir }: {
             )}
             {nbEcarts > 0 && (
               <span
-                title="La cote PMU dépasse d'au moins 10 % celle du marché d'échange sur au moins un cheval de cette course"
+                title={`${nbEcarts} cheva${nbEcarts > 1 ? "ux payés" : "l payé"} au moins 8 % au-dessus de ${nbEcarts > 1 ? "leur" : "sa"} chance selon le modèle — même lecture que la fiche course`}
                 className="inline-flex items-center gap-1 rounded-full bg-sky-50 px-2 py-0.5 text-[11px] font-semibold text-sky-800 ring-1 ring-inset ring-sky-200"
               >
                 <ArrowLeftRight className="h-3 w-3" aria-hidden />
-                Écart de prix{nbEcarts > 1 ? <b className="font-bold tabular-nums"> ×{nbEcarts}</b> : null}
+                <b className="font-bold tabular-nums">{nbEcarts}</b> écart{nbEcarts > 1 ? "s" : ""} de prix
               </span>
             )}
             {apercu?.analysee && apercu.confiance != null && (
@@ -877,7 +834,7 @@ export default function ProgrammeClient({
   const { data: valueBets } = useSWR(
     isPaid && isToday ? "/value-bets-programme" : null,
     () => predictionsApi.valueBets(1).then((r) => r.data),
-    { refreshInterval: 120000 },
+    { refreshInterval: 60000 },
   );
   const vbByCourse = useMemo(() => {
     if (!valueBets) return {} as Record<string, number>;
@@ -892,7 +849,9 @@ export default function ProgrammeClient({
   const { data: apercuJour } = useSWR(
     `/programme-apercu/${format(selectedDate, "yyyy-MM-dd")}`,
     () => coursesApi.programmeApercu(format(selectedDate, "yyyy-MM-dd")).then((r) => r.data),
-    { refreshInterval: 300000, revalidateOnFocus: false },
+    // Chaque minute le jour même : les écarts de prix suivent les cotes, un aperçu
+    // de cinq minutes contredisait la fiche course ouverte au même moment.
+    { refreshInterval: isToday ? 60000 : 0, revalidateOnFocus: isToday },
   );
   const apercuByCourse = (apercuJour as { courses?: Record<string, ApercuCourse> } | undefined)?.courses ?? {};
 
@@ -1225,7 +1184,7 @@ export default function ProgrammeClient({
 
       <div className="mx-auto max-w-4xl space-y-5 px-4 py-6 sm:space-y-6 sm:px-6 sm:py-8 lg:px-8">
 
-        {/* ── EN-TÊTE : bandeau noir et or, piste en perspective en fond ── */}
+        {/* ── EN-TÊTE : bandeau noir et or ── */}
         <header className="relative isolate overflow-hidden rounded-[22px] bg-[linear-gradient(160deg,#261F16_0%,#12100C_55%,#0B0907_100%)] px-4 pb-4 pt-5 ring-1 ring-inset ring-amber-500/25 shadow-[inset_0_1px_0_rgba(255,255,255,.08),0_26px_48px_-28px_rgba(17,12,5,.85)] sm:px-6 sm:pb-5 sm:pt-6">
           {/* Halos dorés qui dérivent lentement, atténués sur le noir. */}
           <span aria-hidden className="bt-halo-a pointer-events-none absolute -left-16 -top-20 -z-10 h-56 w-56 rounded-full bg-amber-500/20 blur-3xl" />
@@ -1233,7 +1192,6 @@ export default function ProgrammeClient({
           <span aria-hidden className="bt-halo-c pointer-events-none absolute left-1/3 top-6 -z-10 h-40 w-40 rounded-full bg-yellow-400/10 blur-3xl" />
           {/* Quadrillage discret qui s'efface vers le bas : donne de la profondeur au noir. */}
           <span aria-hidden className="pointer-events-none absolute inset-0 -z-10 bg-[linear-gradient(rgba(255,255,255,.035)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,.035)_1px,transparent_1px)] bg-[size:26px_26px] [mask-image:linear-gradient(180deg,#000,transparent_80%)]" />
-          <PisteRelief className="right-[-4%] top-[-38%] w-[44%] max-[479px]:right-[-35%] max-[479px]:top-[-30%] max-[479px]:w-[95%] max-[479px]:opacity-50" />
           <span
             aria-hidden
             className="pointer-events-none absolute max-[479px]:hidden"
