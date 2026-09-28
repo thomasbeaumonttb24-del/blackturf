@@ -114,3 +114,10 @@ def test_oeilleres_champ_de_la_sortie():
 def test_incident_reste_a_zero():
     """Place 99 (incident) : 0 quel que soit le champ."""
     assert F.score_position(99, F.champ_sortie(_h(99, 16), 10)) == 0.0
+
+
+def test_reduction_km_en_dixiemes_corrigee_seulement_en_v2():
+    assert F.hist_col("reduction_km", False) == "h.reduction_km"
+    sql = F.hist_col("reduction_km", True)
+    assert "COALESCE(h.reduction_km, tw.reduction_km)" in sql
+    assert f"< {F.REDUCTION_KM_DIXIEMES_MAX}" in sql and "* 10" in sql

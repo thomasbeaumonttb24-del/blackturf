@@ -254,10 +254,21 @@ def hist_dedup_actif(force: Optional[bool] = None) -> bool:
         return False
 
 
+# Réduction kilométrique des copies PMU : 17 696 lignes externes (et aucune interne)
+# valent moins de 10 s/km, soit le vrai chrono divisé par 10 (7,83 pour 78,3 sur la
+# même course, audit du 2026-09-28). Rien entre 10 et 50 : la frontière est nette.
+# `min()` retenait ce 7,8 comme « meilleure réduction » du cheval.
+REDUCTION_KM_DIXIEMES_MAX = 10.0
+
+
 def hist_col(col: str, dedup: bool) -> str:
     """Expression SQL d'une colonne d'historique : complétée par la copie si dédoublonné."""
     if dedup and col in HIST_COLONNES_COMPLETEES:
-        return f"COALESCE(h.{col}, tw.{col})"
+        expr = f"COALESCE(h.{col}, tw.{col})"
+        if col == "reduction_km":
+            return (f"(CASE WHEN {expr} > 0 AND {expr} < {REDUCTION_KM_DIXIEMES_MAX} "
+                    f"THEN {expr} * 10 ELSE {expr} END)")
+        return expr
     return f"h.{col}"
 
 
