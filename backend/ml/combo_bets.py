@@ -623,9 +623,11 @@ def enumerate_bet_candidates(
         # Le rapport parimutuel réel dépend du pool, inconnu avant la course. On neutralise
         # donc l'EV des combos (0.0) → ils n'entrent plus comme "value" mais seulement
         # comme coup/spéculatif plafonné. Simple Gagnant/Placé gardent leur EV (cote réelle).
+        _neutralise = False
         try:
             from ml.algo_flags import FLAGS as _AF
-            _ev_val = _ev(proba, rapport) if (not _AF.combo_ev_none or "Simple" in type_pari) else 0.0
+            _neutralise = bool(_AF.combo_ev_none) and "Simple" not in type_pari
+            _ev_val = 0.0 if _neutralise else _ev(proba, rapport)
         except Exception:
             _ev_val = _ev(proba, rapport)
         cands.append({
@@ -635,6 +637,9 @@ def enumerate_bet_candidates(
             "proba_gain": round(float(proba), 4),
             "rapport_estime": round(rapport, 1),
             "ev": round(_ev_val, 3),
+            # EV mise à 0 par combo_ev_none : la calibration de generer_plan la
+            # recalcule aujourd'hui (cf. mise_calculator.EV_NEUTRALISEE_RESPECTEE).
+            "_ev_neutralise": _neutralise,
             "edge": round(float(sum(edge_by_idx[i] for i in sel) / len(sel)), 4),
             "texte_explication": texte,
         })

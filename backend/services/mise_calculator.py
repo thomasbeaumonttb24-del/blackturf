@@ -31,6 +31,19 @@ CI_WIDTH_PENALTY = 3.0
 # gel et le départ est de 30 %, donc ce seuil n'est pas théorique.
 _DERIVE_RAPPORT_SIGNALEE = 0.15
 
+# EV DES COMBINAISONS NEUTRALISÉES (drapeau combo_ev_none, cf. ml.combo_bets) : la
+# calibration estimé→réel ci-dessous recalculait `ev = p × rapport − 1` dès qu'un
+# facteur ≠ 1 existait, ce qui réactivait l'EV « mécaniquement positive » que le
+# drapeau devait supprimer, pour les seuls types calibrés (audit 2026-09-28, M1).
+# False = comportement en service (recalcul) ; True = l'EV neutralisée reste à 0.
+# À ne basculer qu'après mesure au banc de rejeu : cela change la sélection.
+EV_NEUTRALISEE_RESPECTEE = False
+
+
+def _ev_recalculee(c: dict) -> bool:
+    """La calibration doit-elle recalculer l'EV de ce candidat ?"""
+    return not (EV_NEUTRALISEE_RESPECTEE and c.get("_ev_neutralise"))
+
 # Le filet « chaque course est jouée » respecte-t-il le plafond de rang du profil ?
 # False = comportement d'avant le 2026-09-01 (le plafond était ignoré par le repli),
 # conservé pour que le banc de mesure A/B puisse rejouer l'ancienne version.
@@ -1568,7 +1581,8 @@ def generer_plan(
                                                zone=zone)
                 if f and f != 1.0:
                     c["rapport_estime"] = round(float(c["rapport_estime"]) * f, 1)
-                    c["ev"] = round(float(c["proba_gain"]) * c["rapport_estime"] - 1.0, 4)
+                    if _ev_recalculee(c):
+                        c["ev"] = round(float(c["proba_gain"]) * c["rapport_estime"] - 1.0, 4)
                     c["_rapport_cal_f"] = round(float(f), 3)
                     c["_rapport_cal_f_exact"] = float(f)
         except Exception as e:  # noqa: BLE001 — repli inchangé, mais visible
@@ -1591,7 +1605,8 @@ def generer_plan(
                 fp = proba_realization_factor(c.get("type_pari"), rapport_calib)
                 if fp and fp != 1.0:
                     c["proba_gain"] = round(float(c["proba_gain"]) * fp, 4)
-                    c["ev"] = round(float(c["proba_gain"]) * float(c["rapport_estime"]) - 1.0, 4)
+                    if _ev_recalculee(c):
+                        c["ev"] = round(float(c["proba_gain"]) * float(c["rapport_estime"]) - 1.0, 4)
                     c["_proba_cal_f"] = round(float(fp), 3)
                     c["_proba_cal_f_exact"] = float(fp)
         except Exception as e:  # noqa: BLE001 — repli inchangé, mais visible
@@ -4071,10 +4086,12 @@ def _prix_live_calibre(c: dict, p: dict) -> tuple[float, float, float]:
     fr, fp = float(fr or 1.0), float(fp or 1.0)
     if fr != 1.0:
         rap = round(rap * fr, 1)
-        ev = round(float(proba) * rap - 1.0, 4)
+        if _ev_recalculee(c):
+            ev = round(float(proba) * rap - 1.0, 4)
     if fp != 1.0:
         proba = round(float(proba) * fp, 4)
-        ev = round(float(proba) * float(rap) - 1.0, 4)
+        if _ev_recalculee(c):
+            ev = round(float(proba) * float(rap) - 1.0, 4)
     return rap, proba, ev
 
 
