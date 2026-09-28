@@ -24,6 +24,24 @@ MIN_PROFIL_WEIGHTS_RUNS = 30
 MIN_RAPPORT_CALIB_RUNS = 30
 
 
+def sans_modeles_retires(alias: str) -> str:
+    """Fragment SQL à ajouter au WHERE d'un APPRENTISSAGE lisant prediction_evaluation.
+
+    Écarte les prédictions des modèles RETIRÉS (`model_versions.est_rollback`) :
+    v545 à v547 ont été entraînés sur des features recalculées avec des valeurs
+    d'après course (fuite du 24/09) puis retirés. Leurs 1 190 prédictions restaient
+    `is_replayable` et nourrissaient le mélange, les isotones, le méta-apprenant…
+    (audit du 2026-09-28).
+
+    Réservé aux apprentissages : ces prédictions ont été servies, les statistiques
+    publiques doivent continuer de les compter. Une prédiction sans version connue
+    (NULL) est gardée, comme avant.
+    """
+    return (f" AND NOT EXISTS (SELECT 1 FROM model_versions mv_retire"
+            f" WHERE mv_retire.version_id = {alias}.model_version_id"
+            f" AND mv_retire.est_rollback = true)")
+
+
 async def missing_snapshot_causes(session: AsyncSession) -> dict:
     """Pourquoi une évaluation retombe-t-elle sur la ligne legacy mutable ?
 

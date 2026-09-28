@@ -50,6 +50,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ml.plackett_luce import EXPOSANTS_NEUTRES, forces_par_position, p_ordre_exact
+from ml.prediction_evaluation import sans_modeles_retires
 
 log = structlog.get_logger(module="harville_calibration")
 
@@ -165,13 +166,13 @@ async def _charger_courses(session: AsyncSession) -> list[tuple[np.ndarray, list
     VICTOIRE brutes du modèle, normalisées par course — exactement ce que
     `ml.combo_bets` passe à `_Sim`.
     """
-    rows = (await session.execute(text("""
+    rows = (await session.execute(text(f"""
         SELECT pe.course_id, pa.numero, pe.proba_top1_raw, r.classement
         FROM prediction_evaluation pe
         JOIN participations pa ON pa.participation_id = pe.participation_id
         JOIN courses c         ON c.course_id         = pe.course_id
         JOIN resultats r       ON r.course_id         = pe.course_id
-        WHERE pe.is_replayable = true
+        WHERE pe.is_replayable = true{sans_modeles_retires('pe')}
           AND pe.proba_top1_raw IS NOT NULL
           AND r.classement IS NOT NULL
           AND c.date_heure IS NOT NULL

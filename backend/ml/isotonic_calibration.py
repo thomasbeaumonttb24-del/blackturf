@@ -24,6 +24,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from scripts.calibration_longshots import fetch_winners
+from ml.prediction_evaluation import sans_modeles_retires
 
 log = structlog.get_logger(module="isotonic_calibration")
 
@@ -81,7 +82,7 @@ async def _fetch_proba_outcomes(session: AsyncSession) -> list[tuple[float, int,
           AND c.date_heure IS NOT NULL
           AND pr.created_at IS NOT NULL
           AND pr.created_at < c.date_heure
-          AND pr.is_replayable = true
+          AND pr.is_replayable = true{sans_modeles_retires('pr')}
     """))
     winners = await fetch_winners(session)
     out: list[tuple[float, int, str]] = []

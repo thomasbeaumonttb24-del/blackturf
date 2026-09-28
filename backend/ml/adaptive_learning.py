@@ -28,6 +28,7 @@ from datetime import datetime
 from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
+from ml.prediction_evaluation import sans_modeles_retires
 
 log = structlog.get_logger(module="adaptive_learning")
 
@@ -795,14 +796,14 @@ async def fit_temperature_holdout(session: AsyncSession,
     from ml.isotonic_calibration_top3 import load_curve as _t3_load
 
     try:
-        rows = (await session.execute(text("""
+        rows = (await session.execute(text(f"""
             SELECT pe.course_id, pa.numero, pe.proba_top3_raw,
                    c.nb_partants, c.date_heure, r.classement
             FROM prediction_evaluation pe
             JOIN participations pa ON pa.participation_id = pe.participation_id
             JOIN courses c         ON c.course_id         = pe.course_id
             JOIN resultats r       ON r.course_id         = pe.course_id
-            WHERE pe.is_replayable = true
+            WHERE pe.is_replayable = true{sans_modeles_retires('pe')}
               AND pe.proba_top3_raw IS NOT NULL
               AND r.classement IS NOT NULL
               AND c.date_heure IS NOT NULL
