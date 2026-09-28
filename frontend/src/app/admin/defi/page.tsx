@@ -37,8 +37,6 @@ interface LigneCloture {
 
 interface Cloture {
   mois: string;
-  /** Mois d'avant le lancement officiel : aucune récompense. */
-  essai?: boolean;
   mois_termine: boolean;
   paris_en_attente: number;
   recompenses: { rang: number; plan: string; jours: number }[];
@@ -58,6 +56,8 @@ function moisParis(): string {
   return `${p.find((x) => x.type === "year")?.value}-${p.find((x) => x.type === "month")?.value}`;
 }
 
+const PREMIER_MOIS_DEFI = "2026-10";
+
 function decaler(mois: string, delta: number): string {
   const [a, m] = mois.split("-").map(Number);
   const d = new Date(Date.UTC(a, m - 1 + delta, 1));
@@ -66,10 +66,11 @@ function decaler(mois: string, delta: number): string {
 
 export default function AdminDefiPage() {
   const courant = useMemo(() => moisParis(), []);
-  // Par défaut le mois précédent : c'est celui qu'on vient clôturer.
-  const [mois, setMois] = useState(() => decaler(courant, -1));
+  // Par défaut le mois précédent : c'est celui qu'on vient clôturer. Jamais avant le
+  // premier mois du défi (octobre 2026).
+  const [mois, setMois] = useState(() => (decaler(courant, -1) < PREMIER_MOIS_DEFI ? PREMIER_MOIS_DEFI : decaler(courant, -1)));
   const [envoi, setEnvoi] = useState<number | null>(null);
-  const { data, mutate, isLoading } = useSWR<Cloture>(["/admin/defi/cloture", mois],
+  const { data, mutate, isLoading, error } = useSWR<Cloture>(["/admin/defi/cloture", mois],
     () => adminApi.defiCloture(mois).then((r) => r.data));
 
   async function recompenser(l: LigneCloture) {
@@ -102,8 +103,8 @@ export default function AdminDefiPage() {
         desc="Vérifiez les premiers du mois clos, puis remettez les récompenses. Le plan offert expire tout seul et le plan précédent revient, sauf si le joueur a souscrit entre-temps."
         actions={
           <div className="flex items-center gap-1 rounded-xl border border-border p-1">
-            <button type="button" aria-label="Mois précédent" onClick={() => setMois(decaler(mois, -1))}
-              className="inline-flex h-9 w-9 items-center justify-center rounded-lg hover:bg-muted"><ChevronLeft className="h-4 w-4" /></button>
+            <button type="button" aria-label="Mois précédent" disabled={mois <= PREMIER_MOIS_DEFI} onClick={() => setMois(decaler(mois, -1))}
+              className="inline-flex h-9 w-9 items-center justify-center rounded-lg hover:bg-muted disabled:opacity-30"><ChevronLeft className="h-4 w-4" /></button>
             <span className="min-w-[120px] text-center text-[13px] font-semibold">{moisLabel(mois)}</span>
             <button type="button" aria-label="Mois suivant" disabled={mois >= courant} onClick={() => setMois(decaler(mois, 1))}
               className="inline-flex h-9 w-9 items-center justify-center rounded-lg hover:bg-muted disabled:opacity-30"><ChevronRight className="h-4 w-4" /></button>
@@ -111,12 +112,7 @@ export default function AdminDefiPage() {
         }
       />
 
-      {data?.essai && (
-        <Encart ton="attention" icone={<AlertTriangle className="h-4 w-4" />}>
-          Mois d&apos;essai, avant le lancement officiel : le classement s&apos;affiche mais aucune récompense n&apos;est remise.
-        </Encart>
-      )}
-      {data && !data.essai && !data.mois_termine && (
+      {data && !data.mois_termine && (
         <Encart ton="attention" icone={<AlertTriangle className="h-4 w-4" />}>
           Mois en cours : le classement bouge encore, aucune récompense ne peut être remise.
         </Encart>
@@ -128,7 +124,9 @@ export default function AdminDefiPage() {
       )}
 
       <Panneau titre="Top 10 du mois" desc="Joueurs classés uniquement (minimum de paris atteint, comptes admin et suspendus exclus).">
-        {isLoading || !data ? <div className="p-5"><Squelette lignes={5} /></div> : data.lignes.length === 0 ? (
+        {error && !data ? (
+          <p className="p-5 text-[13px] text-muted-foreground">Chargement impossible. <button type="button" className="font-semibold underline" onClick={() => mutate()}>Réessayer</button></p>
+        ) : isLoading || !data ? <div className="p-5"><Squelette lignes={5} /></div> : data.lignes.length === 0 ? (
           <p className="p-5 text-[13px] text-muted-foreground">Aucun joueur classé ce mois-ci.</p>
         ) : (
           <ul className="divide-y divide-border/60">
@@ -152,7 +150,7 @@ export default function AdminDefiPage() {
                       {st && <Puce ton={st.ton}>{st.txt}</Puce>}
                     </div>
                   </div>
-                  {lot && !l.recompense && !data.essai && (
+                  {lot && !l.recompense && (
                     <button type="button" onClick={() => recompenser(l)}
                       disabled={!data.mois_termine || data.paris_en_attente > 0 || envoi !== null}
                       className="inline-flex min-h-[2.75rem] shrink-0 items-center justify-center gap-2 rounded-xl bg-brand-gold px-4 text-[13px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40">

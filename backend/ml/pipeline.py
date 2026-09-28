@@ -62,7 +62,12 @@ H2H_TOLERANCE = 0.002
 # promue, elle servait l'arrivée apprise. Au-delà de ce seuil, le modèle a appris
 # quelque chose que personne ne sait avant le départ : jamais promu, même en
 # remplacement structurel.
-FUITE_AVANCE_MARCHE_MAX = 0.08
+# 0,08 était trop large : le 25/09 au matin, un réentraînement sur des features
+# recalculées avec les statistiques de saison ACTUELLES (jockey, entraîneur,
+# carrière — qui comptent des courses postérieures) passait à +0,046, et même le
+# champion v544 remontait à +0,019 sur ce hold-out contre −0,018 à sa création.
+# Le seuil reste au-dessus du record honnête (+0,020), sans rien laisser au-delà.
+FUITE_AVANCE_MARCHE_MAX = 0.03
 
 
 def _fuite_suspectee(h2h: Optional[dict]) -> bool:
@@ -2402,6 +2407,34 @@ async def _do_retraining(mois: int, label: str) -> dict:
 # ─────────────────────────────────────────────
 # Prédictions
 # ─────────────────────────────────────────────
+async def version_servie(session: AsyncSession, model) -> Optional[str]:
+    """`version_id` du modèle réellement chargé depuis `current_model.pkl`.
+
+    Les prédictions portaient la ligne `model_versions.est_actif`, qui peut ne pas
+    être le fichier servi (promotion en cours, retour arrière manuel) : des
+    prédictions de v545 ont été attribuées à v544. Le pickle connaît son numéro
+    depuis `BlackTurfEnsemble.save` ; les modèles plus anciens (numéro 0)
+    retombent sur `est_actif`.
+    """
+    num = int(getattr(model, "version_num", 0) or 0)
+    actif = (await session.execute(
+        select(ModelVersion).where(ModelVersion.est_actif == True)  # noqa: E712
+    )).scalars().first()
+    if num <= 0:
+        return actif.version_id if actif else None
+    if actif is not None and actif.version_num == num:
+        return actif.version_id
+    servi = (await session.execute(
+        select(ModelVersion).where(ModelVersion.version_num == num)
+    )).scalars().first()
+    log.warning("pipeline.predict.version_diverge", servi=num,
+                actif=actif.version_num if actif else None,
+                connue=servi is not None)
+    if servi is not None:
+        return servi.version_id
+    return actif.version_id if actif else None
+
+
 async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Optional[dict]:
     """
     Génère les prédictions + recommandations pour une course à venir.
@@ -2765,14 +2798,29 @@ async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Option
         # ci-dessus, +0,011 sur la cote seule, classement à parité. Remplace la
         # proba de victoire servie quand des paramètres sont retenus ET que tous les
         # partants sont cotés ; sinon la chaîne ci-dessus reste servie telle quelle.
+        #
+        # COVARIABLES DU MARCHÉ (2026-09-27) : mouvement de cote sur 30 min, cote Geny,
+        # favori du marché, lus dans les features de CE calcul. Servies seulement si
+        # le nocturne les a retenues (elles battent les deux paramètres hors
+        # échantillon) ; sinon, ou si elles ne se calculent pas, deux paramètres.
         _melange_applique = False
+        _melange_etendu = False
         try:
             from ml.algo_flags import FLAGS as _AFma
             if _AFma.melange_arrivees:
-                from ml.melange_arrivees import appliquer as _ma_appliquer, en_service as _ma_params
-                _ma = _ma_params()
+                from ml import melange_arrivees as _ma_mod
+                _ma = _ma_mod.en_service()
                 if _ma is not None:
-                    _p_ma = _ma_appliquer(_raw_p1_snap, cotes_pmu, *_ma)
+                    _p_ma = None
+                    _ext = _ma_mod.en_service_etendu() if _AFma.melange_covariables else None
+                    if _ext is not None:
+                        _cov = _ma_mod.covariables_de_features(features_list, cotes_pmu)
+                        if _cov is not None:
+                            _p_ma = _ma_mod.appliquer(_raw_p1_snap, cotes_pmu, _ext[0], _ext[1],
+                                                      covariables=_cov, gammas=_ext[2])
+                            _melange_etendu = _p_ma is not None
+                    if _p_ma is None:
+                        _p_ma = _ma_mod.appliquer(_raw_p1_snap, cotes_pmu, *_ma)
                     if _p_ma is not None:
                         probas_top1 = _p_ma
                         _melange_applique = True
@@ -2817,12 +2865,8 @@ async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Option
             {"cid": course_id},
         )
 
-        # Récupérer version modèle active
-        mv_result = await session.execute(
-            select(ModelVersion).where(ModelVersion.est_actif == True)
-        )
-        mv = mv_result.scalars().first()
-        mv_id = mv.version_id if mv else None
+        # Version du modèle QUI a produit ces probas (cf. `version_servie`).
+        mv_id = await version_servie(session, model)
 
         # Rang prédit = ordre par PROBABILITÉ finale (proba_top1 desc, tiebreak top3).
         # Doit être cohérent avec les probas affichées + le plan de mise. Calculé ICI
@@ -3359,7 +3403,8 @@ async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Option
             log.warning("pipeline.markowitz.failed", error=str(e))
 
         log.info("pipeline.predict.done", course_id=course_id, nb_predictions=len(predictions),
-                 melange_arrivees=_melange_applique, source_victoire=_source_victoire,
+                 melange_arrivees=_melange_applique, melange_etendu=_melange_etendu,
+                 source_victoire=_source_victoire,
                  placement_technique=_placement_technique)
         return fiche
 

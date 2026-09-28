@@ -1440,11 +1440,12 @@ async def _palmares_rows(db: AsyncSession) -> dict:
 # mais invisible : un ticket que personne n'a vu ne compte pas au palmarès.
 QUINTE_MODULE_DEPUIS = datetime(2026, 9, 24, 17, 8, 10, tzinfo=timezone.utc)
 
-# Version publique du bloc : comptages seulement. Le ROI et les agrégats d'argent
-# restent réservés à l'admin (règle produit de `/stats/public` et du palmarès) —
+# Version publique du bloc : comptages + montant total encaissé (`retour`), qui est
+# ce que le site affiche. La mise, le net et le ROI restent réservés à l'admin :
 # mise + retour publiés suffiraient à recalculer le ROI.
 _QUINTE_CHAMPS_PUBLICS = ("disponible", "nb_tickets", "nb_courses", "nb_en_attente",
-                          "nb_tickets_gagnants", "nb_bonus", "nb_cinq_sur_cinq", "depuis")
+                          "nb_tickets_gagnants", "nb_bonus", "nb_cinq_sur_cinq", "depuis",
+                          "retour")
 
 
 def _quinte_public(bloc: dict) -> dict:
@@ -1473,11 +1474,12 @@ async def _quinte_palmares(db: AsyncSession) -> dict:
     vide = {"disponible": False, "nb_tickets": 0, "nb_courses": 0, "nb_en_attente": 0,
             "mise_totale": 0.0, "retour": 0.0, "net": 0.0, "roi": None,
             "nb_tickets_gagnants": 0, "nb_bonus": 0, "nb_cinq_sur_cinq": 0,
-            "par_profil": {}, "depuis": None}
+            "par_profil": {}, "depuis": None, "gagnants": []}
     try:
         rows = (await db.execute(_text("""
             SELECT r.course_id, r.profil, r.plan, c.nb_partants, c.date_heure,
-                   res.classement, res.rapports, res.rapports_detail
+                   res.classement, res.rapports, res.rapports_detail,
+                   c.hippodrome_nom, c.numero_reunion, c.numero, r.created_at, r.settled_at
             FROM profil_run_log r
             JOIN courses c ON c.course_id = r.course_id
             JOIN resultats res ON res.course_id = r.course_id
@@ -1516,10 +1518,14 @@ async def _quinte_palmares(db: AsyncSession) -> dict:
         except (TypeError, ValueError):
             return None
 
-    out = dict(vide, par_profil={})
+    def _iso(v):
+        return v.isoformat() if hasattr(v, "isoformat") else v
+
+    out = dict(vide, par_profil={}, gagnants=[])
     courses: set = set()
     depuis = None
-    for cid, profil, plan, nb_part, dh, classement, rapports, detail in rows:
+    for (cid, profil, plan, nb_part, dh, classement, rapports, detail,
+         hippo, n_reunion, n_course, created_at, settled_at) in rows:
         module = (_json(plan) or {}).get("module_quinte")
         classement = _json(classement) or []
         if not isinstance(module, dict) or not classement:
@@ -1555,6 +1561,34 @@ async def _quinte_palmares(db: AsyncSession) -> dict:
         p["mise_totale"] += bilan["total_mise"]
         p["retour"] += bilan["total_gain"]
         p["nb_bonus"] += nb_bonus
+        # Chaque combinaison payée devient un « pari gagné » du palmarès, au même
+        # format que ceux du plan principal (listes récents / records). Elles
+        # n'entrent pas dans les totaux du plan principal : cf. `_avec_quinte`.
+        if n_reunion and n_course:
+            code = f"R{n_reunion}C{n_course}"
+        else:
+            m = re.search(r"(R\d+C\d+)", str(cid))
+            code = m.group(1) if m else None
+        mise_c = float(bilan.get("mise_par_combinaison") or 0)
+        for g in bilan["gagnantes"]:
+            gain = float(g["gain"])
+            out["gagnants"].append({
+                "profil": profil,
+                "course_id": cid,
+                "code": code,
+                "hippodrome": hippo,
+                "date": _iso(dh),
+                "type_pari": f"Quinté+ · {g.get('rang') or 'Désordre'}",
+                "chevaux": list(g["combinaison"]),
+                "mise": round(mise_c, 2),
+                "gain": round(gain, 2),
+                "benefice": round(gain - mise_c, 2),
+                "rapport": round(gain / mise_c, 2) if mise_c > 0 else None,
+                "rapport_vise": None,
+                "fige_avant_course": True,
+                "fige_le": _iso(created_at),
+                "regle_le": _iso(settled_at),
+            })
 
     mise, retour = round(out["mise_totale"], 2), round(out["retour"], 2)
     for p in out["par_profil"].values():
@@ -1571,6 +1605,16 @@ async def _quinte_palmares(db: AsyncSession) -> dict:
         "depuis": (depuis.isoformat() if hasattr(depuis, "isoformat") else depuis) if depuis else None,
     })
     return out
+
+
+def _avec_quinte(data: dict, quinte: dict) -> tuple[list, list]:
+    """Listes « paris gagnés » (récents, records) du palmarès, tickets Quinté+
+    gagnants compris. Les totaux (`n`, `total_gain`…) restent ceux du plan
+    principal : le Quinté+ a sa propre ligne de chiffres."""
+    q = quinte.get("gagnants") or []
+    gagnants = sorted(data["gagnants"] + q, key=lambda g: g.get("date") or "", reverse=True)
+    top = sorted(data["top_gains"] + q, key=lambda x: x["benefice"], reverse=True)[:30]
+    return gagnants, top
 
 
 _PALMARES_INTEGRITE = (
@@ -1737,8 +1781,8 @@ async def stats_palmares_public(
         gagnants : sans ce dénominateur, n'afficher que les paris gagnants serait un
         biais du survivant. Le front doit présenter les deux ensemble.
 
-    Ce qui N'EST PAS exposé : le ROI et les agrégats de gains par profil restent
-    réservés à l'admin (exigence produit déjà appliquée à `/stats/public`).
+    Ce qui N'EST PAS exposé : le ROI, la mise, le bénéfice net et les agrégats par
+    profil restent réservés à l'admin — seul le total brut `total_gain` est public.
     """
     CACHE_KEY = "stats:palmares-public"
     cached = await _cache_get(redis, CACHE_KEY)
@@ -1746,20 +1790,27 @@ async def stats_palmares_public(
         return cached
 
     data = await _palmares_rows(db)
+    quinte = await _quinte_palmares(db)
+    gagnants, top_gains = _avec_quinte(data, quinte)
     result = {
         # Volumes alignés sur ce que la page track-record sait dérouler via ses
         # boutons « voir plus » (50 récents / 30 records). Avec l'ancien cap à 10,
         # un visiteur anonyme recevait exactement 10 lignes : le bouton, conditionné
         # à `limite < longueur`, ne s'affichait jamais et la liste semblait close.
-        "top_gains": data["top_gains"][:30],
-        "gagnants": data["gagnants"][:50],
+        "top_gains": top_gains[:30],
+        "gagnants": gagnants[:50],
         "nb_paris_gagnes": data["n"],
         "nb_courses_gagnantes": data["n_courses"],
         "nb_courses_reglees": data["n_courses_reglees"],
+        # Gains bruts encaissés (somme des rapports officiels des paris gagnés) :
+        # c'est le chiffre phare du hero de la page track-record, qui doit être le
+        # même pour un visiteur et pour un membre. La mise, le bénéfice net et le
+        # ROI restent, eux, réservés à l'admin.
+        "total_gain": data["total_gain"],
         # Ticket Quinté+ : ligne SÉPARÉE, jamais mêlée aux paris ni aux totaux
         # ci-dessus. Version publique = comptages seulement (pas de ROI ni de
         # montants agrégés, cf. _quinte_public) ; l'admin a le bloc complet.
-        "quinte": _quinte_public(await _quinte_palmares(db)),
+        "quinte": _quinte_public(quinte),
         "integrite": data["integrite"],
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
@@ -1868,7 +1919,8 @@ async def stats_palmares_gagnants(
     `/stats/palmares-public`) ; seuls les agrégats ROI/gains par profil, réservés à
     l'admin, sont calculés ici."""
     data = await _palmares_rows(db)
-    gagnants = data["gagnants"]
+    quinte = await _quinte_palmares(db)
+    gagnants, top_gains = _avec_quinte(data, quinte)
     by_profil = data["by_profil"]
 
     profils = []
@@ -1890,14 +1942,15 @@ async def stats_palmares_gagnants(
         # Liste = 100 paris gagnants les plus récents (le résumé par profil + les
         # totaux ci-dessous portent eux sur TOUTES les courses analysées).
         "gagnants": gagnants[:100],
-        "top_gains": data["top_gains"],
+        "top_gains": top_gains,
         "n": data["n"],
         "n_courses": data["n_courses"],
         "nb_courses_reglees": data["n_courses_reglees"],
         "total_gain": data["total_gain"],
         "total_benefice": round(data["total_gain"] - data["total_mise"], 2),
         "profils": profils,
-        "quinte": await _quinte_palmares(db),   # ligne à part, hors totaux ci-dessus
+        # Ligne à part, hors totaux ci-dessus (ses tickets gagnants figurent dans les listes).
+        "quinte": {k: v for k, v in quinte.items() if k != "gagnants"},
         "integrite": data["integrite"],
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }

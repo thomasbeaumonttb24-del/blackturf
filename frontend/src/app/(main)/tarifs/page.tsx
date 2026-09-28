@@ -1,11 +1,12 @@
 import type { Metadata } from "next";
 import { OG_IMAGE, jsonLd } from "@/lib/seo";
 import Link from "next/link";
-import { Check, X, Zap, ChevronRight, Calculator } from "lucide-react";
+import { Check, X, Zap, ChevronRight, Calculator, Gift } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { CheckoutButton } from "@/components/billing/CheckoutButton";
+import { MentionPaiement } from "@/components/billing/MentionPaiement";
 
 export const metadata: Metadata = {
   // Le corps de la page employait déjà trente et une fois le vocabulaire de l'IA sans
@@ -54,6 +55,10 @@ const offersJsonLd = {
 // FAQPage : depuis le 7 mai 2026, Google ne produit plus aucun résultat enrichi à partir de
 // ce type. Le balisage resterait valide, mais sans le moindre effet en recherche.
 const FAQ = [
+  {
+    q: "Comment fonctionne le parrainage ?",
+    a: "Partagez votre lien personnel (Profil → Parrainage). Votre ami a 5 € de remise sur son premier abonnement, et dès qu'il a payé, 5 € sont déduits de votre prochaine mensualité. 4 amis abonnés dans le mois suffisent pour un mois Expert offert, 3 pour un mois Standard ; au-delà, vos crédits sont reportés au mois suivant.",
+  },
   {
     q: "Puis-je annuler à tout moment ?",
     a: "Oui, sans frais ni condition. Votre abonnement reste actif jusqu'à la fin de la période.",
@@ -181,9 +186,7 @@ export default function TarifsPage() {
                 est exigée depuis la mise en place de l'essai unique par compte. La FAQ de
                 l'accueil disait déjà l'inverse de cette ligne. Ce qui est vrai, et qui est le
                 vrai argument, c'est qu'aucun prélèvement n'a lieu avant le terme. */}
-            <p className="text-center text-xs text-muted-foreground mt-2">
-              Carte requise, aucun prélèvement avant la fin de l&apos;essai
-            </p>
+            <MentionPaiement />
           </CardContent>
         </Card>
 
@@ -227,12 +230,51 @@ export default function TarifsPage() {
                 est exigée depuis la mise en place de l'essai unique par compte. La FAQ de
                 l'accueil disait déjà l'inverse de cette ligne. Ce qui est vrai, et qui est le
                 vrai argument, c'est qu'aucun prélèvement n'a lieu avant le terme. */}
-            <p className="text-center text-xs text-muted-foreground mt-2">
-              Carte requise, aucun prélèvement avant la fin de l&apos;essai
-            </p>
+            <MentionPaiement />
           </CardContent>
         </Card>
       </div>
+
+      {/* Parrainage : l'argument « abonnement gratuit » dit là où l'on regarde le prix. */}
+      <section className="relative mb-12 overflow-hidden rounded-3xl bg-gradient-to-br from-stone-900 via-stone-900 to-stone-800 p-6 text-white shadow-[0_30px_60px_-30px_rgba(28,25,23,.7)] ring-1 ring-white/10 sm:p-8">
+        <span className="tr-shine" aria-hidden />
+        <div className="absolute -right-16 -top-16 h-56 w-56 rounded-full bg-amber-400/20 blur-3xl" aria-hidden />
+        <div className="relative grid gap-6 md:grid-cols-[1fr_auto] md:items-center">
+          <div>
+            <p className="inline-flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.18em] text-amber-300">
+              <Gift className="h-3.5 w-3.5" aria-hidden /> Parrainage
+            </p>
+            <h2 className="mt-2 font-display text-2xl font-semibold leading-tight tracking-tight sm:text-3xl">
+              Invitez vos amis, <span className="text-amber-300">ne payez plus votre abonnement</span>.
+            </h2>
+            <p className="mt-3 max-w-xl text-sm leading-relaxed text-stone-300">
+              Chaque ami qui s&apos;abonne avec votre lien a 5 € de remise, et vous 5 € de moins sur votre
+              prochaine mensualité, automatiquement. Sans limite d&apos;amis : au-delà du mois offert, vos
+              crédits passent au mois suivant.
+            </p>
+            <Link
+              href="/profil#parrainage"
+              rel="nofollow"
+              className="mt-5 inline-flex items-center gap-1.5 rounded-xl bg-gradient-to-b from-amber-300 to-amber-500 px-5 py-2.5 text-sm font-semibold text-stone-900 shadow-[0_8px_20px_-8px_rgba(245,158,11,.8),inset_0_1px_0_rgba(255,255,255,.5)] transition-transform hover:-translate-y-0.5"
+            >
+              Obtenir mon lien de parrainage <ChevronRight className="h-4 w-4" aria-hidden />
+            </Link>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            {[
+              { formule: "Expert", prix: "19 €", amis: 4 },
+              { formule: "Standard", prix: "12 €", amis: 3 },
+            ].map((f) => (
+              <div key={f.formule} className="rounded-2xl bg-white/[0.06] p-4 text-center ring-1 ring-white/15">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-stone-400">{f.formule} · {f.prix}</p>
+                <p className="mt-1 font-display text-4xl font-semibold text-amber-300">{f.amis}</p>
+                <p className="text-xs text-stone-300">amis abonnés</p>
+                <p className="mt-1 text-xs font-semibold text-emerald-300">= 1 mois offert</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
 
       {/* Comparison — stacked cards on mobile */}
       <div className="sm:hidden space-y-4 mb-12">

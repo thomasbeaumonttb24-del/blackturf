@@ -26,6 +26,12 @@ from db.models import User
 from services.course_resolution import STATUTS_NON_COURUES
 from services.temps_courses import jour_courses, PARIS
 from services.confiance_course import confiance_course as _confiance_course
+from services.cote_juste import cote_juste as _cote_juste, COTE_JUSTE_MAX
+
+# Seuil d'un « écart de prix » : le marché paie au moins 8 % au-dessus de la cote
+# juste du modèle. Même valeur que `ECART_MEILLEUR_PRIX` dans
+# frontend/src/components/courses/classement.tsx — les deux doivent rester égales.
+ECART_PRIX_MIN = 0.08
 from ml.portfolio import BetPortfolioEngine
 from ml.adaptive_learning import get_adaptive_learning
 from ml.monte_carlo import MonteCarloSimulator
@@ -362,7 +368,11 @@ async def _load_partants(course_id: str, db: AsyncSession) -> list[PartantOut]:
             # Musique / status
             musique=p.musique,
             non_partant=p.non_partant,
-            elo_global=ch.elo_score_global,
+            # ELO À LA DATE de la course (photo avant départ) : l'ELO courant d'une
+            # course passée intègre ses résultats et les suivants. Course à venir
+            # sans photo : l'ELO courant EST l'ELO d'avant course.
+            elo_global=(p.elo_avant_global if p.elo_avant_global is not None
+                        else ch.elo_score_global),
             # Équipement
             deferre=eq.deferre if eq else None,
             oeilleres=eq.oeilleres if eq else None,
@@ -1147,8 +1157,8 @@ async def get_programme_apercu(
     pour l'apprendre — donc savoir que ça valait la peine de cliquer.
 
     Ce qui est exposé, par course et RIEN de plus : le nombre de chevaux notés,
-    la confiance du modèle sur son n°1, et s'il place le favori des parieurs en
-    tête. Aucun numéro, aucun nom, aucune probabilité individuelle — exactement
+    la confiance du modèle sur son n°1, s'il place le favori des parieurs en
+    tête, et le NOMBRE d'écarts de prix (chevaux payés au-dessus de leur chance). Aucun numéro, aucun nom, aucune probabilité individuelle — exactement
     la même règle que `/courses/{id}/apercu`, dont ceci est la version en lot.
     Une requête unique agrégée : 40 appels séparés sur une page de programme
     coûteraient plus cher que la page elle-même.
@@ -1199,7 +1209,7 @@ async def get_programme_apercu(
     par_course: dict[str, dict] = {}
     for r in rows:
         agg = par_course.setdefault(r["course_id"], {
-            "nb_notes": 0, "nb_ecartes": 0, "confiance": None,
+            "nb_notes": 0, "nb_ecartes": 0, "nb_ecarts_prix": 0, "confiance": None,
             "numero_top1": None, "cote_top1": None,
             "numero_favori": None, "cote_favori": None,
         })
@@ -1210,6 +1220,15 @@ async def get_programme_apercu(
             agg["numero_top1"] = r["numero"]
             agg["confiance"] = r["confiance"]
         cote = r["cote_pmu"]
+        # Écart de prix : EXACTEMENT la tuile « Écarts de prix » de la fiche course
+        # (`ecartPrix` dans frontend/src/components/courses/classement.tsx) — cote du
+        # marché ÷ cote juste du modèle − 1, compté à partir de +8 %, cote juste
+        # plafonnée (999) écartée. Deux règles différentes sur deux pages faisaient
+        # annoncer « aucun écart » au programme pour une course qui en montrait cinq.
+        # Seul le COMPTE sort, jamais un numéro.
+        juste = _cote_juste(r["proba_top1"])
+        if cote and cote > 0 and juste and juste < COTE_JUSTE_MAX and cote / juste - 1 >= ECART_PRIX_MIN:
+            agg["nb_ecarts_prix"] += 1
         if cote and cote > 1 and (agg["cote_favori"] is None or cote < agg["cote_favori"]):
             agg["cote_favori"] = cote
             agg["numero_favori"] = r["numero"]
@@ -1225,6 +1244,7 @@ async def get_programme_apercu(
             "analysee": True,
             "nb_notes": agg["nb_notes"],
             "nb_ecartes": agg["nb_ecartes"],
+            "nb_ecarts_prix": agg["nb_ecarts_prix"],
             # Même définition que la fiche course (`services.confiance_course`).
             "confiance": _confiance_course(agg["confiance"]),
             "accord_marche": (bool(fav == top1) if (fav is not None and top1 is not None) else None),
@@ -1237,7 +1257,9 @@ async def get_programme_apercu(
     }
     try:
         redis = await get_redis()
-        await redis.setex(cache_key, 120, json.dumps(resultat))
+        # 60 s : la page programme relit l'aperçu chaque minute le jour même, et les
+        # écarts de prix suivent les cotes.
+        await redis.setex(cache_key, 60, json.dumps(resultat))
     except Exception:
         pass
     return resultat
@@ -1960,8 +1982,11 @@ async def get_mise_plan(
         })
 
     # Drapeaux de disponibilité RÉELS (couplé/trio à l'ordre si champ réduit, etc.).
-    from services.bet_catalog import course_info_bets
+    from services.bet_catalog import course_info_bets, nb_partants_courants
     course_info = course_info_bets(course)
+    # Champ qui court compté en base : un NP retiré avant la prédiction n'a pas de
+    # ligne dans `preds` (plafond de rang et couverture, cf. mise_calculator.champ_reel).
+    course_info["nb_partants_courants"] = await nb_partants_courants(db, course_id)
 
     # Auto-amélioration : pondération ROI réel par type + thermostat adaptatif
     # (calibration du modèle + ROI récent → durcit/assouplit la sélection).
@@ -2212,8 +2237,11 @@ async def get_bilan_pronostic(
             "rang_predit": pred.rang_predit,
         })
 
-    from services.bet_catalog import course_info_bets
+    from services.bet_catalog import course_info_bets, nb_partants_courants
     course_info = course_info_bets(course)
+    # Champ qui court compté en base : un NP retiré avant la prédiction n'a pas de
+    # ligne dans `preds` (plafond de rang et couverture, cf. mise_calculator.champ_reel).
+    course_info["nb_partants_courants"] = await nb_partants_courants(db, course_id)
 
     montant = max(2.0, min(float(montant or 20), 10000.0))
     nb_partants = course.nb_partants or len(preds)

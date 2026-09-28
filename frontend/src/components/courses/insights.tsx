@@ -1396,6 +1396,53 @@ interface PreuvesResp {
 
 const ordinal = (n: number) => (n === 1 ? "1ᵉʳ" : `${n}ᵉ`);
 
+/** Palette par verdict : vert = gagnant donné 1ᵉʳ, ambre = dans le top 3,
+ *  neutre = raté. Les trois gardent le même relief : une course ratée n'est
+ *  pas reléguée visuellement, sinon le bloc redeviendrait une vitrine. */
+const TONS_PREUVE = {
+  top1: {
+    carte: "from-emerald-50 via-white to-white ring-emerald-200/80",
+    bande: "from-emerald-400 to-emerald-600",
+    medaille: "from-emerald-400 to-emerald-700 text-white shadow-[inset_0_1px_0_rgba(255,255,255,.45),0_6px_14px_-6px_rgba(4,120,87,.7)]",
+    texte: "text-emerald-800",
+  },
+  top3: {
+    carte: "from-amber-50 via-white to-white ring-amber-200/80",
+    bande: "from-amber-300 to-amber-500",
+    medaille: "from-amber-300 to-amber-600 text-amber-950 shadow-[inset_0_1px_0_rgba(255,255,255,.55),0_6px_14px_-6px_rgba(180,83,9,.7)]",
+    texte: "text-amber-800",
+  },
+  rate: {
+    carte: "from-stone-50 via-white to-white ring-stone-200",
+    bande: "from-stone-300 to-stone-400",
+    medaille: "from-stone-200 to-stone-400 text-stone-800 shadow-[inset_0_1px_0_rgba(255,255,255,.6),0_6px_14px_-6px_rgba(68,64,60,.5)]",
+    texte: "text-stone-600",
+  },
+} as const;
+
+/** Tuile de score : un grand chiffre « x / n » et une jauge segmentée, une
+ *  case par course — on voit d'un coup d'œil combien, sur combien. */
+function TuileScore({ valeur, total, libelle, ton }: {
+  valeur: number; total: number; libelle: string; ton: "top1" | "top3";
+}) {
+  const plein = ton === "top1" ? "bg-gradient-to-b from-emerald-400 to-emerald-600" : "bg-gradient-to-b from-amber-300 to-amber-500";
+  const chiffre = ton === "top1" ? "text-emerald-700" : "text-amber-700";
+  return (
+    <div className="rounded-xl bg-gradient-to-b from-white to-stone-50 p-3 ring-1 ring-stone-200/80 shadow-[inset_0_1px_0_#fff,0_1px_2px_rgba(17,24,39,.04),0_10px_20px_-16px_rgba(17,24,39,.5)] sm:p-3.5">
+      <div className="flex items-baseline gap-1">
+        <span className={cn("font-display text-[28px] font-bold leading-none tabular-nums sm:text-[32px]", chiffre)} style={SG}>{valeur}</span>
+        <span className="text-[13px] font-semibold tabular-nums text-stone-400">/ {total}</span>
+      </div>
+      <p className="mt-1 text-[12px] font-medium leading-snug text-stone-700 sm:text-[13px]">{libelle}</p>
+      <div className="mt-2 flex gap-1" aria-hidden="true">
+        {Array.from({ length: total }, (_, k) => (
+          <span key={k} className={cn("h-1.5 flex-1 rounded-full", k < valeur ? plein : "bg-stone-200 shadow-[inset_0_1px_1px_rgba(0,0,0,.08)]")} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function PreuvesRecentesCard() {
   const { data } = useEndpoint<PreuvesResp>("/stats/preuves-recentes?limite=6");
   if (!data || !data.courses?.length) return null;
@@ -1406,87 +1453,123 @@ export function PreuvesRecentesCard() {
     <Card
       title="Ce que le modèle a dit sur les dernières courses"
       icon={Trophy}
-      aside="vérifiable, une par une"
+      aside={
+        <span className="hidden items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-1 font-semibold text-emerald-800 ring-1 ring-inset ring-emerald-200 sm:inline-flex">
+          <Check className="h-3 w-3" aria-hidden="true" /> vérifiable, une par une
+        </span>
+      }
     >
       {/* Le compteur AVANT les exemples : c'est lui qui empêche de lire la
           rangée de cartes comme une vitrine de réussites choisies. */}
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border border-stone-200 bg-stone-50/70 px-3.5 py-3">
-        <span className="flex items-baseline gap-1.5">
-          <span className="font-display text-xl font-bold tabular-nums text-emerald-700">{n_gagnant_top1}</span>
-          <span className="text-[12px] text-stone-600">
-            gagnant{n_gagnant_top1 > 1 ? "s" : ""} donné{n_gagnant_top1 > 1 ? "s" : ""} 1ᵉʳ
-          </span>
-        </span>
-        <span className="h-6 w-px bg-stone-200" aria-hidden="true" />
-        <span className="flex items-baseline gap-1.5">
-          <span className="font-display text-xl font-bold tabular-nums text-amber-700">{n_gagnant_top3}</span>
-          <span className="text-[12px] text-stone-600">
-            gagnant{n_gagnant_top3 > 1 ? "s" : ""} dans le top 3
-          </span>
-        </span>
-        <span className="h-6 w-px bg-stone-200" aria-hidden="true" />
-        <span className="text-[12px] text-stone-600">
-          sur les <span className="font-semibold text-slate-900 tabular-nums">{n_courses}</span> dernières
-          courses courues — les plus récentes, pas les mieux réussies
-        </span>
+      <div className="grid grid-cols-2 gap-2.5 sm:gap-3">
+        <TuileScore
+          valeur={n_gagnant_top1}
+          total={n_courses}
+          ton="top1"
+          libelle={`gagnant${n_gagnant_top1 > 1 ? "s" : ""} donné${n_gagnant_top1 > 1 ? "s" : ""} 1ᵉʳ`}
+        />
+        <TuileScore
+          valeur={n_gagnant_top3}
+          total={n_courses}
+          ton="top3"
+          libelle={`gagnant${n_gagnant_top3 > 1 ? "s" : ""} dans le top 3`}
+        />
       </div>
+      <p className="mt-2.5 text-[12px] leading-snug text-stone-600 sm:text-[12.5px]">
+        Sur les <span className="font-semibold tabular-nums text-slate-900">{n_courses}</span> dernières courses courues —{" "}
+        <span className="font-semibold text-slate-900">les plus récentes, pas les mieux réussies.</span>{" "}
+        <span className="sm:hidden">Pronostics figés avant le départ.</span>
+      </p>
 
-      <ul className="mt-3 flex gap-2.5 overflow-x-auto pb-1.5">
+      {/* Mobile : carrousel à défilement aimanté (la carte suivante dépasse pour
+          inviter au glissement). Dès 640 px : grille, tout est visible. */}
+      <ul className="-mx-4 mt-4 flex snap-x snap-mandatory scroll-px-4 gap-3 overflow-x-auto px-4 pb-3 pt-1 [scrollbar-width:none] sm:mx-0 sm:grid sm:grid-cols-2 sm:overflow-visible sm:px-0 sm:pb-1 lg:grid-cols-3 [&::-webkit-scrollbar]:hidden">
         {courses.map((c) => {
           const rang = c.rang_du_gagnant;
-          const ton = c.gagnant_top1
-            ? { bd: "border-emerald-200", bg: "bg-emerald-50/60", fg: "text-emerald-700", txt: "gagnant donné 1ᵉʳ" }
+          const cle = c.gagnant_top1 ? "top1" : c.gagnant_top3 ? "top3" : "rate";
+          const ton = TONS_PREUVE[cle];
+          const verdict = c.gagnant_top1
+            ? "Gagnant donné 1ᵉʳ"
             : c.gagnant_top3
-              ? { bd: "border-amber-200", bg: "bg-amber-50/60", fg: "text-amber-700", txt: `gagnant donné ${rang ? ordinal(rang) : ""}` }
-              : { bd: "border-stone-200", bg: "bg-white", fg: "text-stone-600", txt: rang ? `gagnant donné ${ordinal(rang)}` : "gagnant hors classement" };
+              ? `Gagnant donné ${rang ? ordinal(rang) : ""}`
+              : rang ? `Gagnant donné ${ordinal(rang)}` : "Gagnant hors classement";
           return (
-            <li key={c.course_id} className="min-w-[15rem] flex-shrink-0">
+            <li key={c.course_id} className="w-[82%] max-w-[20rem] shrink-0 snap-start sm:w-auto sm:max-w-none">
               <a
                 href={`/courses/${c.course_id}`}
                 className={cn(
-                  "flex h-full flex-col rounded-xl border p-3 transition-colors hover:border-amber-300",
-                  ton.bd, ton.bg,
+                  "group relative flex h-full flex-col overflow-hidden rounded-2xl bg-gradient-to-br ring-1",
+                  "shadow-[inset_0_1px_0_#fff,0_1px_2px_rgba(17,24,39,.06),0_14px_26px_-18px_rgba(17,24,39,.55)]",
+                  "transition-all duration-200 hover:-translate-y-1 hover:shadow-[inset_0_1px_0_#fff,0_2px_4px_rgba(17,24,39,.06),0_22px_34px_-18px_rgba(17,24,39,.6)]",
+                  "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-700",
+                  ton.carte,
                 )}
               >
-                <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-                  <span className="font-mono">{codeCourse(c.course_id)}</span>
-                  <span className="min-w-0 break-words">{titre(c.hippodrome)}</span>
-                  {c.est_quinte && (
-                    <span className="ml-auto rounded-full bg-amber-500 px-1.5 py-0.5 text-[9.5px] font-bold text-brand-dark">Q+</span>
-                  )}
-                </span>
+                <span className={cn("h-1 w-full bg-gradient-to-r", ton.bande)} aria-hidden="true" />
 
-                <span className={cn("mt-1.5 flex items-center gap-1 text-[12px] font-semibold", ton.fg)}>
-                  {c.gagnant_top3
-                    ? <Check className="h-3.5 w-3.5 flex-shrink-0" aria-hidden="true" />
-                    : <Minus className="h-3.5 w-3.5 flex-shrink-0" aria-hidden="true" />}
-                  {ton.txt}
-                </span>
+                <div className="flex items-center gap-3 px-3.5 pt-3">
+                  {/* Médaille : le rang que le modèle donnait au vainqueur. */}
+                  <span className={cn(
+                    "flex h-11 w-11 shrink-0 flex-col items-center justify-center rounded-full bg-gradient-to-b ring-2 ring-white",
+                    ton.medaille,
+                  )}>
+                    {rang
+                      ? <span className="font-display text-[15px] font-bold leading-none" style={SG}>{ordinal(rang)}</span>
+                      : <Minus className="h-4 w-4" aria-hidden="true" />}
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className={cn("flex items-center gap-1 text-[13px] font-bold leading-tight", ton.texte)} style={SG}>
+                      {c.gagnant_top3 && <Check className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />}
+                      {verdict}
+                    </span>
+                    <span className="mt-0.5 block text-[11px] text-stone-500">par le modèle, avant le départ</span>
+                  </span>
+                  {c.est_quinte && (
+                    <span className="self-start rounded-full bg-gradient-to-b from-amber-400 to-amber-500 px-1.5 py-0.5 text-[10px] font-bold text-brand-dark shadow-[inset_0_1px_0_rgba(255,255,255,.5)]">Q+</span>
+                  )}
+                </div>
 
                 {/* Le NUMÉRO d'abord, en gros : c'est ce qu'on coche sur un ticket
                     et ce qu'annonce le commentaire de course. Le nom sert à
                     reconnaître le cheval, pas à jouer. */}
-                <span className="mt-1.5 flex min-w-0 items-center gap-1.5">
+                <div className="mx-3.5 mt-3 flex min-w-0 items-center gap-2.5 rounded-xl bg-white/80 px-2.5 py-2 ring-1 ring-stone-200/70 shadow-[inset_0_1px_2px_rgba(17,24,39,.05)]">
                   <span className="shrink-0 font-display text-[16px] font-bold leading-none text-slate-900">
                     <CasaqueNumero numero={c.gagnant_numero} />
                   </span>
-                  <span className="min-w-0 break-words text-[12.5px] leading-tight text-stone-600">
-                    {c.gagnant_nom ? titre(c.gagnant_nom) : "—"}
+                  <span className="min-w-0">
+                    <span className="block text-[10px] font-semibold uppercase tracking-wider text-stone-400">Vainqueur</span>
+                    <span className="block break-words text-[14px] font-semibold leading-tight text-slate-900">
+                      {c.gagnant_nom ? titre(c.gagnant_nom) : "—"}
+                    </span>
                   </span>
-                </span>
+                </div>
 
-                <span className="mt-0.5 text-[11px] text-muted-foreground">
-                  {c.nb_partants ? `${c.nb_partants} partants` : ""}
-                  {c.rapport_gagnant ? ` · gagnant payé ${nf(c.rapport_gagnant, 2)} pour 1 €` : ""}
-                </span>
+                {/* Pied façon talon de ticket : où, combien de partants, combien payé. */}
+                <div className="mt-3 flex flex-1 items-end justify-between gap-2 border-t border-dashed border-stone-300/80 px-3.5 pb-3 pt-2.5">
+                  <span className="min-w-0 text-[11.5px] leading-tight text-stone-600">
+                    <span className="font-mono font-semibold text-slate-900">{codeCourse(c.course_id)}</span>{" "}
+                    <span className="break-words">{titre(c.hippodrome)}</span>
+                    {c.nb_partants ? <span className="block text-stone-500">{c.nb_partants} partants</span> : null}
+                  </span>
+                  {c.rapport_gagnant ? (
+                    <span className="shrink-0 text-right">
+                      <span className="block font-display text-[16px] font-bold leading-none tabular-nums text-slate-900" style={SG}>
+                        {nf(c.rapport_gagnant, 2)} €
+                      </span>
+                      <span className="block text-[10px] text-stone-500">payé pour 1 €</span>
+                    </span>
+                  ) : null}
+                </div>
               </a>
             </li>
           );
         })}
       </ul>
 
-      <p className="mt-2.5 text-[11px] leading-4 text-muted-foreground">
+      <p className="mt-1.5 flex items-center gap-1.5 text-[11.5px] leading-4 text-stone-500 sm:mt-3">
+        <Info className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
         Les courses ratées y figurent comme les autres.
+        <span className="ml-auto whitespace-nowrap font-medium text-stone-400 sm:hidden">Glissez →</span>
       </p>
     </Card>
   );

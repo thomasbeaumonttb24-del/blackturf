@@ -16,6 +16,7 @@ from api.config import get_settings
 from api.routes.auth import get_current_user, require_verified_email
 from db.database import get_db
 from db.models import CarteConnue, Subscription, User
+from services import parrainage
 from services.abonnements import journaliser
 
 settings = get_settings()
@@ -111,9 +112,17 @@ async def _plan_effectif(user_id: str, db: AsyncSession,
     """
     subs = [s for s in await _subs_vivantes(user_id, db, sauf_stripe_id=sauf_stripe_id)
             if s.statut in STATUTS_ACCES]
-    if not subs:
+    plans = [s.plan for s in subs]
+    # Récompense du Défi du mois en cours : un webhook (essai ouvert, paiement…) ne
+    # doit pas retirer au gagnant les jours offerts avant leur échéance.
+    from db.models import DefiRecompense
+    plans += (await db.execute(select(DefiRecompense.plan_offert).where(
+        DefiRecompense.user_id == user_id, DefiRecompense.statut == "applique",
+        DefiRecompense.expire_at > datetime.now(timezone.utc),
+    ))).scalars().all()
+    if not plans:
         return "free"
-    return max((s.plan for s in subs), key=lambda p: RANG_PLAN.get(p, 0))
+    return max(plans, key=lambda p: RANG_PLAN.get(p, 0))
 
 
 def _a_moyen_de_paiement(sub: dict) -> bool:
@@ -387,7 +396,9 @@ async def create_checkout(
     # (constaté en production le 2026-08-20, 3 essais ouverts en 24 h sur un même
     # compte). La consommation est enregistrée par le webhook, quand Stripe
     # confirme l'essai — un checkout abandonné ne brûle donc rien.
-    droit_a_lessai = user.essai_utilise_at is None
+    # Un filleul n'a JAMAIS d'essai, même après sa remise : sinon résilier puis
+    # se réabonner lui donnerait la remise ET l'essai.
+    droit_a_lessai = user.essai_utilise_at is None and not user.parraine_par_id
 
     # 2 bis) Carte déjà vue sur un autre compte : l'essai ne se rouvre pas avec une
     # nouvelle adresse e-mail. Le contrôle définitif est côté webhook (la carte du
@@ -404,9 +415,37 @@ async def create_checkout(
             droit_a_lessai = False
             log.warning("stripe.essai_refuse_carte_connue", user_id=user.user_id)
 
+    # Filleul : pas d'essai, 5 € de remise sur la première facture payante.
+    # Coupon posé par le serveur uniquement — la saisie d'un code promo est alors
+    # désactivée (Stripe refuse de cumuler les deux, et un second code ne doit pas
+    # s'ajouter à la remise de parrainage).
+    remise: dict = {"allow_promotion_codes": True}
+    parrainage_filleul = await parrainage.remise_filleul_due(user, db)
+    if parrainage_filleul is not None and await _empreintes_deja_prises(user, db):
+        # Carte déjà vue sur un autre compte : c'est un ancien client qui rouvre un
+        # compte pour la remise. Ni remise, ni essai — plein tarif.
+        log.warning("stripe.remise_parrainage_refusee_carte_connue", user_id=user.user_id)
+        parrainage_filleul = None
+        droit_a_lessai = False
+    if parrainage_filleul is not None:
+        droit_a_lessai = False
+        try:
+            remise = {"discounts": [{"coupon": parrainage.coupon_filleul()}]}
+        except Exception as e:  # noqa: BLE001
+            # Jamais de checkout plein tarif en silence : la remise serait perdue
+            # pour de bon au premier paiement.
+            log.error("stripe.coupon_parrainage_indisponible", error=str(e)[:150])
+            raise HTTPException(
+                status_code=503,
+                detail="La remise de parrainage est momentanément indisponible. "
+                       "Réessayez dans quelques minutes.",
+            )
+
     subscription_data: dict = {
         "metadata": {"user_id": user.user_id, "plan": plan_cible},
     }
+    if parrainage_filleul is not None:
+        subscription_data["metadata"]["parrainage_id"] = parrainage_filleul.parrainage_id
     if droit_a_lessai:
         # Essai gratuit 7 jours : Standard ET Expert (alignés, cf. page /tarifs).
         subscription_data["trial_period_days"] = 7
@@ -432,13 +471,15 @@ async def create_checkout(
         # le paramètre reste explicite pour que le choix soit lisible ici.
         payment_method_collection="always",
         subscription_data=subscription_data,
-        allow_promotion_codes=True,
         locale="fr",
+        **remise,
     )
 
     log.info("stripe.checkout_created", user_id=user.user_id, plan=plan_cible,
-             essai_accorde=droit_a_lessai)
-    return {"url": session.url, "essai": droit_a_lessai}
+             essai_accorde=droit_a_lessai,
+             remise_parrainage=parrainage_filleul is not None)
+    return {"url": session.url, "essai": droit_a_lessai,
+            "remise_parrainage": parrainage_filleul is not None}
 
 
 async def _changer_de_plan(
@@ -580,16 +621,12 @@ async def cancel_subscription(
             html=f"<p>Demande de résiliation.</p><p>User: {user.email} ({user.user_id})</p>"
                  f"<p>Plan: {user.plan} — via Stripe: {cancelled_via_stripe}</p>",
         )
+        from services.email_compte import resiliation
+        html, texte = resiliation(cancelled_via_stripe)
         await send_email(
             to=user.email,
             subject="BlackTurf — Votre demande de résiliation",
-            html="<p>Votre demande de résiliation a bien été enregistrée.</p>"
-                 + ("<p>Votre abonnement prendra fin à l'échéance de la période en cours ; "
-                    "vous gardez l'accès jusque-là.</p>" if cancelled_via_stripe else
-                    "<p>Elle sera traitée sous 72h. Vous conservez l'accès jusqu'au traitement. "
-                    "Pour toute question : contact@blackturf.fr</p>")
-                 + "<hr/><p style='color:#666;font-size:11px;'>Jeu responsable — "
-                   "joueurs-info-service.fr — 09 74 75 13 13</p>",
+            html=html, text=texte,
         )
     except Exception as e:  # noqa: BLE001
         log.warning("stripe.cancel.email_failed", user_id=user.user_id, error=str(e)[:120])
@@ -652,6 +689,10 @@ async def stripe_webhook(
         await _handle_payment_succeeded(data, db)
     elif event_type == "invoice.payment_failed":
         await _handle_payment_failed(data, db)
+    elif event_type == "charge.refunded":
+        await parrainage.sur_remboursement(data, db, "paiement_rembourse")
+    elif event_type == "charge.dispute.created":
+        await parrainage.sur_remboursement(data, db, "paiement_conteste")
     elif event_type == "customer.subscription.trial_will_end":
         await _handle_trial_will_end(data, db)
     elif event_type in ("payment_method.attached", "customer.updated",
@@ -1025,6 +1066,16 @@ async def _handle_payment_succeeded(invoice: dict, db: AsyncSession):
     log.info("stripe.payment_succeeded", invoice_id=invoice.get("id"),
              sub=sub_id, montant_cents=montant)
     if montant <= 0:
+        # Facture soldée par le crédit du client : rien d'encaissé, mais la
+        # remise de parrainage d'un filleul est consommée.
+        client = await _find_user_by_customer(invoice.get("customer"), db)
+        if client is not None:
+            if (invoice.get("total") or 0) > 0:
+                await parrainage.sur_facture_reglee_par_credit(client, invoice, db)
+            # Facture d'un parrain réglée (0 € : entièrement couverte par ses
+            # crédits) : un nouveau mois commence, ses crédits reportés sont posés.
+            await parrainage.liberer_credits(client, db)
+            await db.commit()
         return
 
     user = await _find_user_by_customer(invoice.get("customer"), db)
@@ -1047,6 +1098,8 @@ async def _handle_payment_succeeded(invoice: dict, db: AsyncSession):
                                   "client_stripe": invoice.get("customer"),
                                   "abonnement_pas_encore_connu": sub is None,
                                   "compte_inconnu": user is None})
+        if user is not None:
+            await parrainage.sur_paiement(user, invoice, db)
         await db.commit()
         log.warning("stripe.paiement_journalise_sans_abonnement",
                     invoice_id=invoice.get("id"), sub=sub_id, montant_cents=montant)
@@ -1076,6 +1129,11 @@ async def _handle_payment_succeeded(invoice: dict, db: AsyncSession):
                               # comparaison avant/après : cf. `_handle_payment_failed`.
                               "plan_apres": user.plan,
                               "acces_ouvert": user.plan != "free"})
+    # Premier vrai paiement d'un filleul : c'est lui, et lui seul, qui crédite le
+    # parrain. Les factures à 0 € sont écartées plus haut.
+    await parrainage.sur_paiement(user, invoice, db)
+    # Et si ce client est lui-même parrain : nouveau mois, crédits reportés posés.
+    await parrainage.liberer_credits(user, db)
     await db.commit()
     log.info("stripe.acces_retabli" if reprise else "stripe.paiement_encaisse",
              user_id=user.user_id, plan=user.plan, montant_cents=montant)

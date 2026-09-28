@@ -14,7 +14,7 @@ import { DefiConcept } from "@/components/defi/DefiConcept";
 import { DecorRayons, TropheeSvg } from "@/components/defi/illustrations";
 import {
   Avatar, CompteRebours, DEFI_CARTE, DEFI_FOND, DEFI_REGLES_DEFAUT, DefiEntete, LigneClassement,
-  BandeauEssai, dateLancement, OriginePari, PastilleDirect, Podium, ResultatPari, StatutPari, formatPts, joursRestants, moisLabel, planLabel, formatNombre, chevauxLisibles } from "@/components/defi/kit";
+  ErreurChargement, OriginePari, PastilleDirect, Podium, ResultatPari, StatutPari, formatPts, joursRestants, moisLabel, planLabel, formatNombre, chevauxLisibles } from "@/components/defi/kit";
 import { cn } from "@/lib/utils";
 
 const CARTE = DEFI_CARTE;
@@ -24,6 +24,9 @@ function moisCourantParis(): string {
     .formatToParts(new Date());
   return `${p.find((x) => x.type === "year")?.value}-${p.find((x) => x.type === "month")?.value}`;
 }
+
+// Premier mois du défi (lancement le 1er octobre 2026) : on ne remonte pas plus loin.
+const PREMIER_MOIS_DEFI = "2026-10";
 
 function decalerMois(mois: string, delta: number): string {
   const [a, m] = mois.split("-").map(Number);
@@ -71,8 +74,8 @@ function Hero({ mois, enCours, setMois, regles, classement }: {
           <Sparkles className="h-3 w-3" aria-hidden="true" /> Concours gratuit · sans argent réel
         </span>
         <div className="flex items-center gap-1 rounded-2xl bg-white/85 p-1 shadow-sm ring-1 ring-inset ring-amber-200 backdrop-blur">
-          <button type="button" aria-label="Mois précédent" onClick={() => setMois(decalerMois(mois, -1))}
-            className="inline-flex h-9 w-9 items-center justify-center rounded-xl text-slate-500 hover:bg-amber-50 hover:text-slate-900">
+          <button type="button" aria-label="Mois précédent" disabled={mois <= PREMIER_MOIS_DEFI} onClick={() => setMois(decalerMois(mois, -1))}
+            className="inline-flex h-9 w-9 items-center justify-center rounded-xl text-slate-500 hover:bg-amber-50 hover:text-slate-900 disabled:opacity-25">
             <ChevronLeft className="h-4 w-4" />
           </button>
           <span className="min-w-[128px] text-center text-[13px] font-bold text-slate-900">{moisLabel(mois)}</span>
@@ -121,7 +124,7 @@ function Hero({ mois, enCours, setMois, regles, classement }: {
             <div className="min-w-0">
               <div className="text-[11px] font-semibold uppercase tracking-[0.1em] text-slate-500">{r.rang}{r.rang === 1 ? "er" : "e"} du mois</div>
               <div className="text-[15px] font-bold text-slate-900">{r.jours} jours {planLabel(r.plan)}</div>
-              <div className="text-[11px] text-slate-500">{classement?.essai ? `en jeu dès le ${dateLancement(regles.premier_mois)}` : "offerts au gagnant"}</div>
+              <div className="text-[11px] text-slate-500">offerts au gagnant</div>
             </div>
           </li>
         ))}
@@ -150,7 +153,7 @@ function Duel({ plan, perso }: { plan: DefiStats; perso: DefiStats }) {
               <span className={cn("block h-full rounded-full", s.points_nets >= 0 ? teinte : "bg-rose-400")}
                 style={{ width: `${Math.max(s.nb_paris ? 4 : 0, (Math.abs(s.points_nets) / max) * 100)}%` }} />
             </span>
-            <span className={cn("w-20 text-right font-display text-[13px] font-bold tabular-nums", s.points_nets >= 0 ? "text-emerald-700" : "text-rose-700")}>
+            <span className={cn("min-w-20 shrink-0 text-right font-display text-[13px] font-bold tabular-nums", s.points_nets >= 0 ? "text-emerald-700" : "text-rose-700")}>
               {formatPts(s.points_nets, true)}
             </span>
           </div>
@@ -243,7 +246,6 @@ function Reglement({ regles }: { regles: DefiRegles }) {
         <li>Le pari porte l&apos;étiquette « Plan BlackTurf » quand il reprend un pari du plan de mise que vous avez consulté sur la course, « Perso » sinon. L&apos;étiquette n&apos;a pas d&apos;effet sur le classement.</li>
         <li>Sont classés les joueurs ayant engagé au moins <b>{regles.min_paris_classement} paris</b> dans le mois, par solde décroissant ; à égalité, le plus grand nombre de paris gagnants puis le premier pari le plus ancien l&apos;emportent.</li>
         <li>Récompenses : {lots}. Elles sont remises après la clôture du mois, une fois tous les paris réglés et les comptes vérifiés. Un abonné payant reçoit l&apos;équivalent en déduction de son abonnement. Les récompenses sont nominatives et ne s&apos;échangent pas contre de l&apos;argent.</li>
-        <li>Lancement officiel le <b>{dateLancement(regles.premier_mois)}</b>. Les mois précédents sont des mois d&apos;essai : on y joue avec les mêmes règles, sans récompense.</li>
         <li><b>Un seul compte par personne.</b> BlackTurf peut vérifier l&apos;identité des gagnants et exclure du défi, sans récompense, tout compte multiple, automatisé ou ayant contourné les règles.</li>
         <li>Les comptes de l&apos;équipe BlackTurf jouent hors concours. BlackTurf peut modifier ou arrêter le défi ; un mois commencé se termine avec les règles en vigueur à son début.</li>
       </ol>
@@ -263,10 +265,10 @@ export default function DefiPage() {
 
   const { data: regles = DEFI_REGLES_DEFAUT as unknown as DefiRegles } = useSWR(
     "/defi/regles", () => defiApi.regles().then((r) => r.data), { revalidateOnFocus: false });
-  const { data: classement, isLoading } = useSWR<DefiClassement>(
+  const { data: classement, isLoading, error: erreurClassement, mutate: recharger } = useSWR<DefiClassement>(
     ["/defi/classement", mois, user?.user_id ?? ""], () => defiApi.classement(mois).then((r) => r.data),
     { refreshInterval: enCours ? 60_000 : 0 });
-  const { data: moi } = useSWR<DefiMoi>(
+  const { data: moi, error: erreurMoi, mutate: rechargerMoi } = useSWR<DefiMoi>(
     user ? ["/defi/moi", mois, user.user_id] : null, () => defiApi.moi(mois).then((r) => r.data),
     { refreshInterval: enCours ? 60_000 : 0 });
   const { data: palmares } = useSWR<DefiPalmares>("/defi/palmares", () => defiApi.palmares().then((r) => r.data));
@@ -281,11 +283,12 @@ export default function DefiPage() {
 
   return (
     <div className="mx-auto flex max-w-4xl flex-col gap-8 px-4 py-6 sm:px-6 sm:py-8">
-      {classement?.essai && <BandeauEssai premierMois={regles.premier_mois} />}
       <Hero mois={mois} enCours={enCours} setMois={setMois} regles={regles} classement={classement} />
 
       {user ? (
-        moi ? <MaSaison moi={moi} regles={regles} enCours={enCours} /> : (
+        moi ? <MaSaison moi={moi} regles={regles} enCours={enCours} /> : erreurMoi ? (
+          <div className={cn(CARTE)}><ErreurChargement onRetry={() => rechargerMoi()} /></div>
+        ) : (
           <div className={cn(CARTE, "flex justify-center p-10")}><Loader2 className="h-5 w-5 animate-spin text-slate-400" /></div>
         )
       ) : (
@@ -347,7 +350,8 @@ export default function DefiPage() {
               ))}
             </ol>
           )}
-          {classes.length === 0 && !isLoading && (
+          {erreurClassement && !classement && <ErreurChargement onRetry={() => recharger()} />}
+          {classes.length === 0 && !isLoading && !(erreurClassement && !classement) && (
             <p className="px-5 py-4 text-[12.5px] text-slate-600">
               Personne n&apos;est encore classé : il faut {regles.min_paris_classement} paris dans le mois. La première place est à prendre.
             </p>
@@ -384,7 +388,7 @@ export default function DefiPage() {
                   <Link href={`/courses/${p.course_id}#defi`} className="min-w-0 hover:underline">
                     <div className="text-[13px] font-bold text-slate-900">{p.type_pari} {chevauxLisibles(p.type_pari, p.chevaux)}</div>
                     <div className="break-words text-[11.5px] text-slate-500">
-                      {p.course_label}{p.date_heure && <> · {new Date(p.date_heure).toLocaleString("fr-FR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}</>}
+                      {p.course_label}{p.date_heure && <> · {new Date(p.date_heure).toLocaleString("fr-FR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "Europe/Paris" })}</>}
                     </div>
                   </Link>
                   <ResultatPari p={p} />

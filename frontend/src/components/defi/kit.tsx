@@ -1,7 +1,7 @@
 /**
  * Briques partagées du Défi du mois (page /defi, carte de la page course, admin).
  */
-import { CheckCircle2, Clock, Crown, FlaskConical, RotateCcw, Sparkles, Timer, User, XCircle } from "lucide-react";
+import { CheckCircle2, Clock, Crown, RotateCcw, Sparkles, Timer, User, XCircle } from "lucide-react";
 import { DecorRayons, LaurierSvg, MedailleSvg } from "@/components/defi/illustrations";
 import type { DefiPari } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -69,32 +69,6 @@ export function formatPts(v: number | null | undefined, signe = false): string {
   const n = Math.round(v * 10) / 10;
   const txt = formatNombre(n);
   return `${signe && n > 0 ? "+" : ""}${txt} pts`;
-}
-
-/** « 1er octobre » : date du lancement officiel, depuis « 2026-10 ». */
-export function dateLancement(premierMois?: string): string {
-  const m = Number(premierMois?.split("-")[1]);
-  if (!m) return "lancement officiel";
-  const nom = new Date(Date.UTC(2000, m - 1, 15)).toLocaleDateString("fr-FR", { month: "long", timeZone: "UTC" });
-  return `1er ${nom}`;
-}
-
-/**
- * Mois d'essai (avant le lancement officiel) : on joue pour découvrir, mais aucun
- * lot n'est en jeu. Affiché partout où l'on parie ou regarde le classement.
- */
-export function BandeauEssai({ premierMois, className }: { premierMois?: string; className?: string }) {
-  return (
-    <div role="note" className={cn("flex items-start gap-2.5 rounded-2xl bg-sky-50 px-3.5 py-2.5 text-[12.5px] leading-snug text-sky-950 ring-1 ring-inset ring-sky-200", className)}>
-      <span className="mt-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-white text-sky-700 ring-1 ring-inset ring-sky-200">
-        <FlaskConical className="h-3.5 w-3.5" aria-hidden="true" />
-      </span>
-      <span>
-        <b>Mois d&apos;essai.</b> Le Défi démarre officiellement le <b>{dateLancement(premierMois)}</b> :
-        d&apos;ici là, jouez pour découvrir, sans récompense à la clé. Au lancement, tout le monde repart avec 1&nbsp;000 points.
-      </span>
-    </div>
-  );
 }
 
 export function moisLabel(mois: string): string {
@@ -197,11 +171,24 @@ export function PastilleDirect() {
   );
 }
 
-/** Jours restants jusqu'à la fin du mois du défi (calendrier de Paris, arrondi au jour). */
+/** Instant du 1er jour du mois `m` (1 = janvier, 13 = janvier suivant) à minuit heure de Paris, en ms. */
+function minuitParis(a: number, m: number): number {
+  const utc = Date.UTC(a, m - 1, 1);
+  const p = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Europe/Paris", year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", hourCycle: "h23",
+  }).formatToParts(new Date(utc));
+  const v = (t: string) => Number(p.find((x) => x.type === t)?.value);
+  // Décalage de Paris à cet instant (+1 h ou +2 h) : minuit à Paris le précède d'autant.
+  const decalage = Date.UTC(v("year"), v("month") - 1, v("day"), v("hour"), v("minute")) - utc;
+  return utc - decalage;
+}
+
+/** Jours restants jusqu'à la fin du mois du défi (minuit heure de Paris, arrondi au jour). */
 export function joursRestants(mois: string): number {
   const [a, m] = mois.split("-").map(Number);
   if (!a || !m) return 0;
-  return Math.max(0, Math.ceil((Date.UTC(a, m, 1) - Date.now()) / 86_400_000));
+  return Math.max(0, Math.ceil((minuitParis(a, m + 1) - Date.now()) / 86_400_000));
 }
 
 /** Compte à rebours de fin de mois, en pastille. */
@@ -210,7 +197,7 @@ export function CompteRebours({ mois }: { mois: string; sombre?: boolean }) {
   // Course du mois suivant (vue la veille d'un changement de mois) : le pari compte
   // pour ce mois-là, pas de compte à rebours qui n'aurait pas de sens.
   const [a, m] = mois.split("-").map(Number);
-  const aVenir = Boolean(a && m) && Date.UTC(a, m - 1, 1) > Date.now();
+  const aVenir = Boolean(a && m) && minuitParis(a, m) > Date.now();
   return (
     <span className="inline-flex items-center gap-1.5 rounded-full bg-white/90 px-2 py-0.5 text-[10.5px] font-semibold tabular-nums text-amber-900 shadow-sm ring-1 ring-inset ring-amber-200">
       <Timer className="h-3 w-3 text-amber-600" aria-hidden="true" />
@@ -359,5 +346,19 @@ export function LigneClassement({ rang, nom, solde, nbParis, moi, max, detail }:
         </div>
       </div>
     </li>
+  );
+}
+
+/** Requête du défi en échec (session expirée, réseau, serveur) : un message et un
+ *  bouton plutôt qu'une icône de chargement qui tourne sans fin. */
+export function ErreurChargement({ onRetry, className }: { onRetry: () => void; className?: string }) {
+  return (
+    <div className={cn("flex flex-col items-center gap-2 px-5 py-8 text-center text-[12.5px] text-slate-600", className)}>
+      <span>Impossible de charger le défi pour le moment.</span>
+      <button type="button" onClick={onRetry}
+        className="rounded-full bg-white px-3 py-1 text-[12px] font-semibold text-amber-800 ring-1 ring-inset ring-amber-200 hover:bg-amber-50">
+        Réessayer
+      </button>
+    </div>
   );
 }

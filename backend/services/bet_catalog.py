@@ -141,3 +141,18 @@ def course_info_bets(course, *, nb_partants: Optional[int] = None) -> dict:
     )
     info["nb_partants"] = champ
     return info
+
+
+async def nb_partants_courants(session, course_id: str) -> Optional[int]:
+    """Partants qui courent = participations non marquées non-partant, lues en base.
+
+    Exact même quand un non-partant a été retiré AVANT la prédiction : ce cheval n'a
+    pas de ligne de prédiction, donc « déclarés − non-partants vus dans les
+    prédictions » le comptait encore. None si aucune participation ne court (repli de l’appelant).
+    """
+    from sqlalchemy import text
+    n = (await session.execute(text("""
+        SELECT COUNT(*) FROM participations
+        WHERE course_id = :cid AND COALESCE(non_partant, false) = false
+    """), {"cid": course_id})).scalar()
+    return int(n) if n else None

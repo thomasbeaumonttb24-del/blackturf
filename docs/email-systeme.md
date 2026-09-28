@@ -8,6 +8,7 @@ Le compte de contrôle `thomas.beaumont.tb24@gmail.com` reçoit **un exemplaire 
 | --- | --- | --- | --- |
 | Valeurs du jour | Tous les jours à 10 h Paris, reprises à 10 h 15/30/45 si nécessaire | Comptes Starter, Standard, Expert éligibles et opt-in | Activé en production ; aperçu `docs/email-previews/quotidien.html` |
 | Lettre hebdomadaire | Lundi et mardi, 9 h–20 h Paris, toutes les 30 minutes jusqu'au bilan complet | Inscrits confirmés et comptes actifs éligibles, sans doublon | Activé en production ; aperçu `docs/email-previews/hebdomadaire.html` |
+| Alerte de stratégie | Toutes les 10 min (h+5), si un pari visible remplit les critères d'une stratégie à alerte cochée | Comptes Expert actifs, adresse utilisable, sans opposition marketing | Même interrupteur `EMAIL_EDITORIAL_ENABLED` ; au plus 1 e-mail / 4 h, jamais deux fois le même signal |
 | Confirmation de newsletter | Demande d'inscription | Adresse demandant l'inscription | Transactionnel immédiat |
 | Vérification d'adresse et mot de passe | Inscription, renvoi ou demande de réinitialisation | Compte concerné | Transactionnel immédiat, jeton secret |
 | Pronostic d'une course | Demande explicite sur la fiche course | Adresse demandant ce pronostic | Transactionnel immédiat, une fois par adresse et course |
@@ -22,9 +23,13 @@ Le compte de contrôle `thomas.beaumont.tb24@gmail.com` reçoit **un exemplaire 
 
 Le top et le bilan proviennent de la même règle que les visuels publics : dernier plan du site émis avant le départ, dernier règlement définitif de ce plan, jamais un plan personnel. `mise`, `retour` (mise incluse) et `net` sont contrôlés entre la table de règlement et son bilan JSON avant de figer une édition dans `email_editions`. Les chiffres figés sont publics sur `/api/v1/newsletter/bilans/AAAA-MM-JJ` et ne contiennent ni adresse ni jeton personnel.
 
+- **Alertes de stratégie** (`backend/services/alertes_strategies.py`) : à chaque passage, relit tous les paris visibles pour un Expert dont le départ est à venir, les confronte aux critères de chaque stratégie à alerte cochée (discipline, hippodrome, niveau, terrain, Quinté+, distance et partants min/max ; EV du pari, étoiles, proba top 3, confiance, ELO) et envoie UN récapitulatif par utilisateur. Les signaux envoyés sont journalisés (`alertes_log`, type `strategie_email`) : jamais renvoyés, et ceux apparus pendant le délai de 4 h partent au passage suivant. Un échec d'envoi ne consomme ni signal ni délai.
+
 ## Présentation et aperçu
 
-Les modèles vivent dans `backend/services/email_templates.py`. Ils utilisent le logo public, un seul axe de lecture, des cartes et des styles intégrés compatibles avec les clients mail courants, plus une version texte. Le lien Instagram est présent dans les deux lettres. Générer des aperçus **fictifs**, sans base ni envoi :
+Les modèles vivent dans `backend/services/email_templates.py` (lettres), `backend/services/email_pronostic.py` (pronostic gratuit, réplique de la fiche course) et `backend/services/email_compte.py` (confirmation de lettre, vérification d'adresse, mot de passe, résiliation). Tous partagent l'habillage de `backend/services/email_design.py` : fond nuit, logo or détouré, photo fondue, fenêtre du site, bouton or en relief, bloc Instagram, pied légal, plus une version texte. Les reliefs (médailles, tuiles, bannières, casaque neutre) sont des images générées par `scripts/generer_visuels_email.py` dans `frontend/public/img/email/`.
+
+**Mode sombre.** Gmail, Outlook.com et d'autres assombrissent les fonds clairs et éclaircissent les textes sombres, sans toucher aux images ni aux dégradés CSS. Règles à respecter : aucun dégradé sur une surface claire (couleur unie seulement), aucun texte sombre posé sur une image ou un dégradé, logo et bandeaux sur fond sombre, bouton en texte blanc sur or foncé. Le lien Instagram est présent dans les deux lettres. Générer des aperçus **fictifs**, sans base ni envoi :
 
 Le bilan IA affiche les pourcentages à une décimale et les comptes bruts entre parenthèses. L'icône Instagram est servie depuis `frontend/public/img/email/instagram-glyph.png` ; sa [source est le glyphe Meta publié sur Wikimedia Commons](https://commons.wikimedia.org/wiki/File:Instagram_Glyph_Gradient_RGB_logo.svg). L'image et le texte voisin renvoient au compte `@blackturf.fr`.
 

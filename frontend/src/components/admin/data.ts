@@ -18,7 +18,7 @@ import { adminApi, statsApi } from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
 import type {
   AbonnementsData, CompteLigne, DashboardData, EnLigneData, ModelVersion,
-  PalmaresNet, RevenusData, ScraperStatus, SystemError,
+  PalmaresNet, ParrainagesData, RevenusData, ScraperStatus, SystemError,
 } from "./types";
 import { MOUVEMENTS_ECHEC, scraperSain } from "./types";
 
@@ -87,6 +87,17 @@ export function useRevenus(mois = 12) {
   return useSWR<RevenusData>(
     estAdmin ? ["/admin-revenus", mois] : null,
     () => adminApi.revenus(mois).then((r) => r.data),
+    { refreshInterval: CADENCE.normal, revalidateOnFocus: true, keepPreviousData: true },
+  );
+}
+
+/** Suivi du parrainage : un parrainage se valide au paiement du filleul, par
+ *  webhook, à toute heure — même cadence que les abonnements. */
+export function useParrainages() {
+  const { estAdmin } = useEstAdmin();
+  return useSWR<ParrainagesData>(
+    estAdmin ? "/admin-parrainages" : null,
+    () => adminApi.parrainages().then((r) => r.data),
     { refreshInterval: CADENCE.normal, revalidateOnFocus: true, keepPreviousData: true },
   );
 }

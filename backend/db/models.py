@@ -889,6 +889,13 @@ class User(Base):
     # (chargement paresseux = MissingGreenlet en asynchrone).
     chat_lu_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), deferred=True)
 
+    # Parrainage. `code_parrain` : code public du lien d'invitation, généré au
+    # premier affichage de la page parrainage (jamais dérivé du nom ni de l'e-mail).
+    # `parraine_par_id` : posé UNIQUEMENT à la création du compte, jamais après —
+    # un compte existant ne peut pas se faire parrainer pour décrocher la remise.
+    code_parrain: Mapped[str | None] = mapped_column(String(12), unique=True)
+    parraine_par_id: Mapped[str | None] = mapped_column(ForeignKey("users.user_id"), index=True)
+
     # Bankroll de référence
     bankroll_initiale: Mapped[float | None] = mapped_column(Float)
 
@@ -1020,6 +1027,43 @@ class CarteConnue(Base):
 
     premiere_vue: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     derniere_vue: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class Parrainage(Base):
+    """Un filleul, son parrain, et le sort de la récompense.
+
+    Aucun versement d'argent : le filleul a 5 € de remise sur sa première facture
+    payante (coupon Stripe), le parrain 5 € de crédit sur son solde client Stripe,
+    que Stripe déduit seul de sa prochaine facture — jamais au-delà de son montant,
+    le reste étant reporté. D'où le plafond « un mois offert au plus par facture ».
+
+    Cycle : `en_attente` (compte créé) → `valide` (premier paiement réel du
+    filleul, carte à lui) ou `refuse` (carte du parrain ou d'un autre compte) ;
+    `annule` si ce premier paiement est remboursé — le crédit est alors repris.
+    """
+    __tablename__ = "parrainages"
+
+    parrainage_id: Mapped[str] = mapped_column(String(36), primary_key=True, default=gen_uuid)
+    parrain_id: Mapped[str | None] = mapped_column(ForeignKey("users.user_id"), index=True)
+    # Unique : un compte n'a qu'un parrain, et ne rapporte qu'une fois.
+    filleul_id: Mapped[str | None] = mapped_column(ForeignKey("users.user_id"), unique=True)
+    statut: Mapped[str] = mapped_column(String(12), default="en_attente", index=True)
+    motif: Mapped[str | None] = mapped_column(String(60))
+    # Remise du filleul consommée (première facture payante) : plus jamais offerte,
+    # même si la récompense du parrain reste en attente.
+    remise_filleul_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Facture qui a validé le parrainage : sert à reprendre le crédit si elle est
+    # remboursée.
+    stripe_invoice_id: Mapped[str | None] = mapped_column(String(100), index=True)
+    credit_cents: Mapped[int | None] = mapped_column(Integer)
+    stripe_credit_txn_id: Mapped[str | None] = mapped_column(String(100))
+    # Crédit effectivement posé sur le solde Stripe du parrain. NULL sur un
+    # parrainage `valide` = crédit gagné mais REPORTÉ (plafond du mois atteint,
+    # ou Stripe injoignable) : il sera posé au mois suivant, rien n'est perdu.
+    credit_pose_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    valide_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
 # ─────────────────────────────────────────────

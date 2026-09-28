@@ -18,7 +18,9 @@ DRY="${BT_PRUNE_DRY:-0}"
 # ~35 Go et le disque était remonté de 57 % à 81 % en cinq jours.
 # Règle : on garde toujours les KEEP plus récents par service, et au-delà on
 # retire ceux dont l'image a plus de MAX_AGE_DAYS jours.
-KEEP=5
+# KEEP était à 5 : aucun service n'en avait plus de 5, donc rien ne partait —
+# le 27/09/2026, 25 tags de 10 à 13 jours tenaient le disque à 81 %.
+KEEP=2
 MAX_AGE_DAYS=7
 LIMITE=$(( $(date +%s) - MAX_AGE_DAYS * 86400 ))
 

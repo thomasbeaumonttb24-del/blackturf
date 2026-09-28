@@ -26,7 +26,7 @@ from zoneinfo import ZoneInfo
 
 import structlog
 from sqlalchemy import select, text
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import DBAPIError, IntegrityError
 
 from db.models import (
     BetPlanSnapshot, Course, DefiPari, DefiRecompense, Participation, Resultat, User,
@@ -52,8 +52,9 @@ VERROU_AVANT_DEPART = timedelta(0)
 # la remise des récompenses du mois (qui exige zéro pari en attente).
 DELAI_RAPPORT_MAX = timedelta(hours=72)
 
-# Premier mois OFFICIEL du défi. Avant, le défi est jouable en « mois d'essai » :
-# mêmes règles, classement affiché, mais aucune récompense ni rappel quotidien.
+# Premier mois du défi : lancement le 1er octobre 2026, directement en version
+# définitive (pas de mois d'essai, décision du 2026-09-28). Avant, aucun pari n'est
+# accepté : un déploiement anticipé n'ouvre rien.
 PREMIER_MOIS = os.getenv("DEFI_PREMIER_MOIS", "2026-10")
 
 # Rang → (plan offert, durée). Remis par l'admin après vérification du compte.
@@ -386,6 +387,8 @@ async def engager_pari(session, user: User, course_id: str, type_pari: str,
         raise DefiErreur("Plus de chevaux choisis que de partants.")
 
     mois = mois_de(course.date_heure)
+    if avant_lancement(mois):
+        raise DefiErreur("Le Défi du mois ouvre le 1er octobre.")
     if await solde(session, user.user_id, mois) < points:
         raise DefiErreur("Solde de points insuffisant pour ce mois.")
 
@@ -403,20 +406,33 @@ async def engager_pari(session, user: User, course_id: str, type_pari: str,
         engage_at=now, statut="en_attente",
     )
     session.add(pari)
-    await session.commit()
+    try:
+        await session.commit()
+    except DBAPIError:
+        # Départ donné ou arrivée écrite entre le contrôle ci-dessus et le commit : le
+        # trigger de 0057 refuse l'insertion. Même réponse qu'un dépôt déjà fermé.
+        await session.rollback()
+        log.info("defi.pari_refuse_par_la_base", course_id=course_id, user_id=user.user_id)
+        raise DefiErreur("Les paris sont fermés pour cette course.")
     invalider_classement()
     await session.refresh(pari)
     if avant is not None:
         from services.defi_rappels import notifier_rangs
         await notifier_rangs(session, mois, avant)
+        await session.refresh(pari)  # rechargé si la notification a dû tout annuler
     return pari
 
 
 async def regler_course(session, course_id: str) -> int:
     """Règle les paris du défi d'une course arrivée (ou annulée). Idempotent."""
+    # Verrou des lignes jusqu'au commit : le pipeline, le job horaire et les pages
+    # appellent ce règlement, parfois au même instant sur la même course. Le second
+    # passe son tour au lieu de retoucher un pari déjà réglé (refusé par le trigger
+    # de 0057, donc une erreur 500). Sans effet sous SQLite.
     paris = (await session.execute(
         select(DefiPari).where(DefiPari.course_id == course_id,
                                DefiPari.statut == "en_attente")
+        .with_for_update(skip_locked=True)
     )).scalars().all()
     if not paris:
         return 0
@@ -439,9 +455,22 @@ async def regler_course(session, course_id: str) -> int:
         return len(paris)
 
     if course.statut != "termine":
+        await session.commit()  # rien n'a changé : libère seulement les verrous
         return 0
     res = await session.get(Resultat, course_id)
-    if res is None or not res.classement:
+    # Arrivée sans aucun rapport publié : elle peut encore être provisoire (un
+    # distancement la modifie), et un pari réglé ne se corrige plus. On attend les
+    # rapports ; passé DELAI_RAPPORT_MAX, remboursement, pour ne rien bloquer à vie.
+    if res is None or not res.classement or not res.rapports:
+        if _utc(course.date_heure) + DELAI_RAPPORT_MAX < now:
+            avant = await classements_avant()
+            for p in paris:
+                p.statut, p.rapport, p.points_retour, p.regle_at = "rembourse", 1.0, float(p.points), now
+            await session.commit()
+            invalider_classement()
+            await _notifier_rangs(session, avant)
+            return len(paris)
+        await session.commit()  # rien n'a changé : libère seulement les verrous
         return 0
     avant = await classements_avant()
     non_partants = set((await session.execute(
@@ -484,8 +513,8 @@ async def regler_course(session, course_id: str) -> int:
             if p.statut == "en_attente":
                 p.statut, p.rapport, p.points_retour, p.regle_at = "rembourse", 1.0, float(p.points), now
                 n += 1
+    await session.commit()  # règle les paris, ou libère seulement les verrous
     if n:
-        await session.commit()
         invalider_classement()
         await _notifier_rangs(session, avant)
     return n
@@ -654,8 +683,8 @@ async def tendance_course(session, course_id: str, depot_ouvert_: bool) -> dict:
     }
 
 
-def mois_essai(mois: str) -> bool:
-    """Mois d'avant le lancement officiel : on joue pour découvrir, sans lot."""
+def avant_lancement(mois: str) -> bool:
+    """Mois d'avant le lancement du défi : ni pari, ni rappel, ni récompense."""
     return mois < PREMIER_MOIS
 
 
@@ -664,12 +693,14 @@ def mois_termine(mois: str, now: Optional[datetime] = None) -> bool:
 
 
 async def _abonnement_vivant(session, user_id: str):
-    from api.routes.stripe_routes import STATUTS_VIVANTS
+    """Abonnement PAYANT en cours (celui qui donne accès). Un essai sans carte ou un
+    impayé n'en est pas un : le joueur reçoit alors ses jours offerts directement."""
+    from api.routes.stripe_routes import STATUTS_ACCES
     from db.models import Subscription
 
     return (await session.execute(
         select(Subscription).where(Subscription.user_id == user_id,
-                                   Subscription.statut.in_(STATUTS_VIVANTS))
+                                   Subscription.statut.in_(STATUTS_ACCES))
     )).scalars().first()
 
 
@@ -691,8 +722,8 @@ async def attribuer_recompense(session, mois: str, rang: int,
     now = now or datetime.now(timezone.utc)
     if rang not in RECOMPENSES:
         raise DefiErreur("Aucune récompense pour ce rang.")
-    if mois_essai(mois):
-        raise DefiErreur("Mois d'essai : aucune récompense avant le lancement officiel.")
+    if avant_lancement(mois):
+        raise DefiErreur("Le défi n'existait pas encore ce mois-là.")
     if not mois_termine(mois, now):
         raise DefiErreur("Le mois n'est pas terminé : le classement peut encore bouger.")
     await regler_en_attente(session)
@@ -753,13 +784,20 @@ async def expirer_recompenses(session, now: Optional[datetime] = None) -> int:
         if user is None:
             r.statut = "termine"
             continue
-        # Souscrit pendant le mois offert, ou plan changé par ailleurs : on ne
-        # touche à rien — rétrograder un client payant serait bien pire qu'oublier.
-        if await _abonnement_vivant(session, r.user_id) is not None or user.plan != r.plan_offert:
+        # Plan changé par ailleurs (admin, abonnement supérieur) : on n'y touche pas.
+        if user.plan != r.plan_offert:
             r.statut = "conserve"
             continue
-        user.plan = r.plan_precedent or "free"
         r.statut = "termine"
+        await session.flush()
+        # Plan encore dû sans cette récompense : abonnement payant souscrit pendant le
+        # mois offert, autre récompense en cours… jamais en dessous du plan d'avant.
+        from api.routes.stripe_routes import RANG_PLAN, _plan_effectif
+        du = await _plan_effectif(r.user_id, session)
+        precedent = r.plan_precedent or "free"
+        user.plan = max(du, precedent, key=lambda p: RANG_PLAN.get(p, 0))
+        if user.plan == r.plan_offert:
+            r.statut = "conserve"  # le même plan reste dû (abonnement souscrit entre-temps)
     if echues:
         await session.commit()
     return len(echues)

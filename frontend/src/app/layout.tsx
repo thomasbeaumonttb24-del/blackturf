@@ -6,7 +6,6 @@ import Script from "next/script";
 import "./globals.css";
 import { Toaster } from "sonner";
 import { AuthProvider } from "@/hooks/useAuth";
-import { PseudoRequis } from "@/components/layout/PseudoRequis";
 import { Suspense } from "react";
 import DefilementHaut from "@/components/DefilementHaut";
 import SignalPresence from "@/components/SignalPresence";
@@ -178,7 +177,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         </Suspense>
         <AuthProvider>
           {children}
-          <PseudoRequis />
         </AuthProvider>
         <SignalPresence />
         <Toaster

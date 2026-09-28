@@ -376,8 +376,9 @@ def _verdict(db: dict, logs: dict, modele: dict) -> str:
 # Au-delà de cette avance sur la cote en AUC de classement, un modèle a appris
 # l'arrivée : même seuil que le garde-fou de promotion
 # (`ml.pipeline.FUITE_AVANCE_MARCHE_MAX`), recopié pour ne pas charger tout le
-# pipeline d'entraînement dans un script de rapport. Record honnête : +0,02.
-FUITE_AVANCE_MARCHE_MAX = 0.08
+# pipeline d'entraînement dans un script de rapport. Record honnête : +0,02 ;
+# v546 et v547 (+0,046, features recalculées le 24/09) passaient sous 0,08.
+FUITE_AVANCE_MARCHE_MAX = 0.03
 
 
 def _reference_valable() -> tuple:

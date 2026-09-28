@@ -1,7 +1,7 @@
 "use client";
 export const dynamic = "force-dynamic";
 
-import { useState, Suspense } from "react";
+import { useEffect, useState, Suspense } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useForm } from "react-hook-form";
@@ -9,12 +9,13 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { toast } from "sonner";
 import Image from "next/image";
-import { Loader2, Check, MailCheck } from "lucide-react";
+import { Loader2, Check, MailCheck, Gift } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/useAuth";
 import { champMotDePasse, MOT_DE_PASSE_AIDE, messageErreurApi } from "@/lib/motdepasse";
 import { champPseudo, PSEUDO_AIDE } from "@/lib/pseudo";
-import { authApi } from "@/lib/api";
+import { authApi, parrainageApi } from "@/lib/api";
+import { euros, lireCodeParrain, memoriserCodeParrain, normaliserCode, oublierCodeParrain } from "@/lib/parrainage";
 import { cheminInterne, memoriserIntention, planEssai } from "@/lib/intentionEssai";
 import { AVANTAGES_COMPTE_GRATUIT } from "@/components/billing/CompteGratuitCta";
 
@@ -37,12 +38,44 @@ function InscriptionContent() {
   // connecte plus, elle envoie un lien.
   const [enAttente, setEnAttente] = useState<string | null>(null);
   const [renvoi, setRenvoi] = useState(false);
-  const { register: registerAuth } = useAuth();
+  const { register: registerAuth, user } = useAuth();
   const params = useSearchParams();
   // Intention d'arrivée : `?plan=expert` depuis « Essayer 7 jours », `?suite=/courses/…`
   // depuis un appel à créer un compte. Mémorisée pour l'écran de confirmation d'adresse.
   const plan = planEssai(params.get("plan"));
   const suite = cheminInterne(params.get("suite"));
+  // Lien de parrainage : `?parrain=CODE`, ou le code mémorisé d'une visite précédente.
+  const codeUrl = normaliserCode(params.get("parrain"));
+  const [parrain, setParrain] = useState<{ code: string; prenom: string | null; remise: number } | null>(null);
+  // Saisie manuelle : l'ami a reçu le code à l'oral, ou ouvre le lien sur un autre appareil.
+  const [saisieOuverte, setSaisieOuverte] = useState(false);
+  const [saisie, setSaisie] = useState("");
+  const [verification, setVerification] = useState(false);
+
+  async function appliquerCode(code: string, depuisLien: boolean) {
+    setVerification(true);
+    try {
+      const { data } = await parrainageApi.verifier(code);
+      if (data.valide) {
+        memoriserCodeParrain(data.code);
+        setParrain({ code: data.code, prenom: data.prenom, remise: data.remise_cents });
+        setSaisieOuverte(false);
+        if (!depuisLien) toast.success("Code appliqué : 5 € offerts sur votre premier abonnement");
+      } else {
+        oublierCodeParrain();
+        toast.error(depuisLien ? "Ce lien de parrainage n'est plus valable." : "Code de parrainage inconnu. Vérifiez-le auprès de votre ami.");
+      }
+    } catch {
+      if (!depuisLien) toast.error("Vérification impossible pour le moment. Réessayez.");
+    } finally {
+      setVerification(false);
+    }
+  }
+
+  useEffect(() => {
+    const code = codeUrl || lireCodeParrain();
+    if (code) appliquerCode(code, true);
+  }, [codeUrl]);
 
   const {
     register,
@@ -53,7 +86,8 @@ function InscriptionContent() {
   async function onSubmit(data: FormData) {
     setLoading(true);
     try {
-      const res = await registerAuth(data);
+      const res = await registerAuth({ ...data, code_parrain: parrain?.code });
+      if (parrain) oublierCodeParrain();
       memoriserIntention({ plan, suite });
       setEnAttente(res.email);
     } catch (e: unknown) {
@@ -97,8 +131,9 @@ function InscriptionContent() {
           Rien reçu au bout de deux minutes ? Regardez dans les indésirables.
         </p>
         <p className="text-xs text-muted-foreground mt-3">
-          Dès la confirmation, votre essai {plan === "expert" ? "Expert" : "Standard"} de
-          7 jours vous sera proposé.
+          {parrain
+            ? `Dès la confirmation, vos ${euros(parrain.remise)} de remise de parrainage vous attendent sur votre premier abonnement.`
+            : `Dès la confirmation, votre essai ${plan === "expert" ? "Expert" : "Standard"} de 7 jours vous sera proposé.`}
         </p>
 
         <Button variant="outline" className="w-full mt-6" onClick={renvoyerLien} disabled={renvoi}>
@@ -121,6 +156,27 @@ function InscriptionContent() {
   return (
     <div>
           <div className="rounded-2xl border border-border bg-card p-8 shadow-2xl">
+            {user && codeUrl && (
+              <div className="mb-5 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                Vous avez déjà un compte : le parrainage est réservé aux nouveaux inscrits. Pour
+                inviter vos amis, partagez votre propre lien depuis{" "}
+                <Link href="/profil#parrainage" className="font-semibold underline underline-offset-2">
+                  Profil → Parrainage
+                </Link>.
+              </div>
+            )}
+            {parrain && (
+              <div className="mb-5 flex items-start gap-3 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900">
+                <Gift className="h-5 w-5 flex-shrink-0 text-emerald-700 mt-0.5" aria-hidden />
+                <p>
+                  <span className="font-semibold">
+                    {parrain.prenom ? `${parrain.prenom} vous invite` : "Vous êtes invité"} :{" "}
+                    {euros(parrain.remise)} offerts
+                  </span>{" "}
+                  sur votre premier abonnement Standard ou Expert, mensuel ou annuel.
+                </p>
+              </div>
+            )}
             <h2 className="text-xl font-bold mb-1">Créer un compte</h2>
             <p className="text-sm text-muted-foreground mb-6">
               Déjà inscrit ?{" "}
@@ -209,6 +265,40 @@ function InscriptionContent() {
                   </p>
                 )}
               </div>
+
+              {!parrain && (
+                saisieOuverte ? (
+                  <div>
+                    <label className="block text-sm font-medium mb-1.5">Code de parrainage</label>
+                    <div className="flex gap-2">
+                      <input
+                        value={saisie}
+                        onChange={(e) => setSaisie(e.target.value.toUpperCase())}
+                        placeholder="Ex. K7XQ4MPT"
+                        maxLength={20}
+                        autoCapitalize="characters"
+                        className="w-full rounded-lg border border-input bg-background px-3 py-2.5 text-sm font-mono tracking-widest outline-none focus:ring-2 focus:ring-ring"
+                      />
+                      <Button
+                        type="button"
+                        variant="outline"
+                        disabled={verification || !normaliserCode(saisie)}
+                        onClick={() => { const c = normaliserCode(saisie); if (c) appliquerCode(c, false); }}
+                      >
+                        {verification ? <Loader2 className="h-4 w-4 animate-spin" /> : "Appliquer"}
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setSaisieOuverte(true)}
+                    className="inline-flex items-center gap-1.5 text-sm font-medium text-brand-gold-dark underline underline-offset-2"
+                  >
+                    <Gift className="h-4 w-4" aria-hidden /> J&apos;ai un code de parrainage
+                  </button>
+                )
+              )}
 
               <Button type="submit" variant="brand" className="w-full" size="lg" disabled={loading}>
                 {loading ? (

@@ -27,7 +27,7 @@ from sqlalchemy import select
 from db.models import AlerteLog, DefiPari, User
 from services.defi import (
     CAPITAL_MENSUEL, MIN_PARIS_CLASSEMENT, PARIS_TZ, _utc, classement, formater_points,
-    mois_courant, mois_essai,
+    mois_courant, avant_lancement,
 )
 
 log = structlog.get_logger()
@@ -88,42 +88,62 @@ async def notifier_rangs(session, mois: str, avant: list[dict],
                          now: Optional[datetime] = None) -> int:
     """Compare le classement ``avant`` au classement actuel et prévient les joueurs
     qui ont franchi un seuil (1re place, podium). Ne lève jamais : une alerte
-    manquée ne doit pas faire échouer un règlement."""
-    now = now or datetime.now(timezone.utc)
-    try:
-        apres = await classement(session, mois)
-        rangs_avant = {l["user_id"]: l["rang"] for l in avant}
-        a_prevenir = []
-        for l in apres:
-            if not l["rang"]:
-                continue
-            msg = message_rang(rangs_avant.get(l["user_id"]), l["rang"], l, apres)
-            if msg:
-                a_prevenir.append((l["user_id"], msg))
-        if not a_prevenir:
-            return 0
+    manquée ne doit pas faire échouer un règlement.
 
-        ids = [uid for uid, _ in a_prevenir]
-        recents = set((await session.execute(select(AlerteLog.user_id).where(
-            AlerteLog.type_alerte == TYPE_RANG, AlerteLog.user_id.in_(ids),
-            AlerteLog.created_at >= now - ANTI_RAFALE,
-        ))).scalars().all())
-        users = {u.user_id: u for u in (await session.execute(
-            select(User).where(User.user_id.in_(ids)))).scalars().all()}
-        n = 0
-        for uid, (titre, description) in a_prevenir:
-            u = users.get(uid)
-            if uid in recents or u is None or not _prefs(u)["resultats_suivis"]:
-                continue
-            _alerte(session, uid, TYPE_RANG, titre, description)
-            n += 1
+    Sous PostgreSQL, le travail se fait dans un point de sauvegarde : en cas d'échec,
+    seul lui est annulé. Un rollback complet expirerait tous les objets de la requête
+    appelante (le pari juste engagé, la course affichée), et leur lecture suivante
+    ferait échouer la réponse alors que le pari est bien enregistré."""
+    now = now or datetime.now(timezone.utc)
+    postgres = session.get_bind().dialect.name == "postgresql"
+    # Vrai tant que l'échec reste confiné au point de sauvegarde (déjà annulé).
+    confine = postgres
+    try:
+        if postgres:
+            async with session.begin_nested():
+                n = await _alertes_de_rang(session, mois, avant, now)
+        else:
+            n = await _alertes_de_rang(session, mois, avant, now)
+        confine = False
         if n:
             await session.commit()
         return n
     except Exception as e:  # noqa: BLE001
         log.warning("defi.rangs.echec", mois=mois, err=str(e)[:160])
-        await session.rollback()
+        if not confine:
+            await session.rollback()
         return 0
+
+
+async def _alertes_de_rang(session, mois: str, avant: list[dict], now: datetime) -> int:
+    """Ajoute à la session les alertes de rang à envoyer (sans commit) ; leur nombre."""
+    apres = await classement(session, mois)
+    rangs_avant = {l["user_id"]: l["rang"] for l in avant}
+    a_prevenir = []
+    for l in apres:
+        if not l["rang"]:
+            continue
+        msg = message_rang(rangs_avant.get(l["user_id"]), l["rang"], l, apres)
+        if msg:
+            a_prevenir.append((l["user_id"], msg))
+    if not a_prevenir:
+        return 0
+
+    ids = [uid for uid, _ in a_prevenir]
+    recents = set((await session.execute(select(AlerteLog.user_id).where(
+        AlerteLog.type_alerte == TYPE_RANG, AlerteLog.user_id.in_(ids),
+        AlerteLog.created_at >= now - ANTI_RAFALE,
+    ))).scalars().all())
+    users = {u.user_id: u for u in (await session.execute(
+        select(User).where(User.user_id.in_(ids)))).scalars().all()}
+    n = 0
+    for uid, (titre, description) in a_prevenir:
+        u = users.get(uid)
+        if uid in recents or u is None or not _prefs(u)["resultats_suivis"]:
+            continue
+        _alerte(session, uid, TYPE_RANG, titre, description)
+        n += 1
+    return n
 
 
 def _jours_restants(now: datetime) -> int:
@@ -144,8 +164,8 @@ async def envoyer_rappels(session, now: Optional[datetime] = None) -> int:
     """Passage quotidien des rappels du défi. Idempotent (clé par mois et palier)."""
     now = now or datetime.now(timezone.utc)
     mois = mois_courant(now)
-    if mois_essai(mois):
-        return 0  # mois d'essai : on laisse découvrir, on ne relance personne
+    if avant_lancement(mois):
+        return 0  # le défi n'a pas commencé : personne à relancer
     jr = _jours_restants(now)
     jour = _utc(now).astimezone(PARIS_TZ).day
     lignes = await classement(session, mois)
@@ -164,16 +184,8 @@ async def envoyer_rappels(session, now: Optional[datetime] = None) -> int:
     if jour <= 3:
         prec = _mois_precedent(mois)
         anciens = await classement(session, prec)
-        lancement = mois_essai(prec)
         for l in anciens:
             if l["user_id"] in par_user or l["hors_concours"]:
-                continue
-            if lancement:
-                # Premier mois officiel : les joueurs de l'essai sont les premiers prévenus.
-                envois.append((l["user_id"], f"{mois}:nouveau",
-                               "Le Défi du mois est lancé : les récompenses sont en jeu",
-                               f"{formater_points(CAPITAL_MENSUEL)} pour tout le monde, le 1er du "
-                               f"mois gagne un abonnement Expert offert."))
                 continue
             bilan = (f"Vous avez fini {_rang(l['rang'])} en {MOIS_FR[int(prec[5:]) - 1]}. "
                      if l["rang"] else "")

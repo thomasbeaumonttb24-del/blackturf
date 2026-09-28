@@ -24,6 +24,7 @@ import { Anneau, Compteur, Etoiles, Plan3D, SectionTitre, nf } from "@/component
 import { useRequireAuth } from "@/hooks/useAuth";
 import { defiApi, predictionsApi, coursesApi, statsApi, type DefiMoi } from "@/lib/api";
 import { BOUTON_OR, CompteRebours, DEFI_CARTE, DefiEntete, ResultatPari, formatPts, moisLabel, chevauxLisibles } from "@/components/defi/kit";
+import { ParrainageAppel } from "@/components/billing/ParrainageAppel";
 import { RUBRIQUES } from "@/lib/navigation";
 import { cn, planLabel } from "@/lib/utils";
 import { disciplineLabel, heureParis, titleCase } from "@/lib/seo";
@@ -334,6 +335,13 @@ export default function DashboardPage() {
             </div>
           </section>
         )}
+
+        {/* ══ Parrainage ══════════════════════════════════════════════ */}
+        <section>
+          <Reveal>
+            <ParrainageAppel contexte="espace" />
+          </Reveal>
+        </section>
 
         {/* ══ Défi du mois + outils ═════════════════════════════════════ */}
         <section className="grid grid-cols-1 gap-6 lg:grid-cols-5">

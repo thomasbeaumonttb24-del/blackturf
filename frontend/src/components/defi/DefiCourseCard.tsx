@@ -17,10 +17,12 @@ import { toast } from "sonner";
 import { ArrowRight, Calculator, Check, Info, Loader2, Lock, ShieldCheck, Sparkles, Ticket, TrendingUp, Users, Zap } from "lucide-react";
 import { defiApi, type DefiCourse, type DefiPlanPari, type DefiRegles, type DefiTypeInfo, type DefiTypePari } from "@/lib/api";
 import { CompteGratuitCta } from "@/components/billing/CompteGratuitCta";
+import { PseudoRequis } from "@/components/layout/PseudoRequis";
+import { useAuth } from "@/hooks/useAuth";
 import { CasaqueNumero } from "@/components/courses/identite-cheval";
 import {
-  BandeauEssai, CompteRebours, DEFI_CARTE, DEFI_REGLES_DEFAUT, DefiEntete, OriginePari, ResultatPari, StatutPari, chevauxLisibles, combinaisons, estAOrdre,
-  dateLancement, formatPts, moisLabel, planLabel, formatNombre } from "@/components/defi/kit";
+  CompteRebours, ErreurChargement, DEFI_CARTE, DEFI_REGLES_DEFAUT, DefiEntete, OriginePari, ResultatPari, StatutPari, chevauxLisibles, combinaisons, estAOrdre,
+  formatPts, moisLabel, planLabel, formatNombre } from "@/components/defi/kit";
 import { cn } from "@/lib/utils";
 
 export type DefiPrefill = { type: DefiTypePari; chevaux: number[]; cle: number };
@@ -138,9 +140,12 @@ export function DefiCourseCard({ courseId, partants, connecte, prefill, voirPlan
   /** Ouvre l'onglet Plan de mise (lien affiché tant qu'aucun plan n'est consulté). */
   voirPlan?: () => void;
 }) {
+  const { user } = useAuth();
+  // Ancien compte ou compte Google sans pseudo : il le choisit ici, au moment de jouer.
+  const sansPseudo = connecte && !!user && !user.pseudo;
   const { data: regles = DEFI_REGLES_DEFAUT as unknown as DefiRegles } = useSWR(
     "/defi/regles", () => defiApi.regles().then((r) => r.data), { revalidateOnFocus: false });
-  const { data, mutate, isLoading } = useSWR<DefiCourse>(
+  const { data, mutate, isLoading, error } = useSWR<DefiCourse>(
     connecte ? ["/defi/course", courseId] : null,
     () => defiApi.course(courseId).then((r) => r.data),
     { refreshInterval: 30_000 },
@@ -237,8 +242,7 @@ export function DefiCourseCard({ courseId, partants, connecte, prefill, voirPlan
       <DefiEntete
         surtitre={mois ? `Défi du mois · ${mois}` : "Défi du mois"}
         titre="Pariez vos points sur cette course"
-        sousTitre={(data?.essai ?? regles.essai) ? <>Points × rapport PMU officiel. Mois d&apos;essai : récompenses dès le {dateLancement(regles.premier_mois)}.</>
-          : prix && <>Points × rapport PMU officiel. Le 1<sup>er</sup> du mois gagne {prix.jours} jours {planLabel(prix.plan)}.</>}
+        sousTitre={prix && <>Points × rapport PMU officiel. Le 1<sup>er</sup> du mois gagne {prix.jours} jours {planLabel(prix.plan)}.</>}
         droite={connecte && solde != null ? (
           <div className="rounded-2xl bg-white/90 px-3 py-1.5 text-right shadow-sm ring-1 ring-inset ring-amber-200">
             <div className="text-[9.5px] font-bold uppercase tracking-[0.14em] text-amber-700">Mon solde</div>
@@ -261,12 +265,15 @@ export function DefiCourseCard({ courseId, partants, connecte, prefill, voirPlan
             suite={`/courses/${courseId}#defi`}
           />
         </div>
+      ) : error && !data ? (
+        <ErreurChargement onRetry={() => mutate()} />
       ) : isLoading || !data ? (
         <div className="flex justify-center py-10"><Loader2 className="h-5 w-5 animate-spin text-slate-400" /></div>
       ) : (
         <>
-          {data.essai && <BandeauEssai premierMois={regles.premier_mois} className="mx-5 mt-4" />}
-          {data.ouvert && restants > 0 && pointsMax >= regles.points_min ? (
+          {data.ouvert && sansPseudo ? (
+            <PseudoRequis className="px-5 py-5" />
+          ) : data.ouvert && restants > 0 && pointsMax >= regles.points_min ? (
             <>
               {planConsulte.length > 0 ? (
                 <PlanConsulte paris={planConsulte} types={types} onJouer={jouerDuPlan}
@@ -345,7 +352,7 @@ export function DefiCourseCard({ courseId, partants, connecte, prefill, voirPlan
                     Cliquez dans l&apos;<b className="text-slate-800">ordre d&apos;arrivée</b> que vous jouez : 1<sup>er</sup>, 2<sup>e</sup>… Recliquez un cheval pour le retirer.
                   </p>
                 )}
-                <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3">
+                <div className="grid grid-cols-1 gap-1.5 min-[420px]:grid-cols-2 sm:grid-cols-3">
                   {jouables.map((p) => {
                     const place = chevaux.indexOf(p.numero);
                     const actif = place >= 0;
@@ -427,7 +434,7 @@ export function DefiCourseCard({ courseId, partants, connecte, prefill, voirPlan
                       : `Valider mon pari · ${pointsJoues} pts`}
                   </button>
                   <div className="mt-2 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-[11px] text-slate-500">
-                    <span>Fermeture à {new Date(data.limite).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}, heure de départ annoncée</span>
+                    <span>Fermeture à {new Date(data.limite).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Paris" })}, heure de départ annoncée</span>
                     <span aria-hidden="true">·</span>
                     <span>{restants} pari{restants > 1 ? "s" : ""} restant{restants > 1 ? "s" : ""} sur cette course</span>
                   </div>

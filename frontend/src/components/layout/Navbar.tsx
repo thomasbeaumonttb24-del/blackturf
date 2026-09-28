@@ -5,7 +5,7 @@ import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
 import { useState, useEffect, useRef, useCallback } from "react";
 import useSWR from "swr";
-import { LucideIcon, Menu, X, Bell, User, LogOut, ChevronDown, Zap, LayoutDashboard, Gauge, Search, MessagesSquare, Bot, Medal } from "lucide-react";
+import { LucideIcon, Menu, X, Bell, User, LogOut, ChevronDown, Zap, LayoutDashboard, Gauge, Search, MessagesSquare, Bot, Medal, Gift } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/hooks/useAuth";
@@ -187,14 +187,20 @@ export function Navbar() {
   const nbNonLues = notifData?.count ?? 0;
   const nbChat = surChat ? 0 : (chatData?.non_lus ?? 0);
   const lienActif = (href: string) => pathname === href || pathname.startsWith(`${href}/`);
+  // Compte gratuit à qui l'essai est offert : la barre porte en plus le bouton
+  // « Essai offert ». Dans les 1 216 px utiles de `max-w-7xl`, noms complets + bouton +
+  // badge de plan se chevauchaient (constaté le 2026-09-28) : dans ce cas les liens
+  // gardent leur forme courte et le badge « Découverte » s'efface — le bouton dit
+  // déjà que le compte est gratuit.
+  const essai = peutDemarrerEssai(user);
 
   return (
     <nav className="sticky top-0 z-50 border-b border-[#e2e6df] bg-white/95 backdrop-blur-md">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-        <div className="flex h-16 items-center justify-between">
+        <div className="flex h-16 items-center justify-between gap-3">
 
           {/* Logo */}
-          <Link href="/" className="flex items-center gap-2 flex-shrink-0" aria-label="BlackTurf — Accueil">
+          <Link href="/" className="flex min-w-0 items-center gap-1.5 flex-shrink-0 sm:gap-2" aria-label="BlackTurf — Accueil">
             {/* `alt` vide, volontairement : le lien porte déjà `aria-label` ET le nom
                 écrit à côté. Un alt qui le répète fait annoncer « BlackTurf » deux
                 fois de plus (règle axe « image-redundant-alt »).
@@ -205,10 +211,12 @@ export function Navbar() {
               alt=""
               width={256}
               height={251}
-              className="h-10 w-auto sm:h-11 object-contain"
+              className="h-9 w-auto sm:h-11 object-contain"
               priority
             />
-            <span className="text-xl font-bold tracking-tight text-[#17231f]">
+            {/* Sous 380 px, le nom écrit passait sous les boutons de droite : le logo,
+                qui porte déjà « BLACKTURF », suffit. */}
+            <span className="hidden text-lg font-bold tracking-tight text-[#17231f] min-[380px]:inline sm:text-xl">
               Black<span className="text-[#876438]">Turf</span>
             </span>
           </Link>
@@ -234,26 +242,26 @@ export function Navbar() {
                       : "text-gray-600 hover:bg-[#f5f6f2] hover:text-[#17231f]"
                   )}
                 >
-                  {Icon && <Icon className="hidden 2xl:block h-3.5 w-3.5" />}
+                  {Icon && <Icon className={cn("hidden h-3.5 w-3.5", !essai && "2xl:block")} />}
                   {/* Entre 1 024 et 1 280 px, les noms complets se chevauchaient : la
                       forme courte (celle de la barre du bas sur téléphone) prend le
                       relais, le nom complet revient dès qu'il y a la place. */}
                   {/* Avec l'entrée « Défi du mois » (7 liens), les noms complets ne
                       tiennent qu'à partir de 1 536 px : en dessous, forme courte. */}
-                  <span className="2xl:hidden">{link.court}</span>
-                  <span className="hidden 2xl:inline">{link.label}</span>
+                  <span className={cn(!essai && "2xl:hidden")}>{link.court}</span>
+                  {!essai && <span className="hidden 2xl:inline">{link.label}</span>}
                 </Link>
               );
             })}
           </div>
 
           {/* Right side */}
-          <div className="flex items-center gap-1.5">
+          <div className="flex flex-shrink-0 items-center gap-0.5 sm:gap-1.5">
             {/* Search button (tous) */}
             <Button
               variant="ghost"
               size="icon"
-              className="text-gray-600 hover:text-gray-800 hover:bg-gray-100"
+              className="h-9 w-9 text-gray-600 hover:text-gray-800 hover:bg-gray-100 sm:h-10 sm:w-10"
               onClick={() => setSearchOpen(true)}
               aria-label="Rechercher (⌘K)"
             >
@@ -277,7 +285,9 @@ export function Navbar() {
                     : "Communauté"}
                   title="Communauté"
                   className={cn(
-                    "relative inline-flex h-10 w-10 items-center justify-center rounded-md transition-colors",
+                    // Sous 400 px l'icône cède la place : « Communauté » reste dans le
+                    // menu du compte, avec son compteur de messages non lus.
+                    "relative hidden h-9 w-9 items-center justify-center rounded-md transition-colors min-[400px]:inline-flex sm:h-10 sm:w-10",
                     surChat
                       ? "bg-brand-gold-tint text-brand-gold-dark"
                       : "text-gray-600 hover:bg-gray-100 hover:text-gray-800"
@@ -297,19 +307,22 @@ export function Navbar() {
                 {/* Compte gratuit avec essai jamais pris : l'offre reste visible sur
                     chaque page. Avant, seul le menu déroulant la portait, sous
                     « Passer Standard » — un prix, pas une offre gratuite. */}
-                {peutDemarrerEssai(user) && (
+                {/* À partir de `xl` seulement : entre 1 024 et 1 280 px il n'y a pas
+                    la place, l'offre reste alors dans le menu du compte. */}
+                {essai && (
                   <Link
                     href="/tarifs"
-                    className="hidden lg:inline-flex items-center gap-1.5 rounded-lg bg-brand-gold px-3 py-1.5 text-[13px] font-semibold text-brand-dark shadow-sm shadow-brand-gold/25 ring-1 ring-brand-gold/30 hover:bg-brand-gold-deep transition-colors"
+                    title="Essai gratuit 7 jours"
+                    className="hidden xl:inline-flex flex-shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg bg-brand-gold px-3 py-1.5 text-[13px] font-semibold text-brand-dark shadow-sm shadow-brand-gold/25 ring-1 ring-brand-gold/30 hover:bg-brand-gold-deep transition-colors"
                   >
-                    <Zap className="h-3.5 w-3.5" /> Essai 7 jours offert
+                    <Zap className="h-3.5 w-3.5" /> Essai offert
                   </Link>
                 )}
                 {/* Alerts bell with unread count */}
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="relative text-gray-600 hover:text-gray-800 hover:bg-gray-100"
+                  className="relative h-9 w-9 text-gray-600 hover:text-gray-800 hover:bg-gray-100 sm:h-10 sm:w-10"
                   aria-label="Notifications"
                   onClick={() => router.push("/notifications")}
                 >
@@ -325,14 +338,17 @@ export function Navbar() {
                 <div className="relative">
                   <button
                     onClick={() => setUserMenuOpen(!userMenuOpen)}
-                    className="flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 py-1.5 text-sm hover:border-brand-gold/40 hover:bg-brand-gold-tint/50 transition-all"
+                    className="flex items-center gap-1 rounded-xl border border-gray-200 bg-white px-2 py-1.5 text-sm hover:border-brand-gold/40 sm:gap-2 sm:px-3 hover:bg-brand-gold-tint/50 transition-all"
                     aria-expanded={userMenuOpen}
                     aria-haspopup="true"
                   >
                     <div className="h-6 w-6 rounded-full bg-brand-gold-tint flex items-center justify-center ring-1 ring-brand-gold/30">
                       <User className="h-3 w-3 text-brand-gold-dark" />
                     </div>
-                    <span className="hidden whitespace-nowrap sm:block text-gray-700 font-medium">
+                    {/* Entre 1 024 et 1 280 px les liens texte occupent la barre : le
+                        prénom ne revient qu'à `xl`. Sous `lg`, le menu est replié et
+                        il y a de nouveau la place. */}
+                    <span className="hidden max-w-[9rem] truncate whitespace-nowrap sm:block lg:hidden xl:block text-gray-700 font-medium">
                       {user.prenom || user.email.split("@")[0]}
                     </span>
                     <Badge
@@ -343,7 +359,10 @@ export function Navbar() {
                           ? "gold"
                           : "secondary"
                       }
-                      className="hidden sm:flex text-[10px] px-1.5 py-0"
+                      className={cn(
+                        "hidden sm:flex lg:hidden text-[10px] px-1.5 py-0",
+                        !essai && "xl:flex"
+                      )}
                     >
                       {planLabel(user.plan)}
                     </Badge>
@@ -359,6 +378,17 @@ export function Navbar() {
                           onClick={() => setUserMenuOpen(false)}
                         >
                           <User className="h-4 w-4 text-gray-600" /> {R.profil.label}
+                        </Link>
+                        <Link
+                          href="/profil#parrainage"
+                          rel="nofollow"
+                          className="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                          onClick={() => setUserMenuOpen(false)}
+                        >
+                          <Gift className="h-4 w-4 text-emerald-600" /> Parrainage
+                          <span className="ml-auto rounded-full bg-emerald-50 px-1.5 py-0.5 text-[9px] font-bold text-emerald-700 ring-1 ring-emerald-200">
+                            5 €
+                          </span>
                         </Link>
                         <Link
                           href="/defi"
@@ -446,7 +476,7 @@ export function Navbar() {
                 aria-label="Communauté"
                 title="Communauté"
                 className={cn(
-                  "inline-flex h-10 w-10 items-center justify-center rounded-md transition-colors",
+                  "inline-flex h-9 w-9 items-center justify-center rounded-md transition-colors sm:h-10 sm:w-10",
                   surChat
                     ? "bg-brand-gold-tint text-brand-gold-dark"
                     : "text-gray-600 hover:bg-gray-100 hover:text-gray-800"
@@ -478,7 +508,7 @@ export function Navbar() {
             <Button
               variant="ghost"
               size="icon"
-              className="lg:hidden text-gray-600 hover:bg-gray-100"
+              className="h-9 w-9 text-gray-600 hover:bg-gray-100 sm:h-10 sm:w-10 lg:hidden"
               onClick={() => setMenuOpen(!menuOpen)}
               aria-label={menuOpen ? "Fermer le menu" : "Ouvrir le menu"}
             >
@@ -513,6 +543,10 @@ export function Navbar() {
             <div className="mt-3 border-t border-gray-100 pt-3">
               <p className="px-4 pb-2 text-[10px] font-bold uppercase tracking-[.14em] text-gray-500">Mes outils</p>
               <Link href="/assistant" rel="nofollow" className="block rounded-lg px-4 py-2 text-sm font-medium text-gray-700" onClick={() => setMenuOpen(false)}>{R.assistant.label}</Link>
+              <Link href="/profil#parrainage" rel="nofollow" className="flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium text-gray-700" onClick={() => setMenuOpen(false)}>
+                <Gift className="h-4 w-4 text-emerald-600" aria-hidden /> Parrainage
+                <span className="rounded-full bg-emerald-50 px-1.5 py-0.5 text-[9px] font-bold text-emerald-700 ring-1 ring-emerald-200">5 € offerts</span>
+              </Link>
             </div>
           )}
           {peutDemarrerEssai(user) && (

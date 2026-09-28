@@ -21,6 +21,17 @@ log = structlog.get_logger()
 router = APIRouter()
 
 
+def elo_a_la_date(participation) -> Optional[float]:
+    """ELO global du cheval AVANT la course rejouée (photo `elo_avant_global`).
+
+    Le backtest lisait `chevaux.elo_score_global`, l'ELO d'AUJOURD'HUI : sur une
+    course passée, un cheval devenu bon depuis passait le filtre `elo_min` grâce à
+    des victoires postérieures — la stratégie paraissait meilleure qu'elle ne
+    l'était. Sans photo, pas d'ELO connu à la date : None (le filtre l'écarte).
+    """
+    return getattr(participation, "elo_avant_global", None)
+
+
 # ─────────────────────────────────────────────
 # Schemas
 # ─────────────────────────────────────────────
@@ -251,7 +262,7 @@ async def backtest_strategy(
 
         # `or 0` : un cheval sans ELO (None) faisait planter la comparaison None < float
         # (TypeError) → tout le backtest de la stratégie tombait.
-        if elo_min and (cheval.elo_score_global or 0) < elo_min:
+        if elo_min and (elo_a_la_date(part) or 0) < elo_min:
             continue
 
         # Ce cheval satisfait la stratégie → on parie

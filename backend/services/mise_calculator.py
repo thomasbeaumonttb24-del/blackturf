@@ -368,6 +368,32 @@ RANG_MAX_BONUS_PLACE = 2
 RANG_MAX_FRACTION_CHAMP = 0.60
 
 
+def champ_reel(nb_declares, predictions, nb_courants=None) -> Optional[int]:
+    """Partants RÉELS = déclarés moins les non-partants connus.
+
+    `courses.nb_partants` compte les déclarés, non-partants compris (495 courses
+    sur 1 693 en 30 jours au 27/09/2026). Le plafond de rang et la couverture se
+    règlent sur le champ qui court. Sans nombre déclaré : les partants prédits.
+
+    `nb_courants` (compté en base, `bet_catalog.nb_partants_courants`) prime : un
+    non-partant retiré AVANT la prédiction n'a pas de ligne dans `predictions`, et
+    « déclarés − non-partants vus » le comptait encore (~6 % des courses).
+    """
+    try:
+        if nb_courants is not None and int(nb_courants) > 0:
+            return int(nb_courants)
+    except (TypeError, ValueError):
+        pass
+    nb_np = sum(1 for p in (predictions or []) if p.get("non_partant"))
+    if nb_declares:
+        try:
+            return max(0, int(nb_declares) - nb_np)
+        except (TypeError, ValueError):
+            pass
+    vivants = sum(1 for p in (predictions or []) if not p.get("non_partant"))
+    return vivants or None
+
+
 def _rang_max_effectif(rang_max_profil, nb_partants) -> Optional[int]:
     """Plafond de rang prédit réellement appliqué = le plus contraignant entre le plafond
     du profil et les 60 % supérieurs du champ (plancher 4, sinon les petits champs ne
@@ -1415,6 +1441,9 @@ def generer_plan(
             except (TypeError, ValueError):
                 pass
 
+    nb_champ = champ_reel((course_info or {}).get("nb_partants"), predictions,
+                          (course_info or {}).get("nb_partants_courants"))
+
     # RANG PRÉDIT par cheval = ordre de proba_top1 décroissante (même classement que
     # celui affiché à l'utilisateur). Chaque candidat porte le rang de son PIRE cheval :
     # c'est lui qui détermine si le pari suit le classement ou le contredit.
@@ -1561,8 +1590,7 @@ def generer_plan(
     # Plafond de rang appliqué à CETTE course : le profil borne le rang, le champ le
     # borne encore (cf. _rang_max_effectif).
     cfg = dict(cfg)
-    cfg["rang_max"] = _rang_max_effectif(cfg.get("rang_max"),
-                                         (course_info or {}).get("nb_partants"))
+    cfg["rang_max"] = _rang_max_effectif(cfg.get("rang_max"), nb_champ)
 
     selected = _select_conviction(cands, montant, palier, cfg, roi_weights, signal_mults,
                                   respect_montant=respect_montant, ev_band_perf=ev_band_perf,
@@ -1622,7 +1650,7 @@ def generer_plan(
             # ∝ conviction (proba×rapport, edge outsider, signal, bande d'EV).
             _allocate_spread(selected, montant_engage, cfg, _min_stake_plan,
                              pool=pool_couverture,
-                             nb_partants=(course_info or {}).get("nb_partants"),
+                             nb_partants=nb_champ,
                              ancre=_r1)
         else:
             # PRUDENT : RESPECT STRICT DE LA TRANCHE DE COEFFICIENT (×1.8-4) SUR LA MISE

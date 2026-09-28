@@ -18,14 +18,14 @@ Postgres, pour qu'aucun bug, script ou accès direct ne puisse les contourner :
 
 Triggers : Postgres uniquement (SQLite, utilisé par les tests unitaires, ignore).
 
-Revision ID: 0055
-Revises: 0054
+Revision ID: 0057
+Revises: 0056
 """
 import sqlalchemy as sa
 from alembic import op
 
-revision = "0055"
-down_revision = "0054"
+revision = "0057"
+down_revision = "0056"
 branch_labels = None
 depends_on = None
 

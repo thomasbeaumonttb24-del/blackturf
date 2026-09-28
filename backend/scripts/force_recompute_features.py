@@ -58,5 +58,24 @@ async def main() -> int:
     return 0
 
 
+REFUS = """REFUSÉ : ce recalcul relit l'état ACTUEL de la base (cote de clôture,
+statistiques de saison et totaux de carrière à jour, mouvements de cote finaux) et
+l'écrit dans des vecteurs datés d'avant chaque course. Lancé le 24/09/2026, il a fait
+promouvoir trois modèles qui avaient appris l'arrivée (v545 à v547) et imposé une
+restauration de features_ml depuis la sauvegarde (27/09).
+
+Pour mettre à jour une famille de variables sans fuite, utiliser un patch ciblé :
+scripts/patch_features_elo.py, patch_features_corde.py, patch_features_commentaires.py.
+Option --malgre-la-fuite pour passer outre, en connaissance de cause."""
+
+
+def refuser_sans_option() -> None:
+    import sys
+    if "--malgre-la-fuite" not in sys.argv:
+        print(REFUS, flush=True)
+        raise SystemExit(2)
+
+
 if __name__ == "__main__":
+    refuser_sans_option()
     asyncio.run(main())

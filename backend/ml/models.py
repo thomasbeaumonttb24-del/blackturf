@@ -171,6 +171,18 @@ def temporal_holdout_mask(X: "pd.DataFrame", frac_train: float = 0.8) -> "np.nda
     return mask
 
 
+# Colonnes absentes d'un vecteur PAR CONSTRUCTION, à l'entraînement comme en direct :
+# `pref_dist_{catégorie}` n'est écrite que pour la catégorie de distance de la course
+# (cf. ml.features). Leur absence n'est pas une dérive de schéma.
+COLONNES_CREUSES = frozenset({"pref_dist_courte", "pref_dist_moyenne", "pref_dist_longue"})
+
+
+def colonnes_absentes(attendues, presentes) -> list[str]:
+    """Colonnes attendues par le modèle, absentes des features, hors creuses."""
+    presentes = set(presentes)
+    return [c for c in attendues if c not in presentes and c not in COLONNES_CREUSES]
+
+
 def chemin_evaluation(version_num: int) -> Path:
     """Fichier du modèle d'ÉVALUATION d'une version refit (`model_vNNNN_eval.pkl`).
 
@@ -738,7 +750,13 @@ class BlackTurfEnsemble:
         return p_xgb, p_lgbm, p_cb
 
     def _aligned_features(self, X: pd.DataFrame) -> pd.DataFrame:
-        """Aligne le schéma servi, avec compatibilité terrain des anciens modèles."""
+        """Aligne le schéma servi, avec compatibilité terrain des anciens modèles.
+
+        Une colonne attendue et absente vaut 0, comme à l'entraînement. Hors des
+        colonnes creuses par construction (`COLONNES_CREUSES`), c'est une dérive de
+        schéma entre le modèle et le calcul des features : on la signale au lieu de
+        servir en silence un 0 que le modèle n'a jamais vu à cette place.
+        """
         old_terrain = ("pref_terrain_bon", "pref_terrain_souple", "pref_terrain_lourd")
         if ("pref_terrain_actuel" in X.columns and "terrain_code" in X.columns
                 and any(name in self.feature_names and name not in X.columns
@@ -747,6 +765,10 @@ class BlackTurfEnsemble:
             for code, name in enumerate(old_terrain):
                 if name in self.feature_names and name not in X.columns:
                     X[name] = X["pref_terrain_actuel"].where(X["terrain_code"] == code, 0.0)
+        absentes = colonnes_absentes(self.feature_names, X.columns)
+        if absentes:
+            log.warning("model.colonnes_absentes", version=getattr(self, "version_num", 0),
+                        n=len(absentes), colonnes=absentes[:20])
         return X.reindex(columns=self.feature_names, fill_value=0).fillna(0)
 
     def predict_proba(self, X: pd.DataFrame) -> np.ndarray:
@@ -1129,6 +1151,10 @@ class BlackTurfEnsemble:
     def save(self, version_num: int) -> Path:
         """Sauvegarde le modèle avec son numéro de version."""
         path = MODELS_DIR / f"model_v{version_num:04d}.pkl"
+        # Le pickle porte son propre numéro : les prédictions l'attribuent au modèle
+        # réellement chargé (current_model.pkl), pas à la ligne `est_actif` qui peut
+        # diverger pendant une promotion ou un retour arrière.
+        self.version_num = int(version_num)
         with open(path, "wb") as f:
             pickle.dump(self, f, protocol=pickle.HIGHEST_PROTOCOL)
 

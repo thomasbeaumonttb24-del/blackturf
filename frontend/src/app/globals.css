@@ -688,9 +688,9 @@
   transform: perspective(1000px) translateY(34px) rotateX(10deg) scale(.98);
 }
 
-/* Carte inclinable : le script pose --rx / --ry (degrés) et --mx / --my (reflet). */
+/* Carte inclinable : le script pose --rx / --ry (degrés). */
 .tr-tilt {
-  --rx: 0deg; --ry: 0deg; --mx: 50%; --my: 50%; --lift: 0px;
+  --rx: 0deg; --ry: 0deg; --lift: 0px;
   transform: perspective(1100px) rotateX(var(--rx)) rotateY(var(--ry)) translateY(var(--lift));
   transform-style: preserve-3d;
   transition: transform .45s cubic-bezier(0.16,1,0.3,1), box-shadow .45s ease;
@@ -698,13 +698,6 @@
 }
 .tr-tilt.tr-tilting { transition: transform .08s linear, box-shadow .3s ease; }
 .tr-tilt:hover { --lift: -4px; }
-.tr-glare {
-  pointer-events: none;
-  position: absolute; inset: 0; border-radius: inherit;
-  background: radial-gradient(420px circle at var(--mx) var(--my), rgba(255,255,255,.55), transparent 42%);
-  opacity: 0; transition: opacity .35s ease; mix-blend-mode: soft-light;
-}
-.tr-tilt:hover .tr-glare { opacity: 1; }
 .tr-pop { transform: translateZ(28px); }
 
 /* Reflet qui balaie les cartes du podium. */

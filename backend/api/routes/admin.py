@@ -305,6 +305,44 @@ async def get_user_detail(
         ],
         "nb_bets": nb_total,
         "bets": bets,
+        "parrainage": await _parrainage_du_compte(user, db),
+    }
+
+
+async def _parrainage_du_compte(user: User, db: AsyncSession) -> dict:
+    """Qui a parrainé ce compte, et qui il a parrainé — pour la fiche admin."""
+    from sqlalchemy.orm import aliased
+    from db.models import Parrainage
+    from services import parrainage as P
+
+    Autre = aliased(User)
+
+    def ligne(lien, autre):
+        etape = P._etape(lien, autre, False)
+        return {
+            "user_id": autre.user_id if autre else None,
+            "email": autre.email if autre else "compte supprimé",
+            "statut": lien.statut,
+            "etape_libelle": P.ETAPES_ADMIN.get(etape, etape),
+            "created_at": lien.created_at,
+            "valide_at": lien.valide_at,
+        }
+
+    recu = (await db.execute(
+        select(Parrainage, Autre).join(Autre, Autre.user_id == Parrainage.parrain_id, isouter=True)
+        .where(Parrainage.filleul_id == user.user_id)
+    )).first()
+    donnes = (await db.execute(
+        select(Parrainage, Autre).join(Autre, Autre.user_id == Parrainage.filleul_id, isouter=True)
+        .where(Parrainage.parrain_id == user.user_id).order_by(Parrainage.created_at.desc())
+    )).all()
+    valides = sum(1 for l, _ in donnes if l.statut == "valide")
+    return {
+        "code": user.code_parrain,
+        "parraine_par": ligne(*recu) if recu else None,
+        "filleuls": [ligne(l, a) for l, a in donnes],
+        "valides": valides,
+        "gagne_cents": valides * P.REMISE_CENTS,
     }
 
 
@@ -414,7 +452,7 @@ async def delete_user(
     # base refuse la suppression et la transaction entière repart en arrière.
     supprime["paris"] = (await db.execute(
         delete(BankrollEntry).where(BankrollEntry.user_id == user_id))).rowcount or 0
-    # Les paris du défi sont immuables en base (trigger 0055) : seule une
+    # Les paris du défi sont immuables en base (trigger 0057) : seule une
     # suppression de compte, déclarée pour cette transaction, peut les effacer.
     if db.get_bind().dialect.name == "postgresql":
         await db.execute(text("SELECT set_config('blackturf.suppression_compte', 'on', true)"))
@@ -443,6 +481,14 @@ async def delete_user(
         .values(user_id=None))).rowcount or 0
     supprime["abonnements"] = (await db.execute(
         delete(Subscription).where(Subscription.user_id == user_id))).rowcount or 0
+
+    # Parrainage : le compte disparaît, le lien reste (historique du parrain),
+    # sans pointer sur lui — sinon la clé étrangère bloquerait la suppression.
+    from db.models import Parrainage
+    supprime["parrainages_detaches"] = (await db.execute(
+        update(Parrainage).where(Parrainage.filleul_id == user_id).values(filleul_id=None))).rowcount or 0
+    await db.execute(update(Parrainage).where(Parrainage.parrain_id == user_id).values(parrain_id=None))
+    await db.execute(update(User).where(User.parraine_par_id == user_id).values(parraine_par_id=None))
 
     await db.delete(user)
     await db.commit()

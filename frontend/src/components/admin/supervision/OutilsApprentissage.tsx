@@ -166,6 +166,12 @@ export interface OutilsApprentissagePayload {
   melange_arrivees?: {
     mesure_disponible: boolean;
     en_service: boolean;
+    covariables_en_service?: boolean;
+    covariables_gammas?: number[] | null;
+    covariables_examen_retenu?: boolean;
+    covariables_gain_vs_deux_parametres?: number | null;
+    covariables_gain_vs_deux_parametres_ic95?: number[] | null;
+    covariables_raison?: string | null;
     beta_modele?: number | null;
     beta_marche?: number | null;
     examen_retenu?: boolean | null;
@@ -578,6 +584,24 @@ export default function OutilsApprentissage({
                     ? `vraisemblance ${signedNum(melange.gain_logv_vs_marche)} vs cote, ${signedNum(melange.gain_logv_vs_servi)} vs servi — ${num(melange.n_courses)} courses`
                     : (melange.raison ?? "mesure non concluante"))
                 : `en attente — ${num(melange?.min_courses)} courses nécessaires`}
+            </span>
+          }
+        />
+        <StatTile
+          label="Covariables du marché"
+          hint="Trois termes ajoutés au mélange : le mouvement de la cote sur 30 minutes, la cote Geny et le favori du marché (que le public surjoue). Ils corrigent la cote juste des gros favoris et des chevaux « sous-cotés ». Servis seulement s'ils battent le mélange à deux poids hors échantillon, avec des coefficients de même signe sur les deux moitiés."
+          value={
+            melange?.covariables_en_service && melange.covariables_gammas
+              ? melange.covariables_gammas.map((g) => g.toFixed(2)).join(" / ")
+              : "—"
+          }
+          valueClass={melange?.covariables_en_service ? "text-emerald-700" : "text-muted-foreground"}
+          sub={melange?.covariables_en_service ? "mouvement / Geny / favori en service" : "mélange à deux poids servi"}
+          footer={
+            <span className="text-[11px] text-muted-foreground">
+              {melange?.covariables_examen_retenu
+                ? `vraisemblance ${signedNum(melange.covariables_gain_vs_deux_parametres)} vs deux poids`
+                : (melange?.covariables_raison ?? "pas encore examinées")}
             </span>
           }
         />

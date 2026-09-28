@@ -8,8 +8,9 @@ import { z } from "zod";
 import { toast } from "sonner";
 import {
   Loader2, CreditCard, Bell, User, Shield, Check, X,
-  TrendingUp, Zap, Brain, Star, ChevronRight, Lock, AlertTriangle,
+  TrendingUp, Zap, Brain, Star, ChevronRight, Lock, AlertTriangle, Gift,
 } from "lucide-react";
+import { ParrainageSection } from "@/components/billing/ParrainageSection";
 import Link from "next/link";
 import { useRequireAuth } from "@/hooks/useAuth";
 import { authApi, api } from "@/lib/api";
@@ -142,7 +143,15 @@ export default function ProfilPage() {
   const [loadingPortal, setLoadingPortal] = useState(false);
   const [loadingCancel, setLoadingCancel] = useState(false);
   const [pushEnabled, setPushEnabled] = useState(false);
-  const [activeSection, setActiveSection] = useState<"profile" | "plan" | "notifs" | "security">("profile");
+  const [activeSection, setActiveSection] = useState<"profile" | "plan" | "parrainage" | "notifs" | "security">("profile");
+
+  // Lien direct vers l'onglet (e-mail « 5 € offerts » → /profil#parrainage).
+  useEffect(() => {
+    const suivre = () => { if (window.location.hash === "#parrainage") setActiveSection("parrainage"); };
+    suivre();
+    window.addEventListener("hashchange", suivre);
+    return () => window.removeEventListener("hashchange", suivre);
+  }, []);
 
   const { register, handleSubmit, watch, setValue, reset, formState: { errors } } = useForm<ProfileForm>({
     resolver: zodResolver(profileSchema),
@@ -259,6 +268,7 @@ export default function ProfilPage() {
   const SECTIONS = [
     { id: "profile" as const, label: "Profil", icon: User },
     { id: "plan" as const, label: "Abonnement", icon: CreditCard },
+    { id: "parrainage" as const, label: "Parrainage", icon: Gift },
     { id: "notifs" as const, label: "Notifications", icon: Bell },
     { id: "security" as const, label: "Sécurité", icon: Shield },
   ];
@@ -522,6 +532,17 @@ export default function ProfilPage() {
                   </div>
                 )}
               </div>
+            </div>
+          )}
+
+          {/* ── Parrainage ── */}
+          {activeSection === "parrainage" && (
+            <div id="parrainage">
+              <div className="px-4 sm:px-6 py-4 border-b border-gray-100">
+                <h2 className="font-bold text-gray-900">Parrainage</h2>
+                <p className="text-xs text-gray-600 mt-0.5">Invitez vos amis, économisez sur votre abonnement</p>
+              </div>
+              <ParrainageSection />
             </div>
           )}
 

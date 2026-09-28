@@ -11,6 +11,10 @@ def test_v545_est_reconnue_comme_fuite():
     assert pl._fuite_suspectee({"rank_challenger": 0.9632, "rank_marche": 0.7486})
 
 
+def test_le_retrain_du_25_09_sur_features_recalculees_est_reconnu():
+    assert pl._fuite_suspectee({"rank_challenger": 0.7948, "rank_marche": 0.7486})
+
+
 def test_le_record_honnete_ne_declenche_pas():
     assert not pl._fuite_suspectee({"rank_challenger": 0.7686, "rank_marche": 0.7486})
     assert not pl._fuite_suspectee({"rank_challenger": 0.7017, "rank_marche": 0.7486})

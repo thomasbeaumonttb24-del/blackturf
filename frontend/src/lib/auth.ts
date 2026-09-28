@@ -27,6 +27,8 @@ export interface AuthUser {
   // Essai de 7 jours jamais consommé et aucun abonnement vivant : on peut le
   // proposer directement, sans détour par /tarifs.
   essai_disponible?: boolean;
+  // Filleul pas encore abonné : pas d'essai, 5 € déduits de son premier paiement.
+  remise_parrainage?: boolean;
 }
 
 /** Compte sans formule payante (les deux libellés historiques du gratuit). */
@@ -41,6 +43,15 @@ export function peutDemarrerEssai(user: AuthUser | null | undefined): boolean {
     && !!user!.email_verified
     && !!user!.essai_disponible
     && !user!.essai_bloque_sans_carte
+    && !user!.paiement_en_echec
+    && !user!.abonnement_gerable;
+}
+
+/** Filleul qui peut s'abonner avec sa remise de parrainage (même garde que l'essai). */
+export function peutProfiterRemise(user: AuthUser | null | undefined): boolean {
+  return estGratuit(user)
+    && !!user!.email_verified
+    && !!user!.remise_parrainage
     && !user!.paiement_en_echec
     && !user!.abonnement_gerable;
 }

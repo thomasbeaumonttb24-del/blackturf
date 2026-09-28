@@ -18,7 +18,7 @@ MAINTENANT = datetime.now(timezone.utc)
 
 @pytest.fixture(autouse=True)
 def _cache_classement_vide(monkeypatch):
-    # Hors tests du mois d'essai : le défi est réputé lancé depuis longtemps.
+    # Hors tests du lancement : le défi est réputé ouvert depuis longtemps.
     monkeypatch.setattr(defi, "PREMIER_MOIS", "2000-01")
     """Le cache du classement vit dans le processus : chaque test part d'une base neuve."""
     defi.invalider_classement()
@@ -203,6 +203,18 @@ async def test_rapport_pas_encore_publie_reste_en_attente(db):
     assert p.statut == "en_attente"
 
 
+async def test_arrivee_sans_rapport_ne_regle_pas_meme_les_perdants(db):
+    # Arrivée encore provisoire (aucun rapport) : un distancement peut la changer, et
+    # un pari réglé ne se corrige plus. Le perdant attend comme le gagnant.
+    u = await _user(db)
+    c = await _course(db)
+    p = await defi.engager_pari(db, u, "C1", "Simple Gagnant", [9], 20)
+    await _arrivee(db, c, rapports={}, detail={})
+    assert await defi.regler_course(db, "C1") == 0
+    await db.refresh(p)
+    assert p.statut == "en_attente"
+
+
 async def test_rapport_jamais_publie_rembourse_apres_72h(db):
     u = await _user(db)
     c = await _course(db)
@@ -338,6 +350,35 @@ async def test_recompense_ne_retrograde_jamais_un_abonne(db):
     await db.refresh(u)
     await db.refresh(r)
     assert (u.plan, r.statut) == ("expert", "conserve")
+
+
+async def test_webhook_stripe_ne_retire_pas_les_jours_offerts(db):
+    from api.routes.stripe_routes import _plan_effectif
+    u = await _gagnant_aout(db)
+    r = await defi.attribuer_recompense(db, MOIS_PASSE, 1, now=FIN_AOUT)
+    # Récompense encore en cours (échéance repoussée dans le futur pour le test).
+    r.expire_at = datetime.now(timezone.utc) + timedelta(days=10)
+    await db.commit()
+    # Essai Standard ouvert sans carte : aucun abonnement donnant accès.
+    db.add(Subscription(user_id=u.user_id, stripe_subscription_id="sub_std", plan="standard",
+                        periodicite="monthly", statut="essai_sans_carte", periode_debut=FIN_AOUT,
+                        periode_fin=FIN_AOUT + timedelta(days=7)))
+    await db.commit()
+    assert await _plan_effectif(u.user_id, db) == "expert"
+
+
+async def test_abonnement_inferieur_a_l_echeance_de_la_recompense(db):
+    u = await _gagnant_aout(db)
+    r = await defi.attribuer_recompense(db, MOIS_PASSE, 1, now=FIN_AOUT)
+    # Il souscrit un Standard pendant son mois Expert offert.
+    db.add(Subscription(user_id=u.user_id, stripe_subscription_id="sub_3", plan="standard",
+                        periodicite="monthly", statut="active", periode_debut=FIN_AOUT,
+                        periode_fin=FIN_AOUT + timedelta(days=60)))
+    await db.commit()
+    await defi.expirer_recompenses(db, now=FIN_AOUT + timedelta(days=31))
+    await db.refresh(u)
+    await db.refresh(r)
+    assert (u.plan, r.statut) == ("standard", "termine")
 
 
 async def test_recompense_manuelle_pour_un_abonne_payant(db):

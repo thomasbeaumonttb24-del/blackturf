@@ -131,6 +131,9 @@ class RegisterRequest(BaseModel):
     pseudo: str = Field(min_length=1, max_length=40)
     nom: Optional[str] = None
     prenom: Optional[str] = None
+    # Code du lien de parrainage (`/inscription?parrain=…`). Pris en compte à la
+    # création du compte SEULEMENT.
+    code_parrain: Optional[str] = Field(default=None, max_length=20)
 
     @field_validator("password")
     @classmethod
@@ -174,6 +177,7 @@ class RefreshRequest(BaseModel):
 class GoogleCallbackRequest(BaseModel):
     code: str
     redirect_uri: str
+    code_parrain: Optional[str] = Field(default=None, max_length=20)
 
 
 class UserMeResponse(BaseModel):
@@ -213,6 +217,8 @@ class UserMeResponse(BaseModel):
     # 2 seulement ont jamais ouvert l'essai. Le contrôle de carte déjà vue reste au
     # checkout — la carte n'est pas connue avant.
     essai_disponible: bool = False
+    # Filleul pas encore abonné : pas d'essai, 5 € de remise au premier paiement.
+    remise_parrainage: bool = False
 
 
 # ─────────────────────────────────────────────
@@ -322,20 +328,6 @@ MESSAGE_NON_CONFIRME = (
 )
 
 
-def _html_verification(user: User, lien: str) -> str:
-    return f"""
-    <div style="font-family:sans-serif;max-width:500px;margin:auto;">
-      <h2 style="color:#F59E0B;">🏇 Bienvenue sur BlackTurf, {user.prenom or 'parieur'} !</h2>
-      <p>Confirmez votre adresse e-mail pour activer votre compte :</p>
-      <p><a href="{lien}" style="background:#F59E0B;color:#000;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:bold;">Confirmer mon adresse</a></p>
-      <p style="color:#666;font-size:12px;">Lien valable 24 heures. Sans confirmation, le compte reste inactif.</p>
-      <p style="color:#666;font-size:12px;">Si vous n'êtes pas à l'origine de cette inscription, ignorez ce message : le compte ne s'ouvrira pas.</p>
-      <hr style="border-color:#333;"/>
-      <p style="color:#666;font-size:11px;">⚠️ Le jeu peut créer une dépendance — joueurs-info-service.fr — 09 74 75 13 13</p>
-    </div>
-    """
-
-
 async def _envoyer_lien_verification(user: User) -> bool:
     """Pose un jeton à usage unique (24 h) et envoie le lien. False si l'envoi a échoué.
 
@@ -353,10 +345,12 @@ async def _envoyer_lien_verification(user: User) -> bool:
         finally:
             await r.aclose()
         lien = f"{settings.frontend_url}/verifier-email?token={token}"
+        from services.email_compte import verification_adresse
+        html, texte = verification_adresse(user.prenom, lien)
         await send_email(
             to=user.email,
             subject="BlackTurf — Confirmez votre adresse e-mail",
-            html=_html_verification(user, lien),
+            html=html, text=texte,
         )
         log.info("auth.verification.envoyee", user_id=user.user_id)
         return True
@@ -411,6 +405,7 @@ async def register(body: RegisterRequest,
         existant.nom = body.nom or existant.nom
         existant.prenom = body.prenom or existant.prenom
         existant.pseudo = pseudo
+        await _rattacher_parrain(existant, body.code_parrain, db)
         try:
             await db.commit()
         except IntegrityError:
@@ -431,6 +426,8 @@ async def register(body: RegisterRequest,
     )
     db.add(user)
     try:
+        await db.flush()
+        await _rattacher_parrain(user, body.code_parrain, db)
         await db.commit()
     except IntegrityError:
         # Deux inscriptions simultanées sur le même pseudo : l'index unique tranche.
@@ -441,6 +438,18 @@ async def register(body: RegisterRequest,
 
     await _envoyer_lien_verification(user)
     return _reponse_verification(email)
+
+
+async def _rattacher_parrain(user: User, code: Optional[str], db: AsyncSession) -> None:
+    """Rattache le compte en cours de création à son parrain. Un code invalide
+    bloque l'inscription avec un message clair plutôt que de priver en silence
+    le filleul de sa remise."""
+    from services.parrainage import CodeInvalide, rattacher_filleul
+    try:
+        await rattacher_filleul(user, code, db)
+    except CodeInvalide as refus:
+        await db.rollback()
+        raise HTTPException(status_code=422, detail=str(refus))
 
 
 def _reponse_verification(email: str) -> RegisterResponse:
@@ -623,6 +632,8 @@ async def google_oauth(body: GoogleCallbackRequest, response: Response,
                 plan="free",
             )
             db.add(user)
+            await db.flush()
+            await _rattacher_parrain(user, body.code_parrain, db)
 
     user.last_login_at = datetime.now(timezone.utc)
     await db.commit()
@@ -671,6 +682,9 @@ async def me(user: User = Depends(get_current_user), db: AsyncSession = Depends(
                   for s in vivants)
     en_echec = any(s.statut == "past_due" for s in vivants)
 
+    from services.parrainage import remise_filleul_due
+    remise_parrainage = await remise_filleul_due(user, db)
+
     return UserMeResponse(
         user_id=user.user_id,
         email=user.email,
@@ -686,7 +700,10 @@ async def me(user: User = Depends(get_current_user), db: AsyncSession = Depends(
         essai_fin=bloque.essai_fin if bloque else None,
         abonnement_gerable=gerable,
         paiement_en_echec=en_echec,
-        essai_disponible=user.essai_utilise_at is None and not vivants,
+        # Un filleul n'a pas d'essai : sa remise de 5 € en tient lieu.
+        essai_disponible=(user.essai_utilise_at is None and not vivants
+                          and not user.parraine_par_id),
+        remise_parrainage=remise_parrainage is not None and not vivants,
     )
 
 
@@ -807,10 +824,14 @@ async def verify_email(token: str, response: Response, db: AsyncSession = Depend
     if not user:
         raise HTTPException(status_code=404, detail="Utilisateur introuvable")
 
+    deja_confirme = bool(user.email_verified)
     user.email_verified = True
     user.last_login_at = datetime.now(timezone.utc)
     await db.commit()
     log.info("auth.email_verified", user_id=user.user_id)
+    if not deja_confirme:
+        from services.parrainage import filleul_confirme
+        await filleul_confirme(user, db)
     if user.is_active:
         _set_auth_cookies(response, create_tokens(user.user_id, user.plan))
     return {"ok": True, "message": "Adresse e-mail confirmée"}
@@ -843,18 +864,9 @@ async def forgot_password(
         await r.aclose()
 
     reset_url = f"{settings.frontend_url}/reinitialiser-mot-de-passe?token={token}"
-    html = f"""
-    <div style="font-family:sans-serif;max-width:500px;margin:auto;">
-      <h2 style="color:#F59E0B;">🏇 BlackTurf — Réinitialisation de mot de passe</h2>
-      <p>Bonjour {user.prenom or 'parieur'},</p>
-      <p>Cliquez sur le lien ci-dessous pour réinitialiser votre mot de passe (valable 1 heure) :</p>
-      <p><a href="{reset_url}" style="background:#F59E0B;color:#000;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:bold;">Réinitialiser mon mot de passe</a></p>
-      <p style="color:#666;font-size:12px;">Si vous n'avez pas demandé cette réinitialisation, ignorez cet email.</p>
-      <hr style="border-color:#333;"/>
-      <p style="color:#666;font-size:11px;">⚠️ Le jeu peut créer une dépendance — joueurs-info-service.fr — 09 74 75 13 13</p>
-    </div>
-    """
-    await send_email(to=email, subject="BlackTurf — Réinitialisation de mot de passe", html=html)
+    from services.email_compte import reinitialisation_mot_de_passe
+    html, texte = reinitialisation_mot_de_passe(user.prenom, reset_url)
+    await send_email(to=email, subject="BlackTurf — Réinitialisation de mot de passe", html=html, text=texte)
     log.info("auth.forgot_password", user_id=user.user_id)
     return {"ok": True}
 

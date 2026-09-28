@@ -74,9 +74,15 @@ _META_KEYS = {
 # n'est simplement pas lue au bon endroit — ce qui n'est pas la même dette, et ce
 # que la formulation d'origine faisait passer pour une impasse définitive.
 # La règle du registre est « une cause VÉRIFIÉE » : on écrit donc ce qui est vrai.
-_COMMENTAIRE = ("commentaire_course jamais écrit : /performances-detaillees ne "
-                "publie pas de commentaire ; /participants le publie APRÈS la "
-                "course et n'est pas relu pour l'historique (vérifié 2026-09-06)")
+# MISE À JOUR DU 2026-09-25 : /participants est désormais relu chaque matin
+# (`services.commentaires_pmu`, fenêtre J-7..J-1) et les 30 jours encore publiés
+# ont été rattrapés — le PMU efface les commentaires au bout de 30 jours, rien
+# n'existe avant le 26/08/2026. Ces features retrouvent donc de la variance, et
+# le registre le signalera : c'est voulu, l'entrée sera à retirer.
+_COMMENTAIRE = ("commentaire_course jamais écrit avant le 25/09/2026 : "
+                "/performances-detaillees ne publie pas de commentaire ; /participants "
+                "le publie APRÈS la course (relu chaque matin depuis, effacé par le "
+                "PMU à 30 jours)")
 
 SANS_SOURCE: dict[str, str] = {
     "commentaire_signal": _COMMENTAIRE,

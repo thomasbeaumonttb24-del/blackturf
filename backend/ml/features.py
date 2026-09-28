@@ -722,7 +722,12 @@ async def compute_features_for_participation(
             c.categorie_particularite,
             c.date_heure, c.corde,
             ch.age, ch.sexe,
-            ch.elo_score_global, ch.elo_score_plat, ch.elo_score_trot, ch.elo_score_obstacle,
+            -- ELO À LA DATE (photo avant course), comme le chemin par lot ; le
+            -- rating courant ne sert que pour une course à venir (photo NULL).
+            COALESCE(p.elo_avant_global, ch.elo_score_global),
+            COALESCE(p.elo_avant_plat, ch.elo_score_plat),
+            COALESCE(p.elo_avant_trot, ch.elo_score_trot),
+            COALESCE(p.elo_avant_obstacle, ch.elo_score_obstacle),
             pc.gains_carriere_total, pc.nb_courses_total, pc.nb_victoires_total
         FROM participations p
         JOIN courses c ON p.course_id = c.course_id
@@ -758,8 +763,12 @@ async def compute_features_for_participation(
 
     # ELO moyen et max de la course
     elo_stats = await session.execute(text("""
-        SELECT AVG(ch.elo_score_global), MAX(ch.elo_score_global), MIN(ch.elo_score_global),
-               AVG(ch.elo_score_plat), AVG(ch.elo_score_trot), AVG(ch.elo_score_obstacle)
+        SELECT AVG(COALESCE(p.elo_avant_global, ch.elo_score_global)),
+               MAX(COALESCE(p.elo_avant_global, ch.elo_score_global)),
+               MIN(COALESCE(p.elo_avant_global, ch.elo_score_global)),
+               AVG(COALESCE(p.elo_avant_plat, ch.elo_score_plat)),
+               AVG(COALESCE(p.elo_avant_trot, ch.elo_score_trot)),
+               AVG(COALESCE(p.elo_avant_obstacle, ch.elo_score_obstacle))
         FROM participations p
         JOIN chevaux ch ON p.cheval_id = ch.cheval_id
         WHERE p.course_id = :cid AND p.non_partant = false
@@ -776,12 +785,19 @@ async def compute_features_for_participation(
         (_elo_row[_IDX_ELO_DISC[_cle_discipline(discipline)]] if _elo_row else None)
         or elo_avg)
 
-    # Évolution ELO sur 5 dernières courses
+    # Évolution ELO sur 5 dernières courses — ANTÉRIEURES à celle-ci (même borne
+    # que `_load_course_batch_data` : sans elle, un recalcul après l'arrivée lit le
+    # delta de la course elle-même).
+    from datetime import date as _date_elo
+    _borne_elo = {"cid": cheval_id,
+                  "today": date_heure.date() if date_heure else _date_elo.today(),
+                  "course": course_id}
     elo_hist = await session.execute(text("""
         SELECT delta_elo FROM elo_historique
-        WHERE cheval_id = :cid
+        WHERE cheval_id = :cid AND date_course < :today
+          AND course_id IS DISTINCT FROM :course
         ORDER BY date_course DESC LIMIT 5
-    """), {"cid": cheval_id})
+    """), _borne_elo)
     delta_elos = [r[0] for r in elo_hist.fetchall()]
     delta_elo_5 = float(np.mean(delta_elos)) if delta_elos else 0.0
 
@@ -1327,9 +1343,10 @@ async def compute_features_for_participation(
     elo_velocity_r = await session.execute(text("""
         SELECT delta_elo, date_course
         FROM elo_historique
-        WHERE cheval_id = :cid
+        WHERE cheval_id = :cid AND date_course < :today
+          AND course_id IS DISTINCT FROM :course
         ORDER BY date_course DESC LIMIT 10
-    """), {"cid": cheval_id})
+    """), _borne_elo)
     elo_hist_rows = elo_velocity_r.fetchall()
 
     velocity_elo = 0.0

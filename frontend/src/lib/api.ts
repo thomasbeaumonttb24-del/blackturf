@@ -96,7 +96,7 @@ export type InscriptionEnAttente = {
 
 export const authApi = {
   // L'inscription n'ouvre plus de session : elle envoie un lien de confirmation.
-  register: (data: { email: string; password: string; pseudo: string; nom?: string; prenom?: string }) =>
+  register: (data: { email: string; password: string; pseudo: string; nom?: string; prenom?: string; code_parrain?: string }) =>
     api.post<InscriptionEnAttente>("/auth/register", data),
   // Renvoi du lien SANS session : celui dont le lien a expiré ne peut plus se
   // connecter, donc plus rien demander depuis son profil.
@@ -111,6 +111,56 @@ export const authApi = {
   logout: () => api.post("/auth/logout"),
   updateMe: (data: Record<string, unknown>) => api.patch("/auth/me", data),
   savePushSub: (sub: object) => api.put("/auth/push-subscription", sub),
+};
+
+export type ResumeParrainage = {
+  code: string;
+  lien: string;
+  remise_cents: number;
+  filleuls: {
+    prenom: string;
+    statut: "en_attente" | "valide" | "refuse" | "annule";
+    // Étape fine du suivi, et son libellé prêt à afficher.
+    etape: "email_a_confirmer" | "attente_paiement" | "paiement_en_cours" | "verification"
+      | "credite" | "reporte" | "refuse" | "parrain_inactif" | "annule";
+    etape_libelle: string;
+    depuis: string;
+    credite_le: string | null;
+  }[];
+  en_attente: number;
+  annules: number;
+  valides: number;
+  gagne_cents: number;
+  // null : solde Stripe momentanément illisible.
+  credit_disponible_cents: number | null;
+  remise_filleul_disponible: boolean;
+  // Où et quand le crédit sera déduit (cf. services/parrainage.situation_credit).
+  deduction:
+    | { situation: "facture"; date: string | null; total_cents: number; a_payer_cents: number }
+    | { situation: "abonne"; date: string | null }
+    | { situation: "resilie"; date: string | null }
+    | { situation: "offert" }
+    | { situation: "sans_abonnement" };
+  // Plafond de la période de facturation en cours (4 en Expert, 3 en Standard).
+  mois: {
+    debut: string;
+    fin: string | null;
+    formule: "standard" | "expert" | null;
+    prix_cents: number;
+    plafond: number;
+    poses: number;
+    reportes: number;
+  };
+};
+
+export type CodeParrain =
+  | { valide: false }
+  | { valide: true; code: string; prenom: string | null; remise_cents: number };
+
+export const parrainageApi = {
+  moi: () => api.get<ResumeParrainage>("/parrainage"),
+  verifier: (code: string) =>
+    api.get<CodeParrain>(`/parrainage/code/${encodeURIComponent(code)}`, { tolere401: true }),
 };
 
 export const coursesApi = {
@@ -186,10 +236,6 @@ export type DefiRegles = {
   recompenses: { rang: number; plan: string; jours: number }[];
   types: DefiTypeInfo[];
   mois: string;
-  /** Premier mois officiel (AAAA-MM) ; avant, le défi se joue en mois d'essai. */
-  premier_mois?: string;
-  /** Le mois en cours est un mois d'essai (aucune récompense). */
-  essai?: boolean;
 };
 
 export type DefiPari = {
@@ -226,7 +272,6 @@ export type DefiLigne = DefiStats & {
 
 export type DefiClassement = {
   mois: string;
-  essai?: boolean;
   nb_joueurs: number;
   nb_classes: number;
   lignes: DefiLigne[];
@@ -247,7 +292,6 @@ export type DefiMoi = DefiStats & {
 export type DefiCourse = {
   /** Mois du défi auquel la course appartient (calendrier de Paris). */
   mois: string;
-  essai?: boolean;
   /** Paris ouverts par le PMU sur cette course. */
   types: DefiTypeInfo[];
   ouvert: boolean;
@@ -410,6 +454,8 @@ export const adminApi = {
   defiRecompense: (mois: string, rang: number) =>
     api.post("/defi/recompenses", { mois, rang }, { baseURL: `${API_URL}/admin/api` }),
   dashboard: () => api.get("/dashboard", { baseURL: `${API_URL}/admin/api` }),
+  // Suivi du parrainage : qui parraine qui, étape de chaque filleul, coût et rapport.
+  parrainages: () => api.get("/parrainages", { baseURL: `${API_URL}/admin/api` }),
   enLigne: () => api.get("/en-ligne", { baseURL: `${API_URL}/admin/api` }),
   // Encaissements RÉELS par mois (journal `paiement_recu`) + échéancier des prélèvements.
   revenus: (mois = 12, actualiser = false) =>

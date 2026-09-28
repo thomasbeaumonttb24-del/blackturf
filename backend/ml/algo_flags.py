@@ -230,6 +230,14 @@ class AlgoFlags:
     # immédiat, sans attendre la nuit : BT_MELANGE_ARRIVEES=0.
     melange_arrivees: bool = field(
         default_factory=lambda: _env_bool("BT_MELANGE_ARRIVEES", True))
+    # Covariables du marché dans ce mélange (2026-09-27) : mouvement de cote sur
+    # 30 min, cote Geny, indicatrice du favori (`ml.melange_arrivees.COVARIABLES`).
+    # Mesuré hors échantillon (2 096 courses) : +0,018 de log-vraisemblance sur le
+    # mélange à deux paramètres ; gros favoris et « sous-cotés » enfin calibrés.
+    # ACTIF PAR DÉFAUT et sans effet tant que le nocturne ne les a pas retenues.
+    # Rollback immédiat vers deux paramètres : BT_MELANGE_COVARIABLES=0.
+    melange_covariables: bool = field(
+        default_factory=lambda: _env_bool("BT_MELANGE_COVARIABLES", True))
 
     # ── Modèle technique (2026-09-16) ────────────────────────────────────────
     # Modèles de victoire et de placement SANS aucune information de marché
@@ -299,6 +307,7 @@ class AlgoFlags:
             "market_gate_tolerance": self.market_gate_tolerance,
             "sharpness_calibration": self.sharpness_calibration,
             "melange_arrivees": self.melange_arrivees,
+            "melange_covariables": self.melange_covariables,
             "modele_technique": self.modele_technique,
             "vb_confirmation_technique": self.vb_confirmation_technique,
             "refit_full": self.refit_full,

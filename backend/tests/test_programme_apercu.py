@@ -105,3 +105,59 @@ async def test_apercu_programme_ignore_les_courses_non_analysees(client: AsyncCl
 
     data = (await client.get("/api/v1/programme/apercu")).json()
     assert "PRG3C1" not in data["courses"]
+
+
+
+async def test_apercu_programme_compte_les_ecarts_de_prix(client: AsyncClient, db: AsyncSession):
+    """Écart de prix = cote PMU ÷ cote juste (1/proba) − 1 ≥ 8 % : la règle de la
+    tuile « Écarts de prix » de la fiche course. Seul le NOMBRE sort."""
+    # accord=False : n°4 à 9,0 pour 30 % (juste 3,33 → +170 %) ; n°9 à 2,2 pour
+    # 20 % (juste 5,0 → −56 %) ; n°2 à 55 pour 1 % (juste 100 → −45 %).
+    await _course_du_jour(db, "PRG4C1", accord=False)
+    data = (await client.get("/api/v1/programme/apercu")).json()
+    assert data["courses"]["PRG4C1"]["nb_ecarts_prix"] == 1
+    assert "CHEVAL SECRET" not in str(data).upper()
+
+
+async def test_apercu_programme_ecart_sous_le_seuil_non_compte(client: AsyncClient, db: AsyncSession):
+    """accord=True : n°4 à 2,1 pour 30 % (juste 3,33 → −37 %), n°9 à 6,0 pour 20 %
+    (juste 5,0 → +20 %, compté), n°2 à 55 pour 1 % (juste 100 → −45 %)."""
+    await _course_du_jour(db, "PRG5C1", accord=True)
+    data = (await client.get("/api/v1/programme/apercu")).json()
+    assert data["courses"]["PRG5C1"]["nb_ecarts_prix"] == 1
+
+
+
+async def test_apercu_programme_ecart_au_seuil_de_la_fiche(client: AsyncClient, db: AsyncSession):
+    """+7 % n'est pas un écart, +8 % en est un : même bord que la fiche course.
+    Deux chevaux à 25 % (cote juste 4,00) : l'un à 4,28 (+7 %), l'autre à 4,33 (+8,25 %)."""
+    hippo = Hippodrome(hippodrome_id=str(uuid.uuid4()), nom="Seuil", code="SEU")
+    db.add(hippo)
+    db.add(Reunion(reunion_id="RSEU", date=date.today(), hippodrome_id=hippo.hippodrome_id,
+                   hippodrome_nom="Seuil", numero=3))
+    db.add(Course(course_id="PRG6C1", reunion_id="RSEU", numero=1, nom="Prix du Seuil",
+                  date_heure=_apres_midi(), hippodrome_nom="Seuil", discipline="Plat",
+                  distance=2000, nb_partants=2, statut="a_venir"))
+    for numero, cote, rang in [(1, 4.28, 1), (2, 4.33, 2)]:
+        cheval_id, part_id = str(uuid.uuid4()), str(uuid.uuid4())
+        db.add(Cheval(cheval_id=cheval_id, nom=f"SEUIL {numero}", age=4, sexe="F"))
+        db.add(Participation(participation_id=part_id, course_id="PRG6C1", cheval_id=cheval_id,
+                             numero=numero, cote_pmu=cote, non_partant=False))
+        db.add(Prediction(prediction_id=str(uuid.uuid4()), participation_id=part_id,
+                          course_id="PRG6C1", proba_top1=0.25, proba_top3=0.5,
+                          rang_predit=rang, confidence_score=50.0))
+    await db.commit()
+    data = (await client.get("/api/v1/programme/apercu")).json()
+    assert data["courses"]["PRG6C1"]["nb_ecarts_prix"] == 1
+
+
+async def test_seuil_ecart_identique_a_la_fiche_course():
+    """Le programme et la fiche comptent les écarts avec le même seuil : si l'un
+    bouge sans l'autre, les deux pages se contredisent à nouveau."""
+    import re
+    from pathlib import Path
+    from api.routes.courses import ECART_PRIX_MIN
+    fiche = Path(__file__).resolve().parents[2] / "frontend/src/components/courses/classement.tsx"
+    m = re.search(r"const ECART_MEILLEUR_PRIX = ([0-9.]+);", fiche.read_text(encoding="utf-8"))
+    assert m, "ECART_MEILLEUR_PRIX introuvable dans classement.tsx"
+    assert float(m.group(1)) == ECART_PRIX_MIN
