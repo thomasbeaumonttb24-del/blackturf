@@ -185,11 +185,17 @@ export function Navbar() {
   const nbNonLues = notifData?.count ?? 0;
   const nbChat = surChat ? 0 : (chatData?.non_lus ?? 0);
   const lienActif = (href: string) => pathname === href || pathname.startsWith(`${href}/`);
+  // Compte gratuit à qui l'essai est offert : la barre porte en plus le bouton
+  // « Essai offert ». Dans les 1 216 px utiles de `max-w-7xl`, noms complets + bouton +
+  // badge de plan se chevauchaient (constaté le 2026-09-28) : dans ce cas les liens
+  // gardent leur forme courte et le badge « Découverte » s'efface — le bouton dit
+  // déjà que le compte est gratuit.
+  const essai = peutDemarrerEssai(user);
 
   return (
     <nav className="sticky top-0 z-50 border-b border-[#e2e6df] bg-white/95 backdrop-blur-md">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-        <div className="flex h-16 items-center justify-between">
+        <div className="flex h-16 items-center justify-between gap-3">
 
           {/* Logo */}
           <Link href="/" className="flex min-w-0 items-center gap-1.5 flex-shrink-0 sm:gap-2" aria-label="BlackTurf — Accueil">
@@ -234,19 +240,19 @@ export function Navbar() {
                       : "text-gray-600 hover:bg-[#f5f6f2] hover:text-[#17231f]"
                   )}
                 >
-                  {Icon && <Icon className="hidden xl:block h-3.5 w-3.5" />}
+                  {Icon && <Icon className={cn("hidden h-3.5 w-3.5", !essai && "xl:block")} />}
                   {/* Entre 1 024 et 1 280 px, les noms complets se chevauchaient : la
                       forme courte (celle de la barre du bas sur téléphone) prend le
                       relais, le nom complet revient dès qu'il y a la place. */}
-                  <span className="xl:hidden">{link.court}</span>
-                  <span className="hidden xl:inline">{link.label}</span>
+                  <span className={cn(!essai && "xl:hidden")}>{link.court}</span>
+                  {!essai && <span className="hidden xl:inline">{link.label}</span>}
                 </Link>
               );
             })}
           </div>
 
           {/* Right side */}
-          <div className="flex items-center gap-0.5 sm:gap-1.5">
+          <div className="flex flex-shrink-0 items-center gap-0.5 sm:gap-1.5">
             {/* Search button (tous) */}
             <Button
               variant="ghost"
@@ -297,12 +303,15 @@ export function Navbar() {
                 {/* Compte gratuit avec essai jamais pris : l'offre reste visible sur
                     chaque page. Avant, seul le menu déroulant la portait, sous
                     « Passer Standard » — un prix, pas une offre gratuite. */}
-                {peutDemarrerEssai(user) && (
+                {/* À partir de `xl` seulement : entre 1 024 et 1 280 px il n'y a pas
+                    la place, l'offre reste alors dans le menu du compte. */}
+                {essai && (
                   <Link
                     href="/tarifs"
-                    className="hidden lg:inline-flex items-center gap-1.5 rounded-lg bg-brand-gold px-3 py-1.5 text-[13px] font-semibold text-brand-dark shadow-sm shadow-brand-gold/25 ring-1 ring-brand-gold/30 hover:bg-brand-gold-deep transition-colors"
+                    title="Essai gratuit 7 jours"
+                    className="hidden xl:inline-flex flex-shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg bg-brand-gold px-3 py-1.5 text-[13px] font-semibold text-brand-dark shadow-sm shadow-brand-gold/25 ring-1 ring-brand-gold/30 hover:bg-brand-gold-deep transition-colors"
                   >
-                    <Zap className="h-3.5 w-3.5" /> Essai 7 jours offert
+                    <Zap className="h-3.5 w-3.5" /> Essai offert
                   </Link>
                 )}
                 {/* Alerts bell with unread count */}
@@ -332,7 +341,10 @@ export function Navbar() {
                     <div className="h-6 w-6 rounded-full bg-brand-gold-tint flex items-center justify-center ring-1 ring-brand-gold/30">
                       <User className="h-3 w-3 text-brand-gold-dark" />
                     </div>
-                    <span className="hidden whitespace-nowrap sm:block text-gray-700 font-medium">
+                    {/* Entre 1 024 et 1 280 px les liens texte occupent la barre : le
+                        prénom ne revient qu'à `xl`. Sous `lg`, le menu est replié et
+                        il y a de nouveau la place. */}
+                    <span className="hidden max-w-[9rem] truncate whitespace-nowrap sm:block lg:hidden xl:block text-gray-700 font-medium">
                       {user.prenom || user.email.split("@")[0]}
                     </span>
                     <Badge
@@ -343,7 +355,10 @@ export function Navbar() {
                           ? "gold"
                           : "secondary"
                       }
-                      className="hidden sm:flex text-[10px] px-1.5 py-0"
+                      className={cn(
+                        "hidden sm:flex lg:hidden text-[10px] px-1.5 py-0",
+                        !essai && "xl:flex"
+                      )}
                     >
                       {planLabel(user.plan)}
                     </Badge>
