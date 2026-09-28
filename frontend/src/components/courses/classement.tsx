@@ -176,8 +176,17 @@ function Rang({ rang, absent }: { rang: number; absent?: boolean }) {
  *  Le pourcentage est l'écart relatif entre les deux cotes AFFICHÉES, rien de
  *  plus. Il ne remplace pas l'espérance de gain du modèle (badge « valeur »),
  *  qui, elle, tient compte de la calibration et des garde-fous. */
-export function LecturePrix({ marche, juste }: { marche: number | null; juste: number | null }) {
+export function LecturePrix({ marche, juste, coteProno = null }: {
+  marche: number | null; juste: number | null;
+  /** Cote vue par le modèle au dernier calcul, passée seulement quand elle s'écarte
+   *  nettement de `marche`. La cote juste vient d'une probabilité calculée sur CETTE
+   *  cote : comparée à la cote actuelle, la lecture mélange deux instants → signalé. */
+  coteProno?: number | null;
+}) {
   const ecart = ecartPrix(marche, juste);
+  const perime = coteProno != null
+    ? ` Attention : le modèle a calculé sa probabilité quand la cote était à ${cote(coteProno)} ; le marché a bougé depuis et la cote juste n'en tient pas compte.`
+    : "";
   if (marche == null || !Number.isFinite(marche) || marche <= 0 || juste == null || !Number.isFinite(juste) || juste <= 0) {
     return <span className="text-[13px] text-stone-300">—</span>;
   }
@@ -199,8 +208,11 @@ export function LecturePrix({ marche, juste }: { marche: number | null; juste: n
   if (Math.abs(ecart ?? 0) < ECART_MEILLEUR_PRIX) {
     return (
       <span
-        title={`Le marché paie ${cote(marche)}, le modèle estime la cote juste à ${coteJuste(juste)} : prix conforme.`}
-        className="inline-flex items-center rounded-md bg-stone-100 px-1.5 py-0.5 text-[10.5px] font-semibold text-stone-600"
+        title={`Le marché paie ${cote(marche)}, le modèle estime la cote juste à ${coteJuste(juste)} : prix conforme.${perime}`}
+        className={cn(
+          "inline-flex items-center rounded-md bg-stone-100 px-1.5 py-0.5 text-[10.5px] font-semibold text-stone-600",
+          perime && "border border-dashed border-stone-400",
+        )}
       >
         au prix
       </span>
@@ -211,12 +223,16 @@ export function LecturePrix({ marche, juste }: { marche: number | null; juste: n
     <span
       title={
         genereux
-          ? `Le marché paie ${cote(marche)} pour une cote juste estimée à ${coteJuste(juste)} : ${abs} % au-dessus.`
-          : `Le marché ne paie que ${cote(marche)} pour une cote juste estimée à ${coteJuste(juste)} : ${abs} % en dessous du prix qui couvrirait le risque.`
+          ? `Le marché paie ${cote(marche)} pour une cote juste estimée à ${coteJuste(juste)} : ${abs} % au-dessus.${perime}`
+          : `Le marché ne paie que ${cote(marche)} pour une cote juste estimée à ${coteJuste(juste)} : ${abs} % en dessous du prix qui couvrirait le risque.${perime}`
       }
       className={cn(
-        "inline-flex items-center gap-0.5 rounded-md px-1.5 py-0.5 text-[10.5px] font-bold tabular-nums ring-1",
-        genereux ? "bg-emerald-50 text-emerald-700 ring-emerald-200/70" : "bg-rose-50 text-rose-700 ring-rose-200/70",
+        "inline-flex items-center gap-0.5 rounded-md px-1.5 py-0.5 text-[10.5px] font-bold tabular-nums",
+        // Pointillés = lecture sur une probabilité antérieure au mouvement de cote.
+        perime ? "border border-dashed" : "ring-1",
+        genereux
+          ? cn("bg-emerald-50 text-emerald-700", perime ? "border-emerald-400" : "ring-emerald-200/70")
+          : cn("bg-rose-50 text-rose-700", perime ? "border-rose-400" : "ring-rose-200/70"),
       )}
     >
       {genereux ? "+" : "−"}{abs} %
@@ -801,7 +817,7 @@ export function ClassementAlgo({
                   {aCoteJuste && (
                     <span className="hidden text-right sm:block">
                       {absent ? <span className="text-[13px] text-stone-300">—</span>
-                        : <LecturePrix marche={marche} juste={p.cote_juste} />}
+                        : <LecturePrix marche={marche} juste={p.cote_juste} coteProno={coteProno} />}
                     </span>
                   )}
 
@@ -830,7 +846,7 @@ export function ClassementAlgo({
                       <dt className="text-[9.5px] font-semibold uppercase tracking-wide text-stone-500">Juste · prix</dt>
                       <dd className="flex flex-wrap items-center gap-1">
                         <span className="text-[13px] font-semibold text-slate-700" style={SG}>{p.cote_juste != null ? coteJuste(p.cote_juste) : "—"}</span>
-                        {!absent && <LecturePrix marche={marche} juste={p.cote_juste} />}
+                        {!absent && <LecturePrix marche={marche} juste={p.cote_juste} coteProno={coteProno} />}
                       </dd>
                     </div>
                     <div className="rounded-xl bg-[#FCFAF5] px-2.5 py-1.5 ring-1 ring-inset ring-[#EFE8D8]">
