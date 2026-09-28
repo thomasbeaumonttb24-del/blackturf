@@ -579,6 +579,57 @@ PC_K_SHRINK = 150.0         # pseudo-observations shrinkant le facteur vers 1.0
 # par deux est déjà une correction massive).
 PC_F_MIN, PC_F_MAX = 0.50, 1.05
 
+# ── Apprendre sur les valeurs BRUTES (audit du 2026-09-28) ──────────────────
+# Le plan figé porte la proba et le rapport APRÈS correction. Apprendre dessus mesure
+# l'écart RESTANT : si le vrai ratio réel/brut vaut r et que le facteur en service
+# vaut f, on mesure r / f, on applique donc r / f, puis on mesure f… Le facteur
+# oscille et, mêlé sur tout l'historique, se stabilise vers √r au lieu de r (un Trio
+# à r = 0,45 garde une proba surannoncée d'environ 50 %).
+#
+# Depuis ce correctif, chaque pari du plan porte `probabilite_brute` et
+# `rapport_estime_brut`. Tant qu'un type n'a pas assez de paris BRUTS, on garde le
+# calcul historique à l'identique (aucun saut sur un petit échantillon, que le shrink
+# ramènerait vers 1,0 et qui DÉFERAIT une correction bien étayée). Au-delà du seuil,
+# le type bascule sur les valeurs brutes. Seuils choisis pour que le shrink garde au
+# moins ~80 % du signal au moment de la bascule : 50 / (50 + 12) = 0,81 pour le
+# rapport, 600 / (600 + 150) = 0,80 pour la proba.
+RC_BRUT_MIN_WINS = 50
+PC_BRUT_MIN_PARIS = 600
+
+
+def _nombre_positif(v) -> float | None:
+    """Valeur numérique > 0, sinon None (clé absente des plans anciens, None, bool…)."""
+    if isinstance(v, bool) or not isinstance(v, (int, float)):
+        return None
+    v = float(v)
+    return v if v > 0 else None
+
+
+def _rapport_ticket_reel(p: dict) -> float:
+    """Rapport RÉELLEMENT payé au ticket = gain / mise, à comparer au rapport estimé
+    du ticket (gain_potentiel / mise, ou rapport_estime_brut).
+
+    `rapport_reel` est le rapport PMU pour 1 € sur UNE combinaison. Pour une formule
+    combinée, le règlement n'en paie qu'une part (`gain_mult`) : un 2sur4 à 4 chevaux
+    dont 2 dans les 4 premiers touche 1/6 de la mise au rapport. Comparer ce rapport
+    par combinaison au rapport estimé du ticket entier gonflait le facteur 2sur4
+    jusqu'à son plafond (estimé 1,57, « réel » 6,19, facteur 1,30 alors que le type
+    rend −36 %, audit du 2026-09-28).
+
+    Types à mise pleine : on garde `rapport_reel` tel quel (gain / mise n'en diffère
+    que par l'arrondi du gain au centime). Une part payée partielle vaut au plus
+    6/10 (2sur4 à 5 chevaux, 4 dans les 4 premiers) : le seuil de 0,99 ne peut pas
+    confondre les deux cas.
+    """
+    rapport = float(p["rapport_reel"])
+    mise = float(p.get("mise") or 0)
+    gain = p.get("gain")
+    if mise > 0 and isinstance(gain, (int, float)) and not isinstance(gain, bool):
+        par_ticket = float(gain) / mise
+        if par_ticket < rapport * 0.99:
+            return par_ticket
+    return rapport
+
 
 def _bet_key(type_pari, chevaux) -> tuple:
     """Clé d'un pari = (type, numéros triés) pour matcher plan figé ⋈ bilan réglé."""
@@ -592,7 +643,11 @@ def _seau_vide() -> dict:
     seaux divergents produiraient des facteurs incomparables entre profil et zone."""
     return {"n_win": 0, "sum_est": 0.0, "sum_real": 0.0,
             "n": 0, "mise": 0.0, "gain": 0.0,
-            "n_proba": 0, "sum_proba": 0.0, "n_gagne_proba": 0}
+            "n_proba": 0, "sum_proba": 0.0, "n_gagne_proba": 0,
+            # Mêmes grandeurs sur les valeurs BRUTES (avant correction), pour les
+            # seuls paris dont le plan les porte (cf. RC_BRUT_MIN_WINS).
+            "n_win_b": 0, "sum_est_b": 0.0, "sum_real_b": 0.0,
+            "n_proba_b": 0, "sum_proba_b": 0.0, "n_gagne_proba_b": 0}
 
 
 async def compute_rapport_calibration(session: AsyncSession) -> dict:
@@ -638,6 +693,10 @@ async def compute_rapport_calibration(session: AsyncSession) -> dict:
         # rapport ESTIMÉ par pari, reconstruit depuis le plan figé (gain_potentiel/mise)
         est: dict = {}
         proba_annoncee: dict = {}
+        # Valeurs AVANT correction, présentes sur les plans émis depuis le correctif
+        # du 2026-09-28 (cf. RC_BRUT_MIN_WINS).
+        est_brut: dict = {}
+        proba_brute: dict = {}
         for niv in plan_d.get("niveaux", []):
             for p in niv.get("paris", []):
                 mise = float(p.get("mise") or 0)
@@ -647,6 +706,12 @@ async def compute_rapport_calibration(session: AsyncSession) -> dict:
                 pr = p.get("probabilite")
                 if isinstance(pr, (int, float)) and 0.0 < float(pr) <= 1.0:
                     proba_annoncee[cle] = float(pr)
+                rb = _nombre_positif(p.get("rapport_estime_brut"))
+                if rb is not None:
+                    est_brut[cle] = rb
+                pb = _nombre_positif(p.get("probabilite_brute"))
+                if pb is not None and pb <= 1.0:
+                    proba_brute[cle] = pb
         pa = agg.setdefault(profil, {})
         za = agg_zone.setdefault(zone, {}) if zone else None
         for p in res.get("paris", []):
@@ -660,8 +725,11 @@ async def compute_rapport_calibration(session: AsyncSession) -> dict:
             seaux = [pa.setdefault(t, _seau_vide())]
             if za is not None:
                 seaux.append(za.setdefault(t, _seau_vide()))
-            pr = proba_annoncee.get(_bet_key(t, p.get("chevaux")))
-            re_ = est.get(_bet_key(t, p.get("chevaux")))
+            cle_p = _bet_key(t, p.get("chevaux"))
+            pr = proba_annoncee.get(cle_p)
+            re_ = est.get(cle_p)
+            pr_b = proba_brute.get(cle_p)
+            re_b = est_brut.get(cle_p)
             gagne = p.get("statut") == "gagne" and bool(p.get("rapport_reel"))
             for ta in seaux:
                 ta["n"] += 1
@@ -671,28 +739,48 @@ async def compute_rapport_calibration(session: AsyncSession) -> dict:
                     ta["sum_proba"] += pr
                     if p.get("statut") == "gagne":
                         ta["n_gagne_proba"] += 1
+                if pr_b is not None:
+                    ta["n_proba_b"] += 1
+                    ta["sum_proba_b"] += pr_b
+                    if p.get("statut") == "gagne":
+                        ta["n_gagne_proba_b"] += 1
                 if gagne:
                     ta["gain"] += float(p.get("gain") or 0)
+                    reel_ticket = _rapport_ticket_reel(p)
                     if re_ and re_ > 0:           # estimé connu → couple (estimé, réel)
                         ta["n_win"] += 1
                         ta["sum_est"] += re_
-                        ta["sum_real"] += float(p["rapport_reel"])
+                        ta["sum_real"] += reel_ticket
+                    if re_b is not None:
+                        ta["n_win_b"] += 1
+                        ta["sum_est_b"] += re_b
+                        ta["sum_real_b"] += reel_ticket
+
+    def _source_rapport_brute(a: dict) -> bool:
+        return a.get("n_win_b", 0) >= RC_BRUT_MIN_WINS and a.get("sum_est_b", 0.0) > 0
+
+    def _source_proba_brute(a: dict) -> bool:
+        return a.get("n_proba_b", 0) >= PC_BRUT_MIN_PARIS and a.get("sum_proba_b", 0.0) > 0
 
     def _factor(a: dict) -> float:
-        if a["n_win"] >= RC_MIN_WINS and a["sum_est"] > 0:
-            raw = a["sum_real"] / a["sum_est"]
-            w = a["n_win"] / (a["n_win"] + RC_K_SHRINK)       # shrink vers 1.0
+        # Valeurs brutes dès qu'elles suffisent, sinon calcul historique inchangé.
+        sfx = "_b" if _source_rapport_brute(a) else ""
+        n_win, s_est, s_real = a["n_win" + sfx], a["sum_est" + sfx], a["sum_real" + sfx]
+        if n_win >= RC_MIN_WINS and s_est > 0:
+            raw = s_real / s_est
+            w = n_win / (n_win + RC_K_SHRINK)                 # shrink vers 1.0
             return float(max(RC_F_MIN, min(RC_F_MAX, 1.0 + (raw - 1.0) * w)))
         return 1.0                                            # échantillon insuffisant → neutre
 
     def _proba_factor(a: dict) -> float:
         """Fréquence RÉELLE / probabilité ANNONCÉE, shrinkée et bornée."""
-        n = a.get("n_proba", 0)
-        somme = a.get("sum_proba", 0.0)
+        sfx = "_b" if _source_proba_brute(a) else ""
+        n = a.get("n_proba" + sfx, 0)
+        somme = a.get("sum_proba" + sfx, 0.0)
         if n < PC_MIN_PARIS or somme <= 0:
             return 1.0                                        # jamais de correction à l'aveugle
         annoncee = somme / n
-        reelle = a.get("n_gagne_proba", 0) / n
+        reelle = a.get("n_gagne_proba" + sfx, 0) / n
         if annoncee <= 0:
             return 1.0
         brut = reelle / annoncee
@@ -712,6 +800,13 @@ async def compute_rapport_calibration(session: AsyncSession) -> dict:
             "real_mean": round(a["sum_real"] / a["n_win"], 2) if a["n_win"] else None,
             "est_mean": round(a["sum_est"] / a["n_win"], 2) if a["n_win"] else None,
             "roi": round((a["gain"] - a["mise"]) / a["mise"] * 100, 1) if a["mise"] > 0 else None,
+            # Traçabilité de la bascule sur les valeurs brutes (cf. RC_BRUT_MIN_WINS).
+            "source_factor": "brut" if _source_rapport_brute(a) else "historique",
+            "source_proba_factor": "brut" if _source_proba_brute(a) else "historique",
+            "n_win_brut": a.get("n_win_b", 0),
+            "n_proba_brut": a.get("n_proba_b", 0),
+            "proba_annoncee_brute": (round(a["sum_proba_b"] / a["n_proba_b"], 4)
+                                     if a.get("n_proba_b") else None),
         }
 
     # POOL GLOBAL PAR TYPE (tous profils confondus) — fallback quand le couple

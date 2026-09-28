@@ -183,6 +183,12 @@ class PariRec:
     # du profil : le multiplicateur visé n'est pas tenu et l'interface doit le dire
     # ticket par ticket, pas seulement dans une note de bas de plan.
     hors_tranche: bool = False
+    # Proba et rapport AVANT la calibration estimé→réel (cf. generer_plan). Ce sont
+    # eux que l'apprentissage doit relire, jamais les valeurs corrigées. None pour
+    # un pari construit hors de ce chemin (module Quinté+) : l'apprentissage retombe
+    # alors sur `probabilite` / `gain_potentiel`.
+    probabilite_brute: Optional[float] = None
+    rapport_estime_brut: Optional[float] = None
     # Traçabilité horse_context : contributions/objections par cheval du ticket +
     # chevaux écartés à profil supérieur. None si horse_contexts n'a pas été fourni
     # à generer_plan (comportement inchangé pour tout appelant qui ne le passe pas).
@@ -1531,6 +1537,17 @@ def generer_plan(
     # ×1.9 mais qui paie ×1.3 en réalité voit son rapport ramené sous la bande prudent →
     # écarté. C'est ce qui fait RESPECTER les tranches sur le réel (bilan), pas l'estimé.
     # edge (modèle vs marché) inchangé : il ne dépend pas du rapport parimutuel.
+    #
+    # VALEURS BRUTES, figées AVANT toute correction. Le plan enregistré porte la proba
+    # et le rapport corrigés ; si l'apprentissage relit ces valeurs, il mesure l'écart
+    # restant APRÈS correction et le facteur suivant vaut réel / (brut × facteur) :
+    # il oscille et converge vers √(vrai ratio) au lieu du vrai ratio (Couplé Placé
+    # annoncé 23,9 % après correction, réalisé 19,5 %, audit du 2026-09-28). Les
+    # clés sont copiées dans le plan (`probabilite_brute`, `rapport_estime_brut`) et
+    # `compute_rapport_calibration` apprend sur elles.
+    for c in cands:
+        c.setdefault("_proba_brute", c.get("proba_gain"))
+        c.setdefault("_rapport_brut", c.get("rapport_estime"))
     if rapport_calib:
         try:
             from ml.signal_performance import rapport_realization_factor
@@ -3898,6 +3915,8 @@ def _assemble_plan(selected: list[dict], montant: int, palier: dict, kelly_warn:
             raisons=_raisons_pari(c, profil, facteurs_chevaux, montant=_montant_joue),
             rapport_estime=round(float(c.get("rapport_estime") or 0.0), 2),
             hors_tranche=bool(c.get("_hors_bande")),
+            probabilite_brute=c.get("_proba_brute"),
+            rapport_estime_brut=c.get("_rapport_brut"),
             contexte_traceabilite=c.get("contexte_traceabilite"),
         )
         niveaux_map.setdefault(c["niveau"], []).append(pari)
@@ -4190,6 +4209,8 @@ def plan_to_dict(plan: MisePlan) -> dict:
                         "raisons": p.raisons,
                         "rapport_estime": p.rapport_estime,
                         "hors_tranche": p.hors_tranche,
+                        "probabilite_brute": p.probabilite_brute,
+                        "rapport_estime_brut": p.rapport_estime_brut,
                         "contexte_traceabilite": p.contexte_traceabilite,
                     }
                     for p in n.paris
