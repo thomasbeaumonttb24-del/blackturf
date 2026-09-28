@@ -2902,7 +2902,9 @@ async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Option
         try:
             from ml.cote_calibration import load_cote_calibration
             _cote_calib = await load_cote_calibration(session)
-        except Exception:
+        except Exception as e:  # noqa: BLE001 — repli inchangé, mais visible
+            log.warning("predict.cote_calibration_indisponible", course_id=course_id,
+                        err=str(e)[:160])
             _cote_calib = None
         # Apprentissage par signal (ROI réel par signal, recalc nightly) — module
         # le niveau des value bets vers les signaux historiquement gagnants.
@@ -2911,7 +2913,9 @@ async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Option
             from ml.signal_performance import load_signal_performance, signal_multiplier as _sig_mult_fn
             _signal_perf = await load_signal_performance(session)
             _sig_mult = _sig_mult_fn
-        except Exception:
+        except Exception as e:  # noqa: BLE001 — repli inchangé, mais visible
+            log.warning("predict.signal_performance_indisponible", course_id=course_id,
+                        err=str(e)[:160])
             _signal_perf = None
         # ROI réel par BANDE D'EV (recalc nightly) — gate d'ÉMISSION des value bets
         # (bande au ROI shrinké négatif → pas de VB, cf. flag ev_band_gate). Était
@@ -2920,7 +2924,9 @@ async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Option
         try:
             from ml.signal_performance import load_ev_band_performance
             _ev_band_perf = await load_ev_band_performance(session)
-        except Exception:
+        except Exception as e:  # noqa: BLE001 — repli inchangé, mais visible
+            log.warning("predict.bandes_ev_indisponibles", course_id=course_id,
+                        err=str(e)[:160])
             _ev_band_perf = None
 
         # FLAG devig_gates : overround du champ. Calculé une fois par course.

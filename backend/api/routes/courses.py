@@ -1990,33 +1990,54 @@ async def get_mise_plan(
 
     # Auto-amélioration : pondération ROI réel par type + thermostat adaptatif
     # (calibration du modèle + ROI récent → durcit/assouplit la sélection).
+    #
+    # Chaque apprentissage a son propre repli, et chaque repli LAISSE UNE TRACE : un
+    # seul `except` muet couvrait les trois, si bien qu'une erreur sur le thermostat
+    # effaçait aussi les poids par type (gates, suspensions) sans signal (audit du
+    # 2026-09-28). Les valeurs de repli sont inchangées.
     try:
         # Exposants d'arrivée (Harville) lus en cache mémoire par le moteur de plan :
         # relus en base au plus toutes les 5 min (cf. ml.reglages_appris).
         from ml.reglages_appris import rafraichir as _rafraichir_reglages
         await _rafraichir_reglages()
-        from ml.bet_performance import get_learned_type_weights, get_model_heat
+    except Exception as e:  # noqa: BLE001
+        log.warning("mise_plan.reglages_appris_indisponibles", course_id=course_id,
+                    err=str(e)[:160])
+    try:
+        from ml.bet_performance import get_learned_type_weights
         roi_weights = await get_learned_type_weights(
             db, profil=profil,
             discipline=getattr(course, "discipline", None),
             nb_partants=getattr(course, "nb_partants", None))
+    except Exception as e:  # noqa: BLE001
+        log.warning("mise_plan.poids_types_indisponibles", course_id=course_id,
+                    err=str(e)[:160])
+        roi_weights = {}
+    try:
+        from ml.bet_performance import get_model_heat
         heat = await get_model_heat(db)
-    except Exception:
-        roi_weights, heat = {}, 0.0
+    except Exception as e:  # noqa: BLE001
+        log.warning("mise_plan.thermostat_indisponible", course_id=course_id,
+                    err=str(e)[:160])
+        heat = 0.0
 
     # Calibration estimé→réel du rapport (par profil × type) : recale les rapports sur les
     # paiements PMU RÉELS appris → fait respecter les tranches de cote dans le bilan réel.
     try:
         from ml.signal_performance import load_rapport_calibration
         rapport_calib = await load_rapport_calibration(db)
-    except Exception:
+    except Exception as e:  # noqa: BLE001
+        log.warning("mise_plan.calibration_rapport_indisponible", course_id=course_id,
+                    err=str(e)[:160])
         rapport_calib = None
     # ROI réel appris PAR BANDE D'EV → la mise se déplace vers les bandes rentables et
     # s'allège sur les zones toxiques (levier ROI direct du moteur de mise).
     try:
         from ml.signal_performance import load_ev_band_performance
         ev_band_perf = await load_ev_band_performance(db)
-    except Exception:
+    except Exception as e:  # noqa: BLE001
+        log.warning("mise_plan.bandes_ev_indisponibles", course_id=course_id,
+                    err=str(e)[:160])
         ev_band_perf = None
 
     # Multiplicateurs appris PAR SIGNAL × PROFIL → le pronostic/plan s'adapte au profil

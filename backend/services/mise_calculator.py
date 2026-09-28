@@ -8,6 +8,10 @@ from typing import Optional
 import math
 import os
 
+import structlog
+
+log = structlog.get_logger()
+
 
 # Mise PLANCHER par pari joué (€) — règle produit : jamais moins de 2€ sur un
 # pari (un pari à 1€ ne vaut pas le coup, surtout sur le profil risqué). C'est le
@@ -1558,8 +1562,8 @@ def generer_plan(
                     c["rapport_estime"] = round(float(c["rapport_estime"]) * f, 1)
                     c["ev"] = round(float(c["proba_gain"]) * c["rapport_estime"] - 1.0, 4)
                     c["_rapport_cal_f"] = round(float(f), 3)
-        except Exception:
-            pass
+        except Exception as e:  # noqa: BLE001 — repli inchangé, mais visible
+            log.warning("mise_plan.calibration_rapport_echec", err=str(e)[:160])
 
     # CALIBRATION de la PROBABILITÉ, mesurée le 2026-08-19 sur 19 968 paris réglés :
     # le modèle annonce systématiquement plus souvent qu'il ne réalise (Simple
@@ -1580,8 +1584,8 @@ def generer_plan(
                     c["proba_gain"] = round(float(c["proba_gain"]) * fp, 4)
                     c["ev"] = round(float(c["proba_gain"]) * float(c["rapport_estime"]) - 1.0, 4)
                     c["_proba_cal_f"] = round(float(fp), 3)
-        except Exception:
-            pass
+        except Exception as e:  # noqa: BLE001 — repli inchangé, mais visible
+            log.warning("mise_plan.calibration_proba_echec", err=str(e)[:160])
 
     # TILT PAR TRANCHE DE RAPPORT — le signal le plus solide de nos données (19 972
     # paris réglés) : le ROI réel décroît continûment avec le rapport visé. Simple
@@ -1598,8 +1602,8 @@ def generer_plan(
             for c in cands:
                 c["_pb_mult"] = float(payout_bucket_multiplier(
                     c.get("type_pari"), c.get("rapport_estime"), rapport_calib))
-        except Exception:
-            pass
+        except Exception as e:  # noqa: BLE001 — repli inchangé, mais visible
+            log.warning("mise_plan.tilt_tranche_echec", err=str(e)[:160])
 
     # pool_couverture : candidats validés par les gates du profil mais écartés de la
     # sélection (conviction plus faible). Vivier des tickets de COUVERTURE.
