@@ -193,6 +193,14 @@ class PariRec:
     # alors sur `probabilite` / `gain_potentiel`.
     probabilite_brute: Optional[float] = None
     rapport_estime_brut: Optional[float] = None
+    # Facteurs de calibration RÉELLEMENT appliqués à ce pari (1.0 = aucun). Le
+    # re-pricing après le gel (reprice_plan_live) les réapplique au prix du marché :
+    # sans eux il comparait un rapport BRUT à un rapport figé CALIBRÉ, et le seul
+    # facteur (Couplé Gagnant 0,84, Couplé Ordre 0,79) suffisait à afficher « le
+    # marché a bougé » et un gain gonflé de 19 à 27 %, marché immobile. None = plan
+    # émis avant le 2026-09-28 : comportement d'avant.
+    facteur_rapport: Optional[float] = None
+    facteur_proba: Optional[float] = None
     # Traçabilité horse_context : contributions/objections par cheval du ticket +
     # chevaux écartés à profil supérieur. None si horse_contexts n'a pas été fourni
     # à generer_plan (comportement inchangé pour tout appelant qui ne le passe pas).
@@ -1562,6 +1570,7 @@ def generer_plan(
                     c["rapport_estime"] = round(float(c["rapport_estime"]) * f, 1)
                     c["ev"] = round(float(c["proba_gain"]) * c["rapport_estime"] - 1.0, 4)
                     c["_rapport_cal_f"] = round(float(f), 3)
+                    c["_rapport_cal_f_exact"] = float(f)
         except Exception as e:  # noqa: BLE001 — repli inchangé, mais visible
             log.warning("mise_plan.calibration_rapport_echec", err=str(e)[:160])
 
@@ -1584,6 +1593,7 @@ def generer_plan(
                     c["proba_gain"] = round(float(c["proba_gain"]) * fp, 4)
                     c["ev"] = round(float(c["proba_gain"]) * float(c["rapport_estime"]) - 1.0, 4)
                     c["_proba_cal_f"] = round(float(fp), 3)
+                    c["_proba_cal_f_exact"] = float(fp)
         except Exception as e:  # noqa: BLE001 — repli inchangé, mais visible
             log.warning("mise_plan.calibration_proba_echec", err=str(e)[:160])
 
@@ -3921,6 +3931,8 @@ def _assemble_plan(selected: list[dict], montant: int, palier: dict, kelly_warn:
             hors_tranche=bool(c.get("_hors_bande")),
             probabilite_brute=c.get("_proba_brute"),
             rapport_estime_brut=c.get("_rapport_brut"),
+            facteur_rapport=float(c.get("_rapport_cal_f_exact") or 1.0),
+            facteur_proba=float(c.get("_proba_cal_f_exact") or 1.0),
             contexte_traceabilite=c.get("contexte_traceabilite"),
         )
         niveaux_map.setdefault(c["niveau"], []).append(pari)
@@ -4044,6 +4056,37 @@ def _plan_vide(montant: float, profil: str,
     )
 
 
+def _prix_live_calibre(c: dict, p: dict) -> tuple[float, float, float]:
+    """(rapport, proba, EV) d'un candidat LIVE, calibrés comme le pari figé `p`.
+
+    Réapplique les facteurs que `generer_plan` a RÉELLEMENT appliqués à ce pari
+    (`facteur_rapport`, `facteur_proba`), dans le même ordre et avec les mêmes
+    arrondis : rapport puis EV, proba puis EV. À marché inchangé, le pari re-tarifé
+    est donc identique au pari figé. Plan émis avant le 2026-09-28 (pas de facteurs) :
+    valeurs brutes du candidat, comme avant."""
+    rap, proba, ev = float(c["rapport_estime"]), c["proba_gain"], c["ev"]
+    fr, fp = p.get("facteur_rapport"), p.get("facteur_proba")
+    if fr is None and fp is None:
+        return rap, proba, ev
+    fr, fp = float(fr or 1.0), float(fp or 1.0)
+    if fr != 1.0:
+        rap = round(rap * fr, 1)
+        ev = round(float(proba) * rap - 1.0, 4)
+    if fp != 1.0:
+        proba = round(float(proba) * fp, 4)
+        ev = round(float(proba) * float(rap) - 1.0, 4)
+    return rap, proba, ev
+
+
+def _gain_affiche(mise: float, rap: float, rapport_min: float) -> float:
+    """Gain affiché, avec le MÊME relèvement d'arrondi que `_assemble_plan` : un ticket
+    dont le rapport atteint la tranche ne s'affiche jamais sous son plancher."""
+    gain = round(mise * rap)
+    if mise > 0 and rapport_min > 0 and rap >= rapport_min and gain < math.ceil(mise * rapport_min):
+        gain = math.ceil(mise * rapport_min)
+    return gain
+
+
 def reprice_plan_live(plan: dict, predictions: list[dict], course_info: dict) -> dict:
     """Recalcule les GAINS potentiels d'un plan déjà figé en utilisant les cotes LIVE,
     SANS toucher à la sélection (mêmes paris, mêmes chevaux, mêmes mises). Le rapport de
@@ -4117,11 +4160,11 @@ def reprice_plan_live(plan: dict, predictions: list[dict], course_info: dict) ->
             key = (p.get("type"), frozenset(pari_horses))
             c = look.get(key)
             if c:
-                rap = float(c["rapport_estime"])
+                rap, proba_live, ev_live = _prix_live_calibre(c, p)
                 rap_fige = float(p.get("rapport_estime") or 0.0)
-                p["gain_potentiel"] = round(mise * rap)
-                p["ev_estime"] = c["ev"]
-                p["probabilite"] = c["proba_gain"]
+                p["gain_potentiel"] = _gain_affiche(mise, rap, rapport_min)
+                p["ev_estime"] = ev_live
+                p["probabilite"] = proba_live
                 p["rapport_live"] = round(rap, 2)
                 # Le prix a pu s'effondrer entre le gel et le départ : un ticket vendu
                 # « ×10 minimum » qui ne paie plus que ×4 doit le DIRE. Sans ce
@@ -4138,14 +4181,18 @@ def reprice_plan_live(plan: dict, predictions: list[dict], course_info: dict) ->
                     cl = _cotes_live.get(int(h["numero"])) if h.get("numero") is not None else None
                     if cl:
                         h["cote_live"] = round(float(cl), 2)
-                ev_pondere += mise * float(c["ev"])
+                ev_pondere += mise * float(ev_live)
             elif p.get("type") == "Simple Gagnant" and len(pari_horses) == 1 \
                     and next(iter(pari_horses)) in cotes_live:
                 # Gagnant sec : le rapport EST la cote du cheval, aucun catalogue requis.
                 num = next(iter(pari_horses))
-                rap = cotes_live[num]
+                cote_marche = cotes_live[num]
+                rap = cote_marche
+                # Même facteur de rapport que le pari figé (cote → rapport payé).
+                if p.get("facteur_rapport") not in (None, 1.0):
+                    rap = cote_marche * float(p["facteur_rapport"])
                 rap_fige = float(p.get("rapport_estime") or 0.0)
-                p["gain_potentiel"] = round(mise * rap)
+                p["gain_potentiel"] = _gain_affiche(mise, rap, rapport_min)
                 p["rapport_live"] = round(rap, 2)
                 if rap_fige > 0 and abs(rap / rap_fige - 1.0) >= _DERIVE_RAPPORT_SIGNALEE:
                     p["rapport_a_bouge"] = True
@@ -4153,7 +4200,7 @@ def reprice_plan_live(plan: dict, predictions: list[dict], course_info: dict) ->
                     p["hors_tranche_live"] = True
                 for h in p.get("chevaux", []):
                     if h.get("numero") is not None and int(h["numero"]) == num:
-                        h["cote_live"] = round(rap, 2)
+                        h["cote_live"] = round(cote_marche, 2)   # la COTE, pas le rapport calibré
                 # L'EV suit la même définition : proba figée × rapport live − 1.
                 _pr = float(p.get("probabilite") or 0.0)
                 if _pr > 0:
@@ -4215,6 +4262,8 @@ def plan_to_dict(plan: MisePlan) -> dict:
                         "hors_tranche": p.hors_tranche,
                         "probabilite_brute": p.probabilite_brute,
                         "rapport_estime_brut": p.rapport_estime_brut,
+                        "facteur_rapport": p.facteur_rapport,
+                        "facteur_proba": p.facteur_proba,
                         "contexte_traceabilite": p.contexte_traceabilite,
                     }
                     for p in n.paris
