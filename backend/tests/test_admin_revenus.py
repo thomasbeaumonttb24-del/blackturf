@@ -272,3 +272,72 @@ async def test_revenus_echecs_comptes_par_abonnement_pas_par_tentative(client: A
     assert m["echecs_cents"] == 1200 + 1900
     assert m["nb_tentatives_echouees"] == 6
     assert m["nb_echecs_regles"] == 1
+
+
+async def test_revenus_frais_billing_et_moyenne_depuis_le_premier_encaissement(
+        client: AsyncClient, admin_headers, monkeypatch):
+    from api.config import get_settings
+    from services import revenus_stripe
+    from services.revenus_stripe import FraisDivers
+    now = datetime.now(timezone.utc)
+    livre = _livre(now)
+    livre.frais_divers = [FraisDivers(now - timedelta(minutes=1), 29, "Billing - Usage Fee")]
+    monkeypatch.setattr(get_settings(), "stripe_secret_key", "sk_test_local")
+    monkeypatch.setattr(revenus_stripe, "lire", lambda cle, depuis, forcer=False: livre)
+    monkeypatch.setattr(revenus_stripe, "prochains_montants", lambda cle, ids, forcer=False: {})
+
+    data = (await client.get("/admin/api/revenus?mois=12", headers=admin_headers)).json()
+    m = data["mois"][-1]
+    assert m["frais_cents"] == 100 + 29
+    assert m["net_cents"] == 3000 - 29
+    # Un seul mois d'activité : la moyenne est ce mois, pas 31 € / 12.
+    assert data["totaux"]["moyenne_mensuelle_cents"] == 3100
+
+
+async def test_abonnements_mrr_prix_de_la_formule_actuelle(client: AsyncClient, admin_headers, db):
+    now = datetime.now(timezone.utc)
+    u = User(user_id=str(uuid.uuid4()), email="retro@x.fr", plan="standard")
+    db.add(u)
+    await db.flush()
+    db.add(Subscription(sub_id=str(uuid.uuid4()), user_id=u.user_id, stripe_subscription_id="sub_retro",
+                        plan="standard", periodicite="monthly", statut="active",
+                        periode_debut=now - timedelta(days=1), periode_fin=now + timedelta(days=29)))
+    # Facture Expert réglée APRÈS le passage en Standard.
+    db.add(SubscriptionEvent(event_id=str(uuid.uuid4()), user_id=u.user_id, email="retro@x.fr",
+                             type="paiement_recu", plan="standard", stripe_subscription_id="sub_retro",
+                             montant_cents=1900, created_at=now - timedelta(minutes=5)))
+    await db.commit()
+    data = (await client.get("/admin/api/abonnements", headers=admin_headers)).json()
+    assert data["resume"]["mrr"] == 12.0
+    assert {a["email"]: a for a in data["abonnes"]}["retro@x.fr"]["montant_cents"] == 1200
+    suivi = {c["email"]: c for c in data["suivi"]["comptes"]}["retro@x.fr"]
+    assert suivi["montant_cents"] == 1200
+
+
+async def test_suivi_prochaine_relance_suit_les_relances_faites(client: AsyncClient, admin_headers, db):
+    now = datetime.now(timezone.utc)
+    u = User(user_id=str(uuid.uuid4()), email="impaye@x.fr", plan="free")
+    db.add(u)
+    await db.flush()
+    refus = now - timedelta(days=7, hours=9)
+    relance = now - timedelta(hours=1)
+    db.add_all([
+        Subscription(sub_id=str(uuid.uuid4()), user_id=u.user_id, stripe_subscription_id="sub_imp",
+                     plan="expert", periodicite="monthly", statut="past_due",
+                     periode_debut=refus, periode_fin=refus + timedelta(days=30)),
+        # Le webhook avait écrit « prochaine relance = J+3 » (attempt_count figé à 1).
+        SubscriptionEvent(event_id=str(uuid.uuid4()), user_id=u.user_id, email="impaye@x.fr",
+                          type="paiement_echoue", plan="expert", stripe_subscription_id="sub_imp",
+                          montant_cents=1900, created_at=refus,
+                          detail={"facture": "in_imp", "prochaine_relance": int((refus + timedelta(days=3)).timestamp())}),
+        SubscriptionEvent(event_id=str(uuid.uuid4()), user_id=u.user_id, email="impaye@x.fr",
+                          type="relance_paiement", plan="expert", stripe_subscription_id="sub_imp",
+                          montant_cents=1900, created_at=relance, detail={"facture": "in_imp", "numero": 1}),
+    ])
+    await db.commit()
+    data = (await client.get("/admin/api/abonnements", headers=admin_headers)).json()
+    c = {x["email"]: x for x in data["suivi"]["comptes"]}["impaye@x.fr"]
+    assert c["relances_faites"] == 1
+    # J+7 est passé, mais 4 jours doivent séparer les deux relances.
+    prochaine = datetime.fromisoformat(c["prochaine_relance"].replace("Z", "+00:00"))
+    assert abs((prochaine - (relance + timedelta(days=4))).total_seconds()) < 5

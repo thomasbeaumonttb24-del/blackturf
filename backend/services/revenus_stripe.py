@@ -101,10 +101,19 @@ class Virement:
 
 
 @dataclass
+class FraisDivers:
+    """Frais Stripe débités hors paiement (Billing, Radar…), en centimes positifs."""
+    cree_le: datetime
+    montant_cents: int
+    description: Optional[str]
+
+
+@dataclass
 class Grand_livre:
     encaissements: list[Encaissement] = field(default_factory=list)
     remboursements: list[Remboursement] = field(default_factory=list)
     virements: list[Virement] = field(default_factory=list)
+    frais_divers: list[FraisDivers] = field(default_factory=list)
     lu_le: float = 0.0
 
 
@@ -214,6 +223,13 @@ def collecter(cle: str, depuis_ts: Optional[int] = None) -> Grand_livre:
             arrivee_le=_date(_g(po, "arrival_date")),
             montant_cents=int(_g(po, "amount", defaut=0)),
             statut=str(_g(po, "status", defaut="")),
+        ))
+
+    for bt in _pages(stripe.BalanceTransaction, type="stripe_fee", **params):
+        livre.frais_divers.append(FraisDivers(
+            cree_le=_date(_g(bt, "created")),
+            montant_cents=-int(_g(bt, "net", defaut=0)),
+            description=_g(bt, "description"),
         ))
 
     livre.encaissements.sort(key=lambda e: e.cree_le)

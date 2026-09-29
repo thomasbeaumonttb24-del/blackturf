@@ -1571,7 +1571,11 @@ async def abonnements(
         en_cours_dessai = essai_fin is not None and essai_fin > now
         jours_restants = round((essai_fin - now).total_seconds() / 86400, 1) if en_cours_dessai else None
         sans_carte = sub.statut == STATUT_SANS_CARTE_ADMIN
-        montant = montants.get(sub.stripe_subscription_id) or PRIX_MENSUEL_CENTS.get(sub.plan, 0)
+        # Prix de la formule ACTUELLE. Le « plus gros montant du journal » gardait
+        # 19 € pour un abonné repassé d'Expert à Standard (MRR 62 € au lieu de 55 €,
+        # 2026-09-29). Seul l'annuel lit le montant réellement facturé.
+        montant = ((montants.get(sub.stripe_subscription_id) if sub.periodicite == "annual" else None)
+                   or PRIX_MENSUEL_CENTS.get(sub.plan, 0))
 
         if sans_carte:
             essai_sans_carte += 1
@@ -1962,6 +1966,14 @@ async def revenus(
         b = buckets.get(_mois_de(v["date"], tz))
         if b is not None:
             b["verse_cents"] += v["montant_cents"]
+    # Frais Stripe prélevés À PART des paiements (Stripe Billing : 0,7 % facturé
+    # chaque semaine). Absents, le « net » dépassait le solde réel de 0,29 € en
+    # septembre 2026.
+    for fd in (livre.frais_divers if livre is not None else []):
+        b = buckets.get(_mois_de(fd.cree_le, tz))
+        if b is not None:
+            b["frais_cents"] += fd.montant_cents
+            b["net_cents"] -= fd.montant_cents
     # Prélèvements échoués : UN par abonnement et par mois, pas un par tentative.
     # Stripe réessaie la même facture (J+2, J+4…) et chaque essai écrit un
     # `paiement_echoue` : sommer les tentatives affichait « 39 · 629 € » pour
@@ -2099,6 +2111,8 @@ async def revenus(
         for k, v in sorted(prevu_par_mois.items())
     ]
     reste_mois = prevu_par_mois.get(mois_courant, 0)
+    premier_ = next((i for i, s_ in enumerate(serie) if s_["encaisse_cents"] > 0), None)
+    actifs_ = serie[premier_:] if premier_ is not None else []
     total = sum(s_["ca_cents"] for s_ in serie)
     somme = lambda cle_: sum(s_[cle_] for s_ in serie)  # noqa: E731
 
@@ -2124,7 +2138,10 @@ async def revenus(
             ),
             "reste_a_encaisser_mois_cents": reste_mois,
             "atterrissage_mois_cents": courant["ca_cents"] + reste_mois,
-            "moyenne_mensuelle_cents": round(total / len(serie)) if serie else 0,
+            # Moyenne sur les mois écoulés DEPUIS le premier encaissement : les mois
+            # d'avant l'ouverture ne sont pas des mois à 0 € (81 € / 12 = 6,75 €
+            # affichés en sept. 2026 pour un seul mois d'activité).
+            "moyenne_mensuelle_cents": round(total / len(actifs_)) if actifs_ else 0,
             "nb_paiements": somme("nb_paiements"),
             "echecs_cents": somme("echecs_cents"),
         },
@@ -2261,11 +2278,19 @@ async def _suivi_essais(db: AsyncSession, now: datetime) -> dict:
         else:
             fin_acces = None
 
+        relances = [e for e in _types("relance_paiement")
+                    if dernier_paiement is None or _aware(e.created_at) > dernier_paiement]
         prochaine_relance = None
         if statut == "past_due" and serie:
-            ts = (serie[-1].detail or {}).get("prochaine_relance")
-            if isinstance(ts, (int, float)):
-                prochaine_relance = datetime.fromtimestamp(ts, tz=timezone.utc)
+            # Recalculée sur le calendrier des relances (J+3, J+7) et les relances
+            # déjà faites. Celle écrite au journal par le webhook reposait sur
+            # `attempt_count`, que nos relances n'incrémentent pas : l'écran
+            # annonçait une relance au 25/09 alors qu'on était le 29 et qu'elle
+            # avait eu lieu.
+            from services.relances_paiement import prochaine_relance as _calendrier
+            prochaine_relance = _calendrier(
+                _aware(serie[0].created_at), 1 + len(relances),
+                _aware(relances[-1].created_at) if relances else None)
 
         if resiliation is None:
             resiliation_pendant_essai = False
@@ -2292,14 +2317,14 @@ async def _suivi_essais(db: AsyncSession, now: datetime) -> dict:
             "resiliation_pendant_essai": resiliation_pendant_essai,
             "a_paye": a_paye,
             "impaye_regularise": bool(echecs) and not serie and a_paye,
-            "montant_cents": (max((e.montant_cents for e in evts if e.montant_cents), default=None)
+            # Impayé : la somme due. Sinon : le prix de la formule actuelle (le plus
+            # gros montant du journal gardait 19 € après un passage en Standard).
+            "montant_cents": ((serie[-1].montant_cents if serie else None)
                               or PRIX_MENSUEL_CENTS.get(sub.plan)),
             "echecs_paiement": len(serie),
             "derniere_tentative": _aware(serie[-1].created_at) if serie else None,
             "prochaine_relance": prochaine_relance,
-            "relances_faites": sum(1 for e in _types("relance_paiement")
-                                   if dernier_paiement is None
-                                   or _aware(e.created_at) > dernier_paiement),
+            "relances_faites": len(relances),
             "relances_terminees": issue == "impaye_perdu" or statut == "unpaid",
             "inscrit_le": _aware(u.created_at),
             "derniere_connexion": _aware(u.last_login_at),

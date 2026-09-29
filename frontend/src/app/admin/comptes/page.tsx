@@ -123,7 +123,9 @@ export default function ComptesPage() {
     const tous = comptes ?? [];
     return {
       total: tous.length,
-      abonnes: tous.filter((u) => ["active", "trialing"].includes(u.abonnement_statut ?? "")).length,
+      // Payants + essais, comme le Pilotage : un abonné qui a résilié reste
+      // abonné (et a payé) jusqu'à la fin de sa période.
+      abonnes: tous.filter((u) => ["active", "trialing", "cancel_at_period_end"].includes(u.abonnement_statut ?? "")).length,
       parieurs: tous.filter((u) => u.nb_paris > 0).length,
       suspendus: tous.filter((u) => !u.is_active).length,
       capital: tous.reduce((s, u) => s + (u.solde_actuel ?? 0), 0),
