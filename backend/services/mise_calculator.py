@@ -591,6 +591,17 @@ PROFIL_CONFIG = {
         "types": {"Couplé Gagnant", "Couplé Ordre", "2sur4", "Simple Gagnant",
                   "Trio", "Tiercé Désordre", "Quarté+ Désordre", "Quinté+ Désordre"},
         "loterie": {"Trio"},
+        # HANDICAP (2026-09-29) : en plus des combinaisons larges retirées à tous les
+        # profils (HANDICAP_TYPES_EXCLUS), le risqué n'y joue plus de couplés — il ne
+        # garde que le gagnant sec (rang ≤ 3, rapport ≥ ×10). Rejeu bench_plans,
+        # 1 099 handicaps (11/06 → 29/09), 10 €, heat 0,2, ROI brut du profil :
+        #     avant                     −13,3 % (≤ 10/08)   −20,4 % (> 10/08)
+        #     sans Trio/2sur4/Multi      −0,4 %              −8,8 %
+        #     + sans couplés             +4,2 %              +2,2 %   ← retenu
+        # Positif sur les deux périodes, winsorisé identique (aucun gain > ×30 ne le
+        # porte). Contrepartie assumée : plan à un seul ticket en handicap. Mesuré et
+        # NON retenu sur prudent/modéré (−1,6/−0,6 et +4,1/−2,7 : bruit).
+        "handicap_exclus": {"Couplé Gagnant", "Couplé Ordre", "Couplé Placé"},
         "objectif": "gain",
         # Ancrage STRICT : posé le 2026-09-01, RETIRÉ le 2026-09-02 après mesure.
         #
@@ -771,6 +782,50 @@ PROFIL_CONFIG = {
 }
 
 
+# CONTEXTE DE COURSE — HANDICAP (2026-09-29). Mesure sur 5 601 courses (31/05 → 29/09),
+# paris canoniques construits sur le classement IA figé avant le départ, réglés aux
+# vrais rapports PMU, deux périodes disjointes (avant / après le 10/08) :
+#
+#                         hors handicap   handicap
+#     Couplé Placé r1-r2      −11,1 %      −25,0 %
+#     Couplé Gagnant r1-r2    −13,0 %      −31,7 %
+#     2sur4 r1-r2             −18,2 %      −29,4 %
+#     Trio r1-r2-r3           −38,2 %      −44,2 %   (−60 % winsorisé)
+#     Multi en 5 top 5        −58,2 %      −91,2 %
+#     Simple Gagnant rang 1   −17,4 %       −3,3 %
+#
+# Répliqué sur les deux périodes. En handicap les poids sont faits pour resserrer
+# l'arrivée : l'ordre des premiers est une loterie, mais le cheval que l'IA met en
+# tête garde sa chance. On retire donc des profils les combinaisons à 3 chevaux et
+# plus ; le budget se reporte sur les paris à un cheval et les couplés.
+# (Déclencheur : 29092026R1C7, handicap de 16 partants, Trio 2-4-3 proposé.)
+HANDICAP_TYPES_EXCLUS = frozenset({
+    "Trio", "Trio Ordre", "2sur4", "Tiercé Désordre", "Quarté+ Désordre",
+    "Quinté+ Désordre", "Multi en 4", "Multi en 5", "Multi en 6", "Multi en 7",
+})
+
+
+def est_handicap(course_info: Optional[dict]) -> bool:
+    """Course à handicap (HANDICAP, HANDICAP_DIVISE, HANDICAP_DE_CATEGORIE…), lu dans
+    `categorie_particularite` du PMU. Inconnu → False (comportement d'avant)."""
+    cat = (course_info or {}).get("categorie_particularite") or ""
+    return "HANDICAP" in str(cat).upper()
+
+
+def _adapter_contexte(cfg: dict, course_info: Optional[dict]) -> dict:
+    """Retire du profil les types de pari que le contexte de course rend perdants
+    (mesuré, cf. HANDICAP_TYPES_EXCLUS). Ne touche ni aux tranches ni aux mises."""
+    if not HANDICAP_TYPES_EXCLUS or not est_handicap(course_info):
+        return cfg
+    cfg = dict(cfg)
+    exclus = HANDICAP_TYPES_EXCLUS | frozenset(cfg.get("handicap_exclus") or ())
+    if cfg.get("types") is not None:
+        cfg["types"] = frozenset(cfg["types"]) - exclus
+    cfg["loterie"] = frozenset(cfg.get("loterie") or ()) - exclus
+    cfg["contexte"] = "handicap"
+    return cfg
+
+
 def _effective_config(profil: str, heat: float) -> dict:
     """Profil EFFECTIF = config de base MODULÉE par `heat` ∈ [-1,+1], le thermostat
     adaptatif (calibration du modèle + ROI récent réel).
@@ -837,6 +892,8 @@ def _effective_config(profil: str, heat: float) -> dict:
         # Types « gros lot » (cf. LOTERIE_MAX_TICKETS) : exemptés du gate dur de
         # l'apprentissage, plafonnés en nombre. Contrat produit → non modulé.
         "loterie": frozenset(base.get("loterie") or ()),
+        # Types retirés EN PLUS en course à handicap (cf. _adapter_contexte).
+        "handicap_exclus": frozenset(base.get("handicap_exclus") or ()),
     }
     # Tilt de risque modulé : froid → renforce la sécurité, écrase surprise/coup.
     rp = {}
@@ -1436,7 +1493,7 @@ def generer_plan(
     palier = _palier(montant)
     roi_weights = roi_weights or {}
     heat = max(-1.0, min(1.0, float(heat or 0.0)))
-    cfg = _effective_config(profil, heat)
+    cfg = _adapter_contexte(_effective_config(profil, heat), course_info)
 
     preds = []
     # Largeur de l'intervalle de confiance de proba_top1, PAR CHEVAL — sert à réduire la
@@ -3687,6 +3744,11 @@ def _motif_rejet(c: dict, cfg: dict, roi_weights: Optional[dict] = None,
                  montant: Optional[float] = None) -> str:
     """Motif honnête pour lequel un candidat n'a PAS été retenu par ce profil."""
     allowed = cfg.get("types")
+    if cfg.get("contexte") == "handicap" and _fam(c["type_pari"]) in (
+            HANDICAP_TYPES_EXCLUS | frozenset(cfg.get("handicap_exclus") or ())):
+        return ("Course à handicap : les poids resserrent l'arrivée, l'ordre des premiers "
+                "devient une loterie. Mesuré sur l'historique réel, ce type de pari y perd "
+                "bien plus qu'ailleurs — on joue plutôt les chevaux un par un.")
     if allowed is not None and c["type_pari"] not in allowed:
         return "Type de pari hors méthode de ce profil."
     # Type SUPPRIMÉ par l'apprentissage (ROI réel prouvé perdant sur ce contexte) :

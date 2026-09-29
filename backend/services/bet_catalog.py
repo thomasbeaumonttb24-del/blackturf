@@ -140,6 +140,8 @@ def course_info_bets(course, *, nb_partants: Optional[int] = None) -> dict:
         nb_partants=champ,
     )
     info["nb_partants"] = champ
+    # Contexte de course lu par le moteur de plans (cf. mise_calculator.est_handicap).
+    info["categorie_particularite"] = getattr(course, "categorie_particularite", None)
     return info
 
 
