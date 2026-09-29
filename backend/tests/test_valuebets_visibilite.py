@@ -24,13 +24,14 @@ def _vb(actif=True, il_y_a=timedelta(0), naif=False, niveau=3):
 
 
 def test_plans_en_direct_sans_delai():
-    for plan in ("expert", "pro", "starter", None, "admin"):
+    for plan in ("expert", "pro", None, "admin"):
         assert cutoff_detection(plan, NOW) is None
         assert visible(_vb(), plan, NOW) is True
 
 
 def test_standard_attend_quinze_minutes():
     assert cutoff_detection("standard", NOW) == NOW - DELAI_STANDARD
+    assert cutoff_detection("starter", NOW) == NOW - DELAI_STANDARD  # ancien nom de Standard
     assert visible(_vb(il_y_a=timedelta(minutes=1)), "standard", NOW) is False
     assert visible(_vb(il_y_a=timedelta(minutes=14)), "standard", NOW) is False
     assert visible(_vb(il_y_a=timedelta(minutes=15)), "standard", NOW) is True

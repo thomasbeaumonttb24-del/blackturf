@@ -886,7 +886,8 @@ async def get_pari_du_jour(
     chance de victoire (proba_top1 ≥ 0.10) pour éviter les longshots à EV gonflé.
     Renvoie null si aucun pari crédible (intégrité : pas de pari forcé).
     """
-    if user.plan in ("free", "decouverte"):
+    from services.valuebets_visibilite import PLANS_AVEC_VALUE_BETS
+    if user.plan not in PLANS_AVEC_VALUE_BETS:
         return None
 
     q = (
@@ -896,8 +897,9 @@ async def get_pari_du_jour(
         .join(Cheval, Cheval.cheval_id == Participation.cheval_id)
         .join(Course, Course.course_id == ValueBet.course_id)
         .where(and_(
-            ValueBet.actif == True,
-            Course.statut.in_(["a_venir", "en_cours"]),
+            # Mêmes règles que /value-bets : le Standard voit le pari du jour
+            # avec son délai de 15 min, pas avant l'Expert.
+            *_vb_filtres_sql(user.plan),
             Prediction.proba_top1 >= 0.10,
             ValueBet.ev_max > 0.05,
         ))
@@ -1051,8 +1053,12 @@ async def get_course_analysis(
     - Dutch bet si profitable
     Requiert plan Standard+.
     """
-    if user.plan in ("free", "decouverte"):
+    from services.valuebets_visibilite import PLANS_AVEC_VALUE_BETS, PLANS_DIFFERES
+    if user.plan not in PLANS_AVEC_VALUE_BETS:
         raise HTTPException(status_code=403, detail="Plan Standard ou Expert requis")
+    # L'analyse contient des paris de valeur filtrés SELON LE PLAN : un cache
+    # unique servait à tous ce que le premier visiteur avait le droit de voir.
+    classe_plan = "differe" if user.plan in PLANS_DIFFERES else "direct"
 
     # Charger features depuis DB
     from db.models import FeatureML, Prediction as PredictionModel, ValueBet as VBModel, Course
@@ -1096,8 +1102,11 @@ async def get_course_analysis(
     vbs_r = await db.execute(
         select(VBModel).where(VBModel.course_id == course_id, VBModel.actif.is_(True))
     )
+    # Indicateur de mouvement de cote (SPI) : fonction Expert (page Tarifs).
+    _spi = user.plan == "expert"
     vb_map = {vb.participation_id: {"ev_max": vb.ev_max, "niveau": vb.niveau,
-                                    "spi_detected": vb.spi_detected, "spi_score": vb.spi_score}
+                                    "spi_detected": vb.spi_detected if _spi else None,
+                                    "spi_score": vb.spi_score if _spi else None}
               for vb in vbs_r.scalars().all() if _vb_visible(vb, user.plan, etranger=_etranger)}
 
     # Cotes LIVE avant le gel (T-10) : seule la cote AFFICHÉE suit le marché.
@@ -1136,7 +1145,7 @@ async def get_course_analysis(
         from db.redis_client import get_redis
         import json
         redis = await get_redis()
-        cache_key = f"analyse:{course_id}"
+        cache_key = f"analyse:{course_id}:{classe_plan}:{'spi' if _spi else 'nospi'}"
         cached = await redis.get(cache_key)
         if cached:
             return json.loads(cached)
@@ -1239,15 +1248,22 @@ async def get_dutch_bet(
     Calcule un Dutch bet pour les value bets de cette course.
     Garantit un gain fixe quel que soit le vainqueur parmi les sélections.
     """
-    from db.models import ValueBet as VBModel, Participation, Cheval
+    from db.models import ValueBet as VBModel, Participation, Cheval, Course as CourseModel
     from ml.portfolio import dutching_calculator
+    from services.valuebets_visibilite import PLANS_AVEC_VALUE_BETS
 
+    # Nomme des paris de valeur : même paywall et mêmes règles de visibilité
+    # (délai Standard, niveaux, étranger) que /value-bets. Il suffisait d'être
+    # connecté.
+    if user.plan not in PLANS_AVEC_VALUE_BETS:
+        raise HTTPException(status_code=403, detail="Plan Standard ou Expert requis")
     vbs_r = await db.execute(
         select(VBModel.participation_id, VBModel.ev_max, VBModel.niveau,
                Participation.numero, Participation.cote_pmu, Cheval.nom)
         .join(Participation, Participation.participation_id == VBModel.participation_id)
         .join(Cheval, Cheval.cheval_id == Participation.cheval_id)
-        .where(VBModel.course_id == course_id, VBModel.actif.is_(True), VBModel.niveau >= 2)
+        .join(CourseModel, CourseModel.course_id == VBModel.course_id)
+        .where(VBModel.course_id == course_id, *_vb_filtres_sql(user.plan))
         .order_by(VBModel.ev_max.desc())
     )
     vbs = vbs_r.fetchall()

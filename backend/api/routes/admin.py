@@ -1512,6 +1512,8 @@ async def revenue_stats(
 # table de `/admin/revenue` annonçait 9,90 € et 19,90 € alors que les prix en
 # production sont 12,00 € et 19,00 € — le MRR était faux de ~20 %.
 PRIX_MENSUEL_CENTS = {"standard": 1200, "expert": 1900, "starter": 1200, "pro": 1900}
+# Prix annuels réels chez Stripe (115,20 € et 182,40 €, vérifiés le 2026-09-29).
+PRIX_ANNUEL_CENTS = {"standard": 11520, "expert": 18240, "starter": 11520, "pro": 18240}
 
 # Doit rester aligné sur `stripe_routes.STATUTS_ACCES` / `STATUT_SANS_CARTE`.
 # `past_due` en est sorti le 2026-08-27 : un paiement en échec ne donne plus accès
@@ -1542,7 +1544,7 @@ async def abonnements(
     lignes = (await db.execute(
         select(Subscription, User)
         .join(User, User.user_id == Subscription.user_id)
-        .where(Subscription.statut.in_(vivants))
+        .where(Subscription.statut.in_(vivants), User.is_admin.is_not(True))
         .order_by(desc(Subscription.created_at))
     )).all()
 
@@ -1560,6 +1562,7 @@ async def abonnements(
 
     abonnes = []
     mrr_cents = 0
+    mrr_fin_cents = 0  # abonnés payants qui ont résilié : payés, mais ne renouvelleront pas
     en_essai = essai_sans_carte = payants = fin_essai_3j = 0
     # Répartition par COMPTE (un compte peut porter deux lignes d'abonnement).
     ids_payants: dict[str, str] = {}
@@ -1574,8 +1577,8 @@ async def abonnements(
         # Prix de la formule ACTUELLE. Le « plus gros montant du journal » gardait
         # 19 € pour un abonné repassé d'Expert à Standard (MRR 62 € au lieu de 55 €,
         # 2026-09-29). Seul l'annuel lit le montant réellement facturé.
-        montant = ((montants.get(sub.stripe_subscription_id) if sub.periodicite == "annual" else None)
-                   or PRIX_MENSUEL_CENTS.get(sub.plan, 0))
+        montant = ((montants.get(sub.stripe_subscription_id) or PRIX_ANNUEL_CENTS.get(sub.plan, 0))
+                   if sub.periodicite == "annual" else PRIX_MENSUEL_CENTS.get(sub.plan, 0))
 
         if sans_carte:
             essai_sans_carte += 1
@@ -1587,7 +1590,14 @@ async def abonnements(
             payants += 1
             ids_payants.setdefault(user.user_id, sub.plan)
             # Un abonnement annuel ne rapporte pas douze fois son prix chaque mois.
-            mrr_cents += montant / 12 if sub.periodicite == "annual" else montant
+            mensuel = montant / 12 if sub.periodicite == "annual" else montant
+            # Revenu RÉCURRENT = ce qui se renouvellera. Une résiliation programmée
+            # ne se renouvelle pas : l'échéancier de Revenus la compte déjà à 0 €,
+            # le MRR la comptait plein — deux vérités sur deux pages.
+            if sub.statut == "cancel_at_period_end":
+                mrr_fin_cents += mensuel
+            else:
+                mrr_cents += mensuel
         if en_cours_dessai and jours_restants is not None and jours_restants <= 3:
             fin_essai_3j += 1
 
@@ -1680,6 +1690,7 @@ async def abonnements(
             "fin_essai_sous_3j": fin_essai_3j,
             "mrr": round(mrr_cents / 100, 2),
             "arr": round(mrr_cents * 12 / 100, 2),
+            "mrr_resiliations": round(mrr_fin_cents / 100, 2),
             "essais_ouverts_30j": essais_ouverts_30j,
             "essais_perdus_30j": essais_perdus_30j,
             "resiliations_30j": resiliations_30j,
@@ -1863,7 +1874,7 @@ async def revenus(
             if qui:
                 premiers.add(qui)
             uid_email = par_client.get(e.client_id or "")
-            email = e.email or (uid_email[1] if uid_email else None)
+            email = (uid_email[1] if uid_email else None) or e.email
             plan = _formule_payee(e.price_id, e.plan_prix, e.montant_cents, email)
             # Différence réglée lors d'un passage Standard → Expert : ni un nouveau
             # client, ni une échéance ordinaire.
@@ -1938,11 +1949,11 @@ async def revenus(
         k: {
             "mois": k, "encaisse_cents": 0, "rembourse_cents": 0, "frais_cents": 0,
             "net_cents": 0, "verse_cents": 0, "nb_paiements": 0, "nb_remboursements": 0,
-            "nouveaux_cents": 0, "renouvellements_cents": 0,
+            "nouveaux_cents": 0, "renouvellements_cents": 0, "changements_cents": 0,
             "par_formule": {"standard": 0, "expert": 0},
             "echecs_cents": 0, "nb_echecs": 0, "nb_echecs_regles": 0, "nb_tentatives_echouees": 0,
             "frais_connus": livre is not None,
-            "clients": set(), "paiements": [], "_echecs": {},
+            "clients": set(), "paiements": [],
         }
         for k in cles_mois
     }
@@ -1957,7 +1968,8 @@ async def revenus(
         b["net_cents"] += lp["net_cents"] if lp["net_cents"] is not None else m
         f = lp["plan"] if lp["plan"] in b["par_formule"] else "standard"
         b["par_formule"][f] += m
-        b["nouveaux_cents" if lp["nature"] == "nouveau" else "renouvellements_cents"] += m
+        b[{"nouveau": "nouveaux_cents", "changement": "changements_cents"}.get(
+            lp["nature"], "renouvellements_cents")] += m
         if lp["email"]:
             b["clients"].add(lp["email"].lower())
         b["paiements"].append(lp)
@@ -1974,6 +1986,15 @@ async def revenus(
     # Frais Stripe prélevés À PART des paiements (Stripe Billing : 0,7 % facturé
     # chaque semaine). Absents, le « net » dépassait le solde réel de 0,29 € en
     # septembre 2026.
+    for lt in (livre.litiges if livre is not None else []):
+        # Litige : l'argent repris diminue le chiffre d'affaires comme un
+        # remboursement (un litige gagné le rend : montant négatif), et les frais
+        # de litige s'ajoutent aux frais.
+        b = buckets.get(_mois_de(lt.cree_le, tz))
+        if b is not None:
+            b["rembourse_cents"] += lt.repris_cents
+            b["frais_cents"] += lt.frais_cents
+            b["net_cents"] += lt.net_cents
     for fd in (livre.frais_divers if livre is not None else []):
         b = buckets.get(_mois_de(fd.cree_le, tz))
         if b is not None:
@@ -1996,24 +2017,35 @@ async def revenus(
     for lp in lignes_paiement:
         if lp["email"]:
             regles_par_cle.setdefault(lp["email"].lower(), []).append(lp["date"])
+    # Une FACTURE refusée = un échec, rangé dans le mois de son premier refus.
+    # Clé par abonnement, un refus du 29/09 relancé le 02/10 comptait deux fois
+    # (septembre ET octobre) et doublait le total de la période.
+    par_facture: dict[str, dict] = {}
     for ev in journal:
-        if ev.type == "paiement_echoue":
-            b = buckets.get(_mois_de(ev.created_at, tz))
-            if b is None:
-                continue
+        if ev.type != "paiement_echoue":
+            continue
+        b = buckets.get(_mois_de(ev.created_at, tz))
+        if b is not None:
             b["nb_tentatives_echouees"] += 1
-            cle_ = ev.stripe_subscription_id or (ev.email or "").lower() or ev.event_id
-            e_ = b["_echecs"].setdefault(cle_, {"montant": 0, "dernier": _utc(ev.created_at),
-                                               "email": (ev.email or "").lower()})
-            e_["montant"] = max(e_["montant"], int(ev.montant_cents or 0))
-            e_["dernier"] = max(e_["dernier"], _utc(ev.created_at))
-    for b in buckets.values():
-        for cle_, e_ in b["_echecs"].items():
-            b["nb_echecs"] += 1
-            b["echecs_cents"] += e_["montant"]
-            apres = regles_par_cle.get(cle_, []) + regles_par_cle.get(e_["email"], [])
-            if any(d > e_["dernier"] for d in apres):
-                b["nb_echecs_regles"] += 1
+        detail_ = ev.detail if isinstance(ev.detail, dict) else {}
+        cle_ = (detail_.get("facture") or ev.stripe_subscription_id
+                or (ev.email or "").lower() or ev.event_id)
+        d_ = _utc(ev.created_at)
+        e_ = par_facture.setdefault(cle_, {"montant": 0, "premier": d_, "dernier": d_,
+                                           "sid": ev.stripe_subscription_id,
+                                           "email": (ev.email or "").lower()})
+        e_["montant"] = max(e_["montant"], int(ev.montant_cents or 0))
+        e_["premier"] = min(e_["premier"], d_)
+        e_["dernier"] = max(e_["dernier"], d_)
+    for e_ in par_facture.values():
+        b = buckets.get(_mois_de(e_["premier"], tz))
+        if b is None:
+            continue
+        b["nb_echecs"] += 1
+        b["echecs_cents"] += e_["montant"]
+        apres = regles_par_cle.get(e_["sid"] or "", []) + regles_par_cle.get(e_["email"], [])
+        if any(d > e_["dernier"] for d in apres):
+            b["nb_echecs_regles"] += 1
 
     serie = []
     cumul = 0
@@ -2023,7 +2055,7 @@ async def revenus(
         cumul += ca
         b["paiements"].sort(key=lambda p: p["date"], reverse=True)
         serie.append({
-            **{kk: vv for kk, vv in b.items() if kk not in ("clients", "_echecs")},
+            **{kk: vv for kk, vv in b.items() if kk != "clients"},
             # Chiffre d'affaires encaissé du mois = débits réussis − remboursements.
             "ca_cents": ca,
             "nb_clients": len(b["clients"]),
@@ -2060,8 +2092,8 @@ async def revenus(
     echeances = []
     prevu_par_mois: dict[str, int] = {}
     for sub, user in lignes:
-        catalogue = ((montants.get(sub.stripe_subscription_id) if sub.periodicite == "annual" else None)
-                     or PRIX_MENSUEL_CENTS.get(sub.plan, 0))
+        catalogue = ((montants.get(sub.stripe_subscription_id) or PRIX_ANNUEL_CENTS.get(sub.plan, 0))
+                     if sub.periodicite == "annual" else PRIX_MENSUEL_CENTS.get(sub.plan, 0))
         montant = prochains.get(sub.stripe_subscription_id, catalogue)
         essai_fin = sub.essai_fin
         if essai_fin is not None and essai_fin.tzinfo is None:
@@ -2342,7 +2374,9 @@ async def _suivi_essais(db: AsyncSession, now: datetime) -> dict:
     # une période gratuite comptent — un essai refusé (carte déjà vue) n'en est pas un.
     termines = [l for l in lignes if l["a_eu_essai"]
                 and l["issue"] not in ("en_essai", "resiliation_programmee")]
-    convertis = [l for l in termines if l["a_paye"] or l["issue"] == "converti"]
+    # Converti = a PAYÉ. Un abonnement « active » sans paiement (heure qui suit la
+    # fin d'essai, code promo à 100 %) n'est pas une conversion.
+    convertis = [l for l in termines if l["a_paye"]]
 
     # Paiement ouvert (le client Stripe naît au checkout) mais aucun abonnement :
     # la personne s'est arrêtée à l'écran de carte bancaire.

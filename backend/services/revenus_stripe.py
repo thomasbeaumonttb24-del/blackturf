@@ -112,11 +112,21 @@ class FraisDivers:
 
 
 @dataclass
+class Litige:
+    """Mouvement de solde d'un litige bancaire (perdu : repris > 0 ; gagné : < 0)."""
+    cree_le: datetime
+    repris_cents: int
+    frais_cents: int
+    net_cents: int
+
+
+@dataclass
 class Grand_livre:
     encaissements: list[Encaissement] = field(default_factory=list)
     remboursements: list[Remboursement] = field(default_factory=list)
     virements: list[Virement] = field(default_factory=list)
     frais_divers: list[FraisDivers] = field(default_factory=list)
+    litiges: list[Litige] = field(default_factory=list)
     lu_le: float = 0.0
 
 
@@ -234,6 +244,16 @@ def collecter(cle: str, depuis_ts: Optional[int] = None) -> Grand_livre:
             cree_le=_date(_g(bt, "created")),
             montant_cents=-int(_g(bt, "net", defaut=0)),
             description=_g(bt, "description"),
+        ))
+
+    for bt in _pages(stripe.BalanceTransaction, type="adjustment", **params):
+        if _g(bt, "reporting_category") not in ("dispute", "dispute_reversal"):
+            continue
+        livre.litiges.append(Litige(
+            cree_le=_date(_g(bt, "created")),
+            repris_cents=-int(_g(bt, "amount", defaut=0)),
+            frais_cents=int(_g(bt, "fee", defaut=0)),
+            net_cents=int(_g(bt, "net", defaut=0)),
         ))
 
     livre.encaissements.sort(key=lambda e: e.cree_le)

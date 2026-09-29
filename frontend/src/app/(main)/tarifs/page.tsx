@@ -158,7 +158,7 @@ export default function TarifsPage() {
               <span className="text-4xl font-extrabold">12€</span>
               <span className="text-muted-foreground">/mois</span>
             </div>
-            <p className="text-xs text-muted-foreground mb-6">ou 115€/an (−20%)</p>
+            <p className="text-xs text-muted-foreground mb-6">ou 115,20 €/an (−20 %)</p>
             <ul className="space-y-3 mb-8">
               {[
                 { label: "Prédictions IA : 5 courses/jour", icon: null },
@@ -202,7 +202,7 @@ export default function TarifsPage() {
               <span className="text-4xl font-extrabold">19€</span>
               <span className="text-muted-foreground">/mois</span>
             </div>
-            <p className="text-xs text-muted-foreground mb-6">ou 182€/an (−20%)</p>
+            <p className="text-xs text-muted-foreground mb-6">ou 182,40 €/an (−20 %)</p>
             <ul className="space-y-3 mb-8">
               {[
                 "Tout Standard",

@@ -12,7 +12,7 @@ import { ParrainageAppel } from "@/components/billing/ParrainageAppel";
 
 function AbonnementSuccesContent() {
   const searchParams = useSearchParams();
-  const { refreshUser } = useAuth();
+  const { user, refreshUser } = useAuth();
   const [loading, setLoading] = useState(true);
   const plan = searchParams.get("plan") || "standard";
   // `change=1` : changement de formule sur l'abonnement existant, pas une
@@ -37,6 +37,10 @@ function AbonnementSuccesContent() {
   }, [refreshUser]);
 
   const planLabel = plan === "expert" ? "Expert" : "Standard";
+  // L'adresse dit ce qui a été DEMANDÉ ; seul le compte relu dit ce qui est actif.
+  // Paiement pas encore confirmé (webhook en route, essai refusé à régler) : on
+  // ne souhaite pas « Bienvenue en Expert » à un compte qui ne l'est pas.
+  const planActif = !loading && user?.plan === plan;
   const planDesc =
     plan === "expert"
       ? "Prédictions illimitées, assistant IA, créateur de stratégies, simulation sur 365 jours."
@@ -57,9 +61,17 @@ function AbonnementSuccesContent() {
               <CheckCircle className="h-10 w-10 text-brand-emerald-dark" />
             </div>
 
+            {!planActif && (
+              <p className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                Votre paiement est en cours de confirmation. L&apos;accès {planLabel} s&apos;ouvre dès
+                que votre banque l&apos;a validé ; rechargez cette page dans une minute. Si un
+                paiement est en attente, réglez-le depuis votre{" "}
+                <Link href="/profil" className="font-semibold underline">profil</Link>.
+              </p>
+            )}
             <div>
               <h1 className="text-3xl font-extrabold mb-2">
-                {changementDeFormule ? "Vous êtes maintenant en " : "Bienvenue sur BlackTurf "}
+                {!planActif ? "Demande enregistrée — " : changementDeFormule ? "Vous êtes maintenant en " : "Bienvenue sur BlackTurf "}
                 <span className="text-gradient">{planLabel}</span> !
               </h1>
               <p className="text-muted-foreground">{planDesc}</p>

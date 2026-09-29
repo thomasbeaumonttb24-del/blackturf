@@ -40,7 +40,10 @@ FENETRE_APRES_DEPART = timedelta(hours=6)
 
 # Plan Standard : paris de valeur servis avec 15 min de retard (briefing §4.2).
 DELAI_STANDARD = timedelta(minutes=15)
-PLANS_DIFFERES = ("standard",)
+PLANS_DIFFERES = ("standard", "starter")  # « starter » = ancien nom de Standard
+# Seuls plans qui voient des paris de valeur (liste BLANCHE : un plan inconnu
+# ne voit rien, au lieu de tout voir sans délai).
+PLANS_AVEC_VALUE_BETS = ("starter", "standard", "expert")
 
 STATUTS_OUVERTS = ("a_venir", "en_cours")
 

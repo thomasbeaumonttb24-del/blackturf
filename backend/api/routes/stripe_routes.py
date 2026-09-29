@@ -2,9 +2,10 @@
 Stripe routes — BlackTurf.
 Checkout, webhooks, portail client.
 """
+import os
 import structlog
 import stripe
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Header
@@ -38,14 +39,6 @@ PRICE_MAP = {
     "pro_annual":      settings.stripe_price_pro_annual,
 }
 
-# Prix en centimes de chaque price configuré (aperçu d'un changement de formule).
-PRIX_CENTS_PAR_PRICE = {
-    settings.stripe_price_starter_monthly: 1200,
-    settings.stripe_price_pro_monthly: 1900,
-    settings.stripe_price_starter_annual: 11500,
-    settings.stripe_price_pro_annual: 18200,
-}
-
 # Normalize plan names from Stripe price_id
 PLAN_FROM_PRICE = {
     settings.stripe_price_starter_monthly: "standard",
@@ -77,6 +70,12 @@ STATUT_SANS_CARTE = "essai_sans_carte"
 STATUTS_VIVANTS = ("active", "trialing", "past_due", "cancel_at_period_end",
                    STATUT_SANS_CARTE)
 
+# Statuts qui interdisent d'ouvrir un NOUVEL abonnement sans en être vivants au
+# sens de l'accès : un premier paiement en cours de finalisation (`incomplete`,
+# cas de l'essai refusé) ou un impayé clos côté Stripe (`unpaid`). Sans eux, un
+# clic pendant cette fenêtre ouvrait un second abonnement payant.
+STATUTS_EN_ATTENTE_PAIEMENT = ("incomplete", "unpaid")
+
 # Statuts qui DONNENT ACCÈS au produit. `cancel_at_period_end` est notre statut
 # maison — résilié, mais payé jusqu'à l'échéance. `essai_sans_carte` n'en fait
 # volontairement PAS partie.
@@ -92,6 +91,42 @@ STATUTS_ACCES = ("active", "cancel_at_period_end")
 
 # Ordre des plans, pour choisir lequel accorder quand il en reste plusieurs.
 RANG_PLAN = {"free": 0, "standard": 1, "expert": 2}
+
+
+def _stripe_joignable() -> bool:
+    """Faux sous pytest (aucun appel réseau réel) ou sans clé : les appels de
+    vérification Stripe sont alors sautés, jamais bloquants."""
+    return bool(stripe.api_key) and "PYTEST_CURRENT_TEST" not in os.environ
+
+
+def _abonnements_stripe_vivants(customer_id: Optional[str]) -> list[dict]:
+    """Abonnements NON terminés chez Stripe pour ce client, lus en direct : la
+    base peut être en retard d'un webhook (quelques secondes à quelques minutes)."""
+    if not customer_id or not _stripe_joignable():
+        return []
+    try:
+        return [s for s in stripe.Subscription.list(customer=customer_id, status="all", limit=20)
+                .auto_paging_iter()
+                if s.get("status") not in ("canceled", "incomplete_expired")]
+    except Exception as e:  # noqa: BLE001
+        log.warning("stripe.lecture_abonnements_echouee", customer=customer_id, error=str(e)[:120])
+        return []
+
+
+def _expirer_sessions_ouvertes(customer_id: Optional[str]) -> None:
+    """Ferme les pages de paiement Stripe encore ouvertes de ce client. Sans ça,
+    un onglet Checkout resté ouvert (valable 24 h) pouvait être payé APRÈS un
+    autre : deux abonnements, deux prélèvements."""
+    if not customer_id or not _stripe_joignable():
+        return
+    try:
+        for sess in stripe.checkout.Session.list(customer=customer_id, status="open", limit=20):
+            try:
+                stripe.checkout.Session.expire(sess["id"])
+            except Exception as e:  # noqa: BLE001
+                log.warning("stripe.expiration_session_echouee", session=sess.get("id"), error=str(e)[:120])
+    except Exception as e:  # noqa: BLE001
+        log.warning("stripe.lecture_sessions_echouee", customer=customer_id, error=str(e)[:120])
 
 
 async def _subs_vivantes(user_id: str, db: AsyncSession,
@@ -345,6 +380,9 @@ class CheckoutRequest(BaseModel):
     # (2026-09-29 : un clic sur un bouton « Standard » 8 s après une souscription
     # Expert a rétrogradé un client qui venait de payer 19 €.)
     confirmer: bool = False
+    # Date de prorata renvoyée par l'aperçu : le montant débité est alors
+    # exactement celui annoncé, même si le client a mis du temps à confirmer.
+    proration_date: Optional[int] = None
 
 
 @router.post("/stripe/checkout")
@@ -371,32 +409,54 @@ async def create_checkout(
 
     # 1) Déjà abonné ? On ne crée JAMAIS un second abonnement.
     vivants = await _subs_vivantes(user.user_id, db)
+    en_attente = (await db.execute(
+        select(Subscription).where(Subscription.user_id == user.user_id,
+                                   Subscription.statut.in_(STATUTS_EN_ATTENTE_PAIEMENT))
+    )).scalars().all()
+    if any(s.statut == "past_due" for s in vivants) or (en_attente and not vivants):
+        # Une facture est impayée (ou un premier paiement en cours) : changer de
+        # formule mélange deux prix sur une même période (cas du 26/09 : facture
+        # Expert réglée après un passage en Standard), ouvrir un second abonnement
+        # ferait payer deux fois.
+        raise HTTPException(
+            status_code=409,
+            detail="Un prélèvement est en attente sur votre abonnement. Réglez-le "
+                   "depuis votre profil avant de changer de formule.",
+        )
+    if not vivants and _abonnements_stripe_vivants(user.stripe_customer_id):
+        # Stripe connaît un abonnement que notre base n'a pas encore reçu (webhook
+        # en route) : l'ouvrir une seconde fois serait un double prélèvement.
+        raise HTTPException(
+            status_code=409,
+            detail="Votre abonnement est en cours d'activation. Patientez une minute "
+                   "puis rechargez la page.",
+        )
     if vivants:
-        courant = vivants[0]
+        courant = _abonnement_courant(vivants)
         if courant.plan == plan_cible and courant.periodicite == body.periodicite:
             raise HTTPException(
                 status_code=409,
                 detail="Vous êtes déjà abonné à cette formule. "
                        "Gérez votre abonnement depuis votre profil.",
             )
-        if courant.statut == "past_due":
-            # Une facture est impayée sur la formule actuelle : changer de formule
-            # maintenant mélange deux prix sur une même période (cas du 26/09 :
-            # facture Expert réglée après un passage en Standard).
+        if courant.periodicite != body.periodicite:
+            # Changer d'intervalle refacture la totalité tout de suite et déplace
+            # l'échéance : jamais sans un échange humain.
             raise HTTPException(
                 status_code=409,
-                detail="Un prélèvement est en attente sur votre abonnement. Réglez-le "
-                       "depuis votre profil avant de changer de formule.",
+                detail="Le passage mensuel ↔ annuel se fait sur demande : écrivez-nous "
+                       "à contact@blackturf.fr.",
             )
         if not body.confirmer:
             return {"confirmation_requise": True,
                     "apercu": _apercu_changement(user, courant, plan_cible,
                                                  body.periodicite, price_id)}
         return await _changer_de_plan(user, vivants, plan_cible, body.periodicite,
-                                      price_id, db)
+                                      price_id, db, proration_date=body.proration_date)
 
     # Récupérer ou créer le customer Stripe
     customer_id = user.stripe_customer_id
+    _expirer_sessions_ouvertes(customer_id)
     if not customer_id:
         customer = stripe.Customer.create(
             email=user.email,
@@ -500,6 +560,15 @@ async def create_checkout(
             "remise_parrainage": parrainage_filleul is not None}
 
 
+def _abonnement_courant(vivants: list[Subscription]) -> Subscription:
+    """L'abonnement à modifier : celui qui DONNE accès, de la formule la plus haute,
+    puis le plus récent. `vivants[0]` (le plus récent) pouvait être un essai sans
+    carte alors qu'un Expert payé courait à côté — c'est ce dernier qu'on fermait."""
+    return max(vivants, key=lambda s: (s.statut in STATUTS_ACCES,
+                                       RANG_PLAN.get(s.plan, 0),
+                                       s.created_at.timestamp() if s.created_at else 0))
+
+
 def _sens_changement(courant: Subscription, plan_cible: str, periodicite: str) -> str:
     if RANG_PLAN.get(plan_cible, 0) > RANG_PLAN.get(courant.plan, 0):
         return "hausse"
@@ -546,21 +615,33 @@ def _apercu_changement(user: User, courant: Subscription, plan_cible: str,
     mode = _mode_prorata(sens, sub_stripe)
     en_essai = _en_essai(sub_stripe)
     fin_periode = item.get("current_period_end") or sub_stripe.get("current_period_end")
-    prix_cible = PRIX_CENTS_PAR_PRICE.get(price_id)
+    # Prix lu chez Stripe : l'annuel vaut 115,20 € / 182,40 €, pas un chiffre rond.
+    try:
+        prix_cible = stripe.Price.retrieve(price_id).get("unit_amount")
+    except Exception:  # noqa: BLE001
+        prix_cible = None
 
     immediat = ajustement = None
+    proration_date = int(datetime.now(timezone.utc).timestamp())
     try:
         apercu = stripe.Invoice.upcoming(
             customer=sub_stripe.get("customer"),
             subscription=courant.stripe_subscription_id,
             subscription_items=[{"id": item["id"], "price": price_id}],
             subscription_proration_behavior=mode,
-            subscription_proration_date=int(datetime.now(timezone.utc).timestamp()),
+            subscription_proration_date=proration_date,
         )
         prorata = sum(int(ligne.get("amount") or 0) for ligne in apercu["lines"]["data"]
                       if ligne.get("proration"))
         if mode == "always_invoice":
-            immediat = max(prorata, 0)
+            # Un crédit client (parrainage) est consommé en premier par Stripe.
+            credit = 0
+            try:
+                solde = int(stripe.Customer.retrieve(sub_stripe.get("customer")).get("balance") or 0)
+                credit = -solde if solde < 0 else 0
+            except Exception:  # noqa: BLE001
+                pass
+            immediat = max(prorata - credit, 0)
         else:
             ajustement = prorata
     except Exception as e:  # noqa: BLE001 — l'aperçu ne bloque pas, le message reste honnête
@@ -574,6 +655,11 @@ def _apercu_changement(user: User, courant: Subscription, plan_cible: str,
         message = (f"Passer en {nom} ? Votre essai gratuit continue jusqu'au "
                    f"{_date_fr(sub_stripe.get('trial_end'))}. Aucun prélèvement aujourd'hui ; "
                    f"ensuite {prix_txt}.")
+    elif mode == "always_invoice" and immediat is not None and immediat < 50:
+        # Sous 0,50 €, Stripe ne débite pas : le montant rejoint la facture suivante.
+        message = (f"Passer en {nom} maintenant ? La différence ({_euros(immediat)}) est trop "
+                   f"faible pour être prélevée seule : elle sera ajoutée à votre facture du "
+                   f"{_date_fr(fin_periode)}, puis {prix_txt}.")
     elif mode == "always_invoice":
         montant = (f"{_euros(immediat)} (différence au prorata jusqu'au {_date_fr(fin_periode)})"
                    if immediat is not None else "La différence au prorata")
@@ -593,6 +679,7 @@ def _apercu_changement(user: User, courant: Subscription, plan_cible: str,
         "ajustement_prochaine_facture_cents": ajustement,
         "prochaine_echeance": fin_periode, "prix_cible_cents": prix_cible,
         "resiliation_programmee": resilie, "message": message,
+        "proration_date": proration_date,
     }
 
 
@@ -603,6 +690,7 @@ async def _changer_de_plan(
     periodicite: str,
     price_id: str,
     db: AsyncSession,
+    proration_date: Optional[int] = None,
 ) -> dict:
     """Standard ↔ Expert : on MODIFIE l'abonnement existant.
 
@@ -612,13 +700,28 @@ async def _changer_de_plan(
     différence de prix est proratisée sur la prochaine facture, et l'essai en
     cours est conservé (Stripe garde `trial_end` lors d'un changement d'article).
     """
-    courant = vivants[0]
+    courant = _abonnement_courant(vivants)
     sub_stripe = stripe.Subscription.retrieve(courant.stripe_subscription_id)
     item_id = sub_stripe["items"]["data"][0]["id"]
     sens = _sens_changement(courant, plan_cible, periodicite)
     mode = _mode_prorata(sens, sub_stripe)
 
+    if sub_stripe.get("pending_update"):
+        # Un changement attend déjà son paiement (3-D Secure) : renvoyer vers la
+        # MÊME facture, jamais en créer une seconde qui pourrait être payée aussi.
+        facture = sub_stripe.get("latest_invoice")
+        if isinstance(facture, str):
+            facture = stripe.Invoice.retrieve(facture)
+        return {
+            "url": (facture or {}).get("hosted_invoice_url") or f"{settings.frontend_url}/profil",
+            "change_de_plan": False, "paiement_requis": True, "plan": courant.plan,
+            "message": "Un changement de formule attend déjà la confirmation de votre banque.",
+        }
+
     params: dict = {"items": [{"id": item_id, "price": price_id}], "proration_behavior": mode}
+    maintenant = int(datetime.now(timezone.utc).timestamp())
+    if proration_date and maintenant - 2 * 3600 <= proration_date <= maintenant:
+        params["proration_date"] = int(proration_date)
     if mode == "always_invoice":
         # La nouvelle formule n'est appliquée QUE si la différence est payée : une
         # carte refusée ou une authentification 3-D Secure laisse la formule
@@ -658,15 +761,20 @@ async def _changer_de_plan(
     # Doublons hérités de l'ancien tunnel : un compte ne doit porter qu'UN
     # abonnement. Ceux encore en essai n'ont rien coûté, on les ferme sur-le-champ ;
     # ceux déjà payés courent jusqu'à l'échéance déjà réglée.
-    for doublon in vivants[1:]:
+    for doublon in [v for v in vivants if v is not courant]:
         try:
-            if doublon.statut == "trialing" or doublon.essai_fin is not None:
+            # L'état LIVE décide : `essai_fin` reste renseigné après un essai payé,
+            # et un doublon payé supprimé sur-le-champ perdait sa période réglée.
+            statut_live = stripe.Subscription.retrieve(doublon.stripe_subscription_id).get("status")
+            if statut_live == "trialing":
                 stripe.Subscription.delete(doublon.stripe_subscription_id)
                 doublon.statut = "canceled"
-            else:
+            elif statut_live in ("active",):
                 stripe.Subscription.modify(doublon.stripe_subscription_id,
                                            cancel_at_period_end=True)
                 doublon.statut = "cancel_at_period_end"
+            else:
+                continue  # impayé ou déjà clos : ne rien réétiqueter
             log.warning("stripe.doublon_ferme", user_id=user.user_id,
                         sub=doublon.stripe_subscription_id, statut=doublon.statut)
         except Exception as e:  # noqa: BLE001
@@ -681,13 +789,21 @@ async def _changer_de_plan(
     statut_stripe = maj.get("status")
     if statut_stripe in ("active", "trialing"):
         # Un essai resté sans carte le reste : changer de formule ne débloque rien.
+        # Une résiliation programmée le reste aussi.
         if courant.statut != STATUT_SANS_CARTE:
-            courant.statut = "active"
-            user.plan = plan_cible
-    await journaliser(db, "changement_plan", user, courant,
-                      plan_precedent=plan_precedent,
-                      montant_cents=_montant_cents(maj))
-    await db.commit()
+            courant.statut = ("cancel_at_period_end" if _resiliation_programmee(maj)
+                              else "active")
+    try:
+        user.plan = await _plan_effectif(user.user_id, db)
+        await journaliser(db, "changement_plan", user, courant,
+                          plan_precedent=plan_precedent,
+                          montant_cents=_montant_cents(maj))
+        await db.commit()
+    except Exception as e:  # noqa: BLE001
+        # Stripe a déjà changé la formule (et encaissé) : le webhook réalignera la
+        # base. Le client ne doit pas lire « échec » après avoir payé.
+        log.error("stripe.plan_change_base_non_ecrite", user_id=user.user_id, error=str(e)[:200])
+        await db.rollback()
 
     log.info("stripe.plan_change", user_id=user.user_id, plan=plan_cible,
              sub=courant.stripe_subscription_id, doublons_fermes=len(vivants) - 1)
@@ -750,6 +866,30 @@ async def cancel_subscription(
                 # Double clic : déjà résilié, ne pas journaliser (ni notifier) deux fois.
                 cancelled_via_stripe = True
                 continue
+            if sub.statut == "past_due":
+                # Impayé : pas de « fin de période » à honorer, l'accès est déjà
+                # coupé. Clore TOUT DE SUITE et annuler la facture — sinon les
+                # relances J+3/J+7 débitaient un client qui avait résilié.
+                try:
+                    stripe.Subscription.delete(sub.stripe_subscription_id)
+                    for inv in stripe.Invoice.list(subscription=sub.stripe_subscription_id,
+                                                   status="open", limit=10):
+                        try:
+                            stripe.Invoice.void_invoice(inv["id"])
+                        except Exception as e:  # noqa: BLE001
+                            log.warning("stripe.cancel.void_echoue", facture=inv.get("id"),
+                                        error=str(e)[:120])
+                    sub.statut = "canceled"
+                    cancelled_via_stripe = True
+                    user.plan = await _plan_effectif(user.user_id, db,
+                                                     sauf_stripe_id=sub.stripe_subscription_id)
+                    await journaliser(db, "resilie", user, sub,
+                                      detail={"statut_precedent": "past_due",
+                                              "motif": "resiliation_pendant_impaye"})
+                except Exception as e:  # noqa: BLE001
+                    log.warning("stripe.cancel.impaye_echoue", user_id=user.user_id,
+                                sub=sub.stripe_subscription_id, error=str(e)[:120])
+                continue
             try:
                 stripe.Subscription.modify(sub.stripe_subscription_id,
                                            cancel_at_period_end=True)
@@ -799,6 +939,11 @@ async def stripe_webhook(
 ):
     """Traite les événements Stripe (subscription lifecycle)."""
     payload = await request.body()
+    if not settings.stripe_webhook_secret:
+        # Secret vide = n'importe qui peut signer un faux événement (vérifié avec
+        # stripe 9.11 : la signature HMAC d'une clé vide est acceptée).
+        log.error("stripe.webhook.secret_absent")
+        raise HTTPException(status_code=503, detail="Webhook non configuré")
 
     try:
         event = stripe.Webhook.construct_event(
@@ -818,23 +963,46 @@ async def stripe_webhook(
     await db.execute(text(
         "CREATE TABLE IF NOT EXISTS stripe_events ("
         "event_id TEXT PRIMARY KEY, event_type TEXT, "
-        "processed_at TIMESTAMPTZ NOT NULL DEFAULT now())"
+        "processed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP)"
     ))
     if event_id:
-        seen = await db.execute(text("SELECT 1 FROM stripe_events WHERE event_id = :e"),
-                                {"e": event_id})
-        if seen.first() is not None:
+        # Réservation AVANT traitement : deux livraisons simultanées du même
+        # événement (Stripe livre « au moins une fois ») ne peuvent plus être
+        # traitées deux fois. En cas d'échec du traitement, la réservation est
+        # retirée pour que la relivraison de Stripe le rejoue.
+        res = await db.execute(text(
+            "INSERT INTO stripe_events (event_id, event_type) VALUES (:e, :t) "
+            "ON CONFLICT (event_id) DO NOTHING"
+        ), {"e": event_id, "t": event_type})
+        await db.commit()
+        if not res.rowcount:
             log.info("stripe.webhook.duplicate_ignored", event_id=event_id)
             return {"ok": True}
 
     log.info("stripe.webhook", event_type=event_type, event_id=event_id)
+    try:
+        await _traiter_evenement(event_type, data, db)
+    except Exception:
+        await db.rollback()
+        if event_id:
+            await db.execute(text("DELETE FROM stripe_events WHERE event_id = :e"), {"e": event_id})
+            await db.commit()
+        raise
+    return {"ok": True}
 
+
+async def _traiter_evenement(event_type: str, data: dict, db: AsyncSession) -> None:
     if event_type == "customer.subscription.created":
         await _handle_subscription_created(data, db)
     elif event_type == "customer.subscription.updated":
         await _handle_subscription_updated(data, db)
-    elif event_type in ("customer.subscription.deleted", "customer.subscription.paused"):
+    elif event_type == "customer.subscription.deleted":
         await _handle_subscription_deleted(data, db)
+    elif event_type == "customer.subscription.paused":
+        # Une pause n'est pas une fin : l'accès est suspendu, la reprise
+        # (`subscription.updated` → active) le rend. La traiter comme une
+        # suppression la rendait définitive.
+        await _handle_subscription_updated(data, db)
     elif event_type in ("invoice.payment_succeeded",):
         await _handle_payment_succeeded(data, db)
     elif event_type == "invoice.payment_failed":
@@ -849,17 +1017,6 @@ async def stripe_webhook(
                         "setup_intent.succeeded"):
         # Une carte vient d'arriver : débloquer les essais mis en attente.
         await _handle_moyen_paiement_ajoute(data, db)
-
-    # Marque l'event traité APRÈS le traitement métier (at-least-once + handlers
-    # idempotents → aucun event perdu, aucun double-effet).
-    if event_id:
-        await db.execute(text(
-            "INSERT INTO stripe_events (event_id, event_type) VALUES (:e, :t) "
-            "ON CONFLICT (event_id) DO NOTHING"
-        ), {"e": event_id, "t": event_type})
-        await db.commit()
-
-    return {"ok": True}
 
 
 async def _find_user_by_customer(customer_id: str, db: AsyncSession) -> Optional[User]:
@@ -925,6 +1082,24 @@ async def _handle_subscription_created(sub: dict, db: AsyncSession):
     if plan is None:
         log.error("stripe.unknown_price", sub=sub.get("id"))
         return  # ne PAS accorder de plan sur un price non mappé
+
+    deja = await _subs_vivantes(user.user_id, db)
+    if deja:
+        # Ne devrait plus arriver (sessions expirées, contrôle Stripe au checkout) :
+        # si c'est le cas, l'exploitant le sait tout de suite.
+        log.error("stripe.second_abonnement_cree", user_id=user.user_id, sub=sub.get("id"),
+                  existants=[d.stripe_subscription_id for d in deja])
+        try:
+            from services.alerts import send_email
+            await send_email(
+                to="contact@blackturf.fr",
+                subject=f"[BlackTurf] Second abonnement créé — {user.email}",
+                html=f"<p>Nouvel abonnement {sub.get('id')} alors que "
+                     f"{', '.join(d.stripe_subscription_id or '?' for d in deja)} court déjà. "
+                     f"À vérifier (double prélèvement possible).</p>",
+            )
+        except Exception as e:  # noqa: BLE001
+            log.warning("stripe.alerte_doublon_echouee", error=str(e)[:120])
 
     price_id = sub["items"]["data"][0]["price"]["id"]
     recurring = (sub["items"]["data"][0]["price"].get("recurring") or {})
@@ -1061,10 +1236,21 @@ async def _handle_subscription_updated(sub: dict, db: AsyncSession):
                  statut_stripe=sub.get("status"))
         return
 
+    # Stripe ne garantit pas l'ordre des événements : un `updated(past_due)` ancien
+    # arrivé après le paiement recoupait l'accès d'un client à jour. On applique
+    # l'état ACTUEL de l'abonnement, relu chez Stripe.
+    if _stripe_joignable():
+        try:
+            sub = stripe.Subscription.retrieve(sub["id"])
+        except Exception as e:  # noqa: BLE001
+            log.warning("stripe.relecture_updated_echouee", sub=sub.get("id"), error=str(e)[:120])
+
     plan = _plan_from_sub(sub)
     if plan is None:
+        # Prix inconnu (variable d'environnement changée) : on garde la formule
+        # connue mais on applique quand même le statut (impayé, résiliation).
         log.error("stripe.unknown_price", sub=sub.get("id"))
-        return
+        plan = subscription.plan
 
     plan_precedent = subscription.plan
     statut_precedent = subscription.statut
@@ -1261,6 +1447,34 @@ async def _handle_payment_succeeded(invoice: dict, db: AsyncSession):
                     invoice_id=invoice.get("id"), sub=sub_id, montant_cents=montant)
         return
 
+    if sub.statut == "canceled":
+        # Abonnement clos chez nous (impayé perdu) : un paiement tardif (facture
+        # hébergée payée, événement dans le désordre) ne le rouvre PAS — aucun
+        # abonnement Stripe vivant ne viendrait jamais retirer cet accès. Il est
+        # journalisé et signalé pour remboursement.
+        await journaliser(db, "paiement_recu", user, sub,
+                          montant_cents=montant,
+                          detail={"facture": invoice.get("id"),
+                                  "motif": invoice.get("billing_reason"),
+                                  "plan_facture": plan_facture,
+                                  "abonnement_clos": True,
+                                  "a_rembourser": True})
+        await db.commit()
+        log.error("stripe.paiement_sur_abonnement_clos", sub=sub_id, montant_cents=montant,
+                  email=user.email)
+        try:
+            from services.alerts import send_email
+            await send_email(
+                to="contact@blackturf.fr",
+                subject=f"[BlackTurf] Paiement reçu sur un abonnement clos — {user.email}",
+                html=f"<p>{montant / 100:.2f} € encaissés (facture {invoice.get('id')}) sur "
+                     f"l'abonnement clos {sub_id}. Accès NON rouvert : à rembourser ou "
+                     f"réabonner à la main.</p>",
+            )
+        except Exception as e:  # noqa: BLE001
+            log.warning("stripe.alerte_paiement_clos_echouee", error=str(e)[:120])
+        return
+
     reprise = sub.statut not in STATUTS_ACCES
     if reprise:
         sub.statut = "active"
@@ -1321,6 +1535,22 @@ async def _handle_payment_failed(invoice: dict, db: AsyncSession):
         log.warning("stripe.payment_failed_user_inconnu", customer=invoice.get("customer"))
         return
 
+    if sub_id and _changement_en_attente(invoice, sub_id):
+        # Différence d'un passage Standard → Expert refusée : la formule payée
+        # reste en place, rien n'est impayé. Couper l'accès ici (ancien code)
+        # privait un client à jour de sa formule payée, et les relances pouvaient
+        # finir par CLORE son abonnement.
+        abo = (await db.execute(
+            select(Subscription).where(Subscription.stripe_subscription_id == sub_id)
+        )).scalar_one_or_none()
+        await journaliser(db, "changement_formule_refuse", user, abo,
+                          stripe_subscription_id=sub_id,
+                          montant_cents=invoice.get("amount_due"),
+                          detail={"facture": invoice.get("id")})
+        await db.commit()
+        log.warning("stripe.changement_formule_paiement_refuse", sub=sub_id)
+        return
+
     sub = None
     if sub_id:
         sub = (await db.execute(
@@ -1364,6 +1594,22 @@ async def _handle_payment_failed(invoice: dict, db: AsyncSession):
                 abonnement_connu=sub is not None)
 
 
+def _changement_en_attente(invoice: dict, sub_id: str) -> bool:
+    """Vrai si la facture refusée est la différence d'un changement de formule en
+    attente de paiement, sur un abonnement par ailleurs à jour.
+
+    Pas la fin d'essai refusée (même motif `subscription_update`) : là
+    l'abonnement lui-même est impayé (`past_due`), et c'est bien un impayé."""
+    if invoice.get("billing_reason") != "subscription_update" or not _stripe_joignable():
+        return False
+    try:
+        live = stripe.Subscription.retrieve(sub_id)
+    except Exception as e:  # noqa: BLE001
+        log.warning("stripe.relecture_abo_echouee", sub=sub_id, error=str(e)[:120])
+        return False
+    return bool(live.get("pending_update")) or live.get("status") in ("active", "trialing")
+
+
 async def _handle_trial_will_end(sub: dict, db: AsyncSession):
     """Stripe prévient 3 jours avant la fin d'un essai. C'est le moment où
     l'exploitant peut encore relancer un prospect qui n'a pas mis sa carte."""
@@ -1381,6 +1627,39 @@ async def _handle_trial_will_end(sub: dict, db: AsyncSession):
                       montant_cents=_montant_cents(sub),
                       detail={"carte_enregistree": _a_moyen_de_paiement(sub)})
     await db.commit()
+
+
+async def _regler_impaye_apres_nouvelle_carte(abo: Subscription, user: User,
+                                              db: AsyncSession) -> None:
+    if not _stripe_joignable() or not abo.stripe_subscription_id:
+        return
+    from services.relances_paiement import relances_faites
+    try:
+        live = stripe.Subscription.retrieve(abo.stripe_subscription_id)
+        if live.get("status") not in ("past_due", "unpaid"):
+            return
+        ouvertes = list(stripe.Invoice.list(subscription=abo.stripe_subscription_id,
+                                            status="open", limit=5))
+    except Exception as e:  # noqa: BLE001
+        log.warning("stripe.impaye_relecture_echouee", sub=abo.stripe_subscription_id, error=str(e)[:120])
+        return
+    for facture in ouvertes:
+        n, derniere = await relances_faites(db, facture["id"])
+        if derniere is not None and datetime.now(timezone.utc) - derniere < timedelta(minutes=10):
+            continue  # une tentative vient d'avoir lieu (double événement carte)
+        resultat = None
+        try:
+            payee = stripe.Invoice.pay(facture["id"])
+            resultat = payee.get("status")
+        except stripe.error.CardError:
+            resultat = "refusee"
+        except Exception as e:  # noqa: BLE001
+            log.warning("stripe.impaye_paiement_echoue", facture=facture.get("id"), error=str(e)[:120])
+            continue
+        await journaliser(db, "relance_paiement", user, abo, notifier=False,
+                          montant_cents=facture.get("amount_due"),
+                          detail={"facture": facture["id"], "numero": 1 + n,
+                                  "resultat": resultat, "declencheur": "nouvelle_carte"})
 
 
 async def _handle_moyen_paiement_ajoute(objet: dict, db: AsyncSession):
@@ -1401,6 +1680,15 @@ async def _handle_moyen_paiement_ajoute(objet: dict, db: AsyncSession):
     # Toute carte qui passe par ici est mémorisée, qu'un essai soit bloqué ou non :
     # c'est ce qui alimente le verrou « une carte = un seul essai gratuit ».
     verdict_carte, carte_connue = await _controler_carte(user, {"customer": customer_id}, db)
+
+    # Impayé + nouvelle carte : le profil promet l'accès « dès que le paiement
+    # passe ». Stripe ne retente plus seul (collecte coupée au premier refus) :
+    # on tente UNE fois, comptée comme une relance.
+    for impaye in (await db.execute(
+        select(Subscription).where(Subscription.user_id == user.user_id,
+                                   Subscription.statut == "past_due")
+    )).scalars().all():
+        await _regler_impaye_apres_nouvelle_carte(impaye, user, db)
 
     bloques = (await db.execute(
         select(Subscription).where(

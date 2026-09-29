@@ -469,6 +469,7 @@ def _stripe_changement(monkeypatch, status="active", prorata_lines=(), modify_re
                         lambda sid: _sub_stripe(status, sub_id=sid))
     monkeypatch.setattr(sr.stripe.Subscription, "modify",
                         lambda sid, **kw: appels.append((sid, kw)) or (modify_ret or {"status": status}))
+    monkeypatch.setattr(sr.stripe.Price, "retrieve", lambda pid: {"unit_amount": 1900 if "expert" in pid else 1200})
     monkeypatch.setattr(sr.stripe.Invoice, "upcoming", lambda **kw: {"lines": {"data": [
         {"amount": a, "proration": True} for a in prorata_lines] + [{"amount": 1900, "proration": False}]}})
     return appels

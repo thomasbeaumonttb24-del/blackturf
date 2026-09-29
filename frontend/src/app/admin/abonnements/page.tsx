@@ -302,7 +302,7 @@ export default function AbonnementsPage() {
       )}
 
       <GrilleKpi>
-        <Kpi label="Revenu mensuel" nombre={s.mrr} format={(v) => eur(v)} sub={`${eur(s.arr)} par an`} icone={<Wallet className="h-4 w-4" />} accent="or" href="/admin/revenus" />
+        <Kpi label="Revenu mensuel" nombre={s.mrr} format={(v) => eur(v)} sub={`${eur(s.arr)} par an${s.mrr_resiliations ? ` · hors ${eur(s.mrr_resiliations)} résiliés` : ""}`} icone={<Wallet className="h-4 w-4" />} accent="or" href="/admin/revenus" />
         <Kpi
           label="Payants"
           nombre={r.payants}

@@ -104,6 +104,20 @@ async def relances_faites(db: AsyncSession, facture_id: str) -> tuple[int, Optio
 
 
 async def _facture_ouverte(db: AsyncSession, sub: Subscription) -> Optional[str]:
+    """Facture impayée de l'abonnement : lue CHEZ STRIPE d'abord. Le journal ne
+    sert qu'en repli — un refus non journalisé laissait l'ancien code retomber
+    sur une vieille facture déjà payée, et le nouvel impayé n'était jamais traité."""
+    try:
+        for inv in stripe.Invoice.list(subscription=sub.stripe_subscription_id,
+                                       status="open", limit=5).get("data") or []:
+            # La différence d'un changement de formule n'est pas l'impayé de
+            # l'abonnement (cf. `stripe_routes._changement_en_attente`).
+            if inv.get("billing_reason") == "subscription_update" and sub.statut != "past_due":
+                continue
+            return inv["id"]
+    except Exception as e:  # noqa: BLE001
+        log.warning("relances.liste_factures_echouee", sub=sub.stripe_subscription_id,
+                    error=str(e)[:120])
     derniers = (await db.execute(
         select(SubscriptionEvent)
         .where(SubscriptionEvent.type == "paiement_echoue",
@@ -114,9 +128,33 @@ async def _facture_ouverte(db: AsyncSession, sub: Subscription) -> Optional[str]
         facture = (e.detail or {}).get("facture")
         if facture:
             return facture
-    ouvertes = stripe.Invoice.list(subscription=sub.stripe_subscription_id, status="open", limit=1)
-    data = ouvertes.get("data") or []
-    return data[0]["id"] if data else None
+    return None
+
+
+async def annuler_differences_orphelines(db: AsyncSession) -> int:
+    """Annule les factures de DIFFÉRENCE (passage Standard → Expert) restées
+    ouvertes alors que le changement a expiré (23 h sans paiement). Sans ça, un
+    paiement ultérieur de cette facture encaissait la différence d'un Expert
+    jamais accordé."""
+    annulees = 0
+    abos = (await db.execute(
+        select(Subscription).where(Subscription.statut.in_(("active", "cancel_at_period_end")),
+                                   Subscription.stripe_subscription_id.isnot(None))
+    )).scalars().all()
+    for sid in [a.stripe_subscription_id for a in abos]:
+        try:
+            live = stripe.Subscription.retrieve(sid)
+            if live.get("pending_update"):
+                continue  # le client peut encore la payer (3-D Secure en cours)
+            for inv in stripe.Invoice.list(subscription=sid, status="open", limit=5).get("data") or []:
+                if inv.get("billing_reason") == "subscription_update" and live.get("status") == "active":
+                    stripe.Invoice.void_invoice(inv["id"])
+                    annulees += 1
+                    log.warning("relances.difference_orpheline_annulee", sub=sid, facture=inv["id"],
+                                montant_cents=inv.get("amount_due"))
+        except Exception as e:  # noqa: BLE001
+            log.warning("relances.orphelines_echec", sub=sid, error=str(e)[:120])
+    return annulees
 
 
 async def _clore(db: AsyncSession, sub: Subscription, user: Optional[User],
@@ -188,6 +226,21 @@ async def traiter_impayes(db: AsyncSession, maintenant: Optional[datetime] = Non
             # `get` recharge sous `await` ce qu'un rollback précédent a expiré.
             sub = await db.get(Subscription, sub_id)
             user = await db.get(User, user_id) if user_id else None
+
+            # L'état LIVE de Stripe décide, pas la base (un webhook manqué ne doit
+            # jamais faire débiter un abonnement clos ou résilié).
+            live = stripe.Subscription.retrieve(stripe_sub_id)
+            statut_live = live.get("status")
+            if statut_live in ("canceled", "incomplete_expired"):
+                from api.routes.stripe_routes import _plan_effectif
+                sub.statut = "canceled"
+                if user is not None:
+                    user.plan = await _plan_effectif(user.user_id, db, sauf_stripe_id=stripe_sub_id)
+                await db.commit()
+                log.warning("relances.abonnement_deja_clos_chez_stripe", sub=stripe_sub_id)
+                continue
+            if statut_live in ("active", "trialing"):
+                continue  # réglé entre-temps : le webhook réaligne la base
             facture_id = await _facture_ouverte(db, sub)
             if not facture_id:
                 continue
@@ -199,6 +252,11 @@ async def traiter_impayes(db: AsyncSession, maintenant: Optional[datetime] = Non
 
             if facture.get("status") != "open" or tentatives >= TENTATIVES_MAX:
                 if await _clore(db, sub, user, facture, "relances_epuisees"):
+                    bilan["clos"] += 1
+                continue
+            if live.get("cancel_at_period_end") or live.get("cancel_at"):
+                # Le client a demandé la résiliation : on ne le débite plus.
+                if await _clore(db, sub, user, facture, "resilie_pendant_impaye"):
                     bilan["clos"] += 1
                 continue
 
@@ -243,6 +301,11 @@ async def traiter_impayes(db: AsyncSession, maintenant: Optional[datetime] = Non
             await db.rollback()
             log.error("relances.erreur", sub=stripe_sub_id,
                       error=f"{type(e).__name__}: {str(e)[:200]}")
+
+    try:
+        bilan["differences_annulees"] = await annuler_differences_orphelines(db)
+    except Exception as e:  # noqa: BLE001
+        log.error("relances.orphelines_erreur", error=str(e)[:200])
 
     log.info("relances.bilan", **bilan)
     return bilan

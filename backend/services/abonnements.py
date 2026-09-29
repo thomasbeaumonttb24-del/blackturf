@@ -132,8 +132,12 @@ async def journaliser(
             pendant_essai=pendant_essai,
             detail=detail,
         )
-        db.add(event)
-        await db.flush()
+        # Point de sauvegarde : un échec d'écriture du journal n'empoisonne pas la
+        # transaction du webhook (sinon son `commit` final levait → 500 → Stripe
+        # relivrait en boucle).
+        async with db.begin_nested():
+            db.add(event)
+            await db.flush()
     except Exception as e:  # noqa: BLE001
         # Un journal qui casse le webhook coûterait plus cher que le journal.
         log.error("abonnements.journal_echoue", type=type_, error=str(e)[:200])

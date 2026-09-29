@@ -144,6 +144,7 @@ function CourbeRevenus({
                       { label: "Net perçu", valeur: euros(p.m.net_cents, 2), secondaire: true }] : []),
                     { label: "Nouveaux clients", valeur: euros(p.m.nouveaux_cents, 2), secondaire: true },
                     { label: "Renouvellements", valeur: euros(p.m.renouvellements_cents, 2), secondaire: true },
+                    ...(p.m.changements_cents ? [{ label: "Changements de formule", valeur: euros(p.m.changements_cents, 2), secondaire: true }] : []),
                     ...(p.prevu != null ? [{ label: "Atterrissage prévu", valeur: eur(p.prevu, 2), couleur: PALETTE.ardoiseMoyen, pointille: true }] : []),
                     ...(vue === "cumul" ? [{ label: "Cumul", valeur: eur(p.cumul ?? 0, 2) }] : []),
                   ]}
@@ -755,7 +756,7 @@ export default function RevenusPage() {
           format={(v) => eur(v)}
           icone={<Repeat />}
           accent="ok"
-          sub={abos ? `${eur(abos.resume.arr)} par an · ${abos.resume.abonnes_payants} abonnés payants` : undefined}
+          sub={abos ? `${eur(abos.resume.arr)} par an · ${abos.resume.abonnes_payants} abonnés payants${abos.resume.mrr_resiliations ? ` · hors ${eur(abos.resume.mrr_resiliations)} résiliés` : ""}` : undefined}
         />
         <Kpi
           label={`Total sur ${fenetre} mois`}
@@ -820,6 +821,9 @@ export default function RevenusPage() {
               empile
               series={[
                 { cle: "renouvellements", label: "Renouvellements", couleur: PALETTE.ardoise, valeur: (m) => m.renouvellements_cents },
+                // Différences réglées lors d'un passage en Expert : sans elles, le
+                // haut de la pile n'était plus le total encaissé.
+                { cle: "changements", label: "Changements de formule", couleur: PALETTE.ardoiseMoyen, valeur: (m) => m.changements_cents ?? 0 },
                 { cle: "nouveaux", label: "Nouveaux clients", couleur: PALETTE.or, valeur: (m) => m.nouveaux_cents },
               ]}
             />

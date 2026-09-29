@@ -120,7 +120,8 @@ export default function ComptesPage() {
   }, [comptes, filtre]);
 
   const resume = useMemo(() => {
-    const tous = comptes ?? [];
+    // Le compte d'administration n'est pas un client : exclu comme sur Pilotage.
+    const tous = (comptes ?? []).filter((u) => !u.is_admin);
     return {
       total: tous.length,
       // Payants + essais, comme le Pilotage : un abonné qui a résilié reste

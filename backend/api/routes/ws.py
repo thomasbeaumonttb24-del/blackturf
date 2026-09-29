@@ -320,6 +320,13 @@ async def ws_value_bets(websocket: WebSocket, token: str = Query(default="")):
 
     try:
         while True:
+            # Plan relu à chaque tour (60 s) : un abonné résilié ou impayé gardait
+            # le flux tant qu'il ne fermait pas l'onglet.
+            plan = await _get_user_plan(user_id)
+            if plan not in PLANS_ABONNES:
+                log.info("ws.valuebets.plan_perdu", user_id=user_id, plan=plan)
+                await fermer_ws(websocket, code=4403)
+                return
             await send_vbs()
 
             # Wait 60s reading pong responses

@@ -53,7 +53,10 @@ export function CheckoutButton({ plan, periodicite, label, variant = "brand", si
           setLoading(false);
           return;
         }
-        response = await api.post("/stripe/checkout", { plan, periodicite, confirmer: true });
+        // Même date de prorata que l'aperçu : le montant débité est celui annoncé.
+        response = await api.post("/stripe/checkout", {
+          plan, periodicite, confirmer: true, proration_date: response.data.apercu?.proration_date,
+        });
       }
       if (response.data.paiement_requis) {
         toast.info(response.data.message || "Paiement à confirmer auprès de votre banque");

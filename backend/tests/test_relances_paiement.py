@@ -66,6 +66,14 @@ class FauxStripe:
         monkeypatch.setattr(stripe.Invoice, "modify", modify)
         monkeypatch.setattr(stripe.Invoice, "void_invoice", void_invoice)
         monkeypatch.setattr(stripe.Subscription, "delete", delete)
+        # État live de l'abonnement et factures ouvertes, relus chez Stripe.
+        f.statut_live = "past_due"
+        f.resilie = False
+        monkeypatch.setattr(stripe.Subscription, "retrieve",
+                            lambda sid: {"status": f.statut_live, "cancel_at_period_end": f.resilie})
+        monkeypatch.setattr(stripe.Invoice, "list",
+                            lambda **kw: {"data": [dict(f.facture)] if f.facture.get("status") == "open"
+                                          and kw.get("status") == "open" else []})
         return self
 
 
@@ -277,6 +285,10 @@ async def test_une_erreur_n_arrete_pas_la_boucle(db, monkeypatch):
         return retrieve_sain(fid)
 
     monkeypatch.setattr(stripe.Invoice, "retrieve", retrieve)
+    liste_saine = stripe.Invoice.list
+    monkeypatch.setattr(stripe.Invoice, "list", lambda **kw: (
+        {"data": [{"id": "in_casse", "status": "open"}]} if kw.get("subscription") == "sub_casse"
+        else liste_saine(**kw)))
 
     bilan = await rp.traiter_impayes(db)
 

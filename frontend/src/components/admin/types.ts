@@ -196,6 +196,8 @@ export interface AbonnementsData {
     fin_essai_sous_3j: number;
     mrr: number;
     arr: number;
+    /** Payants ayant résilié : payés jusqu'à l'échéance, hors MRR. */
+    mrr_resiliations?: number;
     essais_ouverts_30j: number;
     essais_perdus_30j: number;
     resiliations_30j: number;
@@ -240,6 +242,8 @@ export interface MoisRevenu {
   nb_paiements: number;
   nouveaux_cents: number;
   renouvellements_cents: number;
+  /** Différences au prorata réglées lors d'un changement de formule. */
+  changements_cents?: number;
   par_formule: Record<Formule, number>;
   echecs_cents: number;
   /** Abonnements dont le prélèvement a échoué ce mois-ci (un par abonnement, pas par tentative). */
