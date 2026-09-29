@@ -49,6 +49,11 @@ function InscriptionContent() {
   const [saisieOuverte, setSaisieOuverte] = useState(false);
   const [saisie, setSaisie] = useState("");
   const [verification, setVerification] = useState(false);
+  // Adresse déjà rattachée à un compte confirmé (HTTP 400). Le 28/09, sept
+  // tentatives en une journée : d'anciens inscrits qui avaient oublié leur
+  // compte, face à un simple toast. On leur ouvre la porte au lieu de la fermer.
+  const [dejaInscrit, setDejaInscrit] = useState<string | null>(null);
+  const lienConnexion = suite ? `/login?redirect=${encodeURIComponent(suite)}` : "/login";
 
   async function appliquerCode(code: string, depuisLien: boolean) {
     setVerification(true);
@@ -83,13 +88,20 @@ function InscriptionContent() {
 
   async function onSubmit(data: FormData) {
     setLoading(true);
+    setDejaInscrit(null);
     try {
       const res = await registerAuth({ ...data, code_parrain: parrain?.code });
       if (parrain) oublierCodeParrain();
       memoriserIntention({ plan, suite });
       setEnAttente(res.email);
     } catch (e: unknown) {
-      const detail = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;
+      const reponse = (e as { response?: { status?: number; data?: { detail?: unknown } } })?.response;
+      const detail = reponse?.data?.detail;
+      // /auth/register ne renvoie 400 que pour « Email déjà utilisé ».
+      if (reponse?.status === 400) {
+        setDejaInscrit(data.email);
+        return;
+      }
       toast.error(messageErreurApi(detail) || "Erreur lors de la création du compte");
     } finally {
       setLoading(false);
@@ -179,7 +191,7 @@ function InscriptionContent() {
             <p className="text-sm text-muted-foreground mb-6">
               Déjà inscrit ?{" "}
               <Link
-                href={suite ? `/login?redirect=${encodeURIComponent(suite)}` : "/login"}
+                href={lienConnexion}
                 className="font-medium text-brand-gold-dark underline underline-offset-2"
               >
                 Se connecter
@@ -276,6 +288,24 @@ function InscriptionContent() {
                     <Gift className="h-4 w-4" aria-hidden /> J&apos;ai un code de parrainage
                   </button>
                 )
+              )}
+
+              {dejaInscrit && (
+                <div role="alert" className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+                  <p className="font-semibold">Vous avez déjà un compte BlackTurf</p>
+                  <p className="mt-1">
+                    L&apos;adresse <span className="font-medium">{dejaInscrit}</span> est déjà inscrite.
+                    Connectez-vous, ou choisissez un nouveau mot de passe si vous ne vous en souvenez plus.
+                  </p>
+                  <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                    <Button asChild variant="brand" className="flex-1">
+                      <Link href={lienConnexion}>Se connecter</Link>
+                    </Button>
+                    <Button asChild variant="outline" className="flex-1">
+                      <Link href="/mot-de-passe-oublie">Mot de passe oublié</Link>
+                    </Button>
+                  </div>
+                </div>
               )}
 
               <Button type="submit" variant="brand" className="w-full" size="lg" disabled={loading}>
