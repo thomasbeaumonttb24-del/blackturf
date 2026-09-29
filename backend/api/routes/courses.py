@@ -1867,7 +1867,8 @@ async def get_mise_plan(
             from services.bet_catalog import course_info_bets as _cib
             from api.config import get_settings as _get_settings
             _subj_hash = _subj(getattr(user, "user_id", None), _get_settings().secret_key)
-            _deja_joue = await daily_exposure_total(db, _subj_hash)
+            _deja_joue = await daily_exposure_total(db, _subj_hash, course_id=course_id,
+                                                    profil=profil)
             _cap = bankroll * DAILY_EXPOSURE_CAP_FRAC
             _engage = montant + supplement_quinte(montant, profil, _cib(course))
             if _deja_joue + _engage > _cap:
@@ -1916,7 +1917,13 @@ async def get_mise_plan(
                 # GAINS LIVE après gel : sélection FIGÉE inchangée (= bilan), mais on
                 # ré-évalue l'ORDRE DE GRANDEUR des gains sur les cotes du marché EN DIRECT
                 # jusqu'au départ. Le bilan/palmarès restent réglés aux vrais rapports PMU.
-                return await _reprice_gains_live(db, course, frozen)
+                servi = await _reprice_gains_live(db, course, frozen)
+                # Le plan servi à l'abonné est de l'argent qu'il va jouer : il doit
+                # compter dans son exposition du jour comme tout plan émis. Ce chemin
+                # sortait avant `_record_plan_emission` (audit du 2026-09-28).
+                await _record_frozen_emission(db, course=course, out=servi, profil=profil,
+                                              montant=montant, bankroll=bankroll, user=user)
+                return servi
         except Exception:
             pass  # pas de plan figé (legacy/échec) → on recalcule en live ci-dessous
 
@@ -2127,6 +2134,48 @@ async def get_mise_plan(
         ev_band_perf=ev_band_perf, user=user, origin="mise_plan",
     )
     return out
+
+
+async def _record_frozen_emission(db, *, course, out: dict, profil: str, montant: float,
+                                  bankroll, user=None) -> None:
+    """Journalise le plan FIGÉ servi à un abonné après le gel (T-10, 10 €).
+
+    Ce plan vient du système (profil_run_log) : ses entrées apprises ne sont pas
+    disponibles ici, et le mêler aux plans recalculés fausserait leur mesure. Origine
+    distincte (`mise_plan_fige`) et configuration explicite, donc version
+    d'algorithme distincte ; il compte en revanche dans l'exposition du jour
+    (`daily_exposure_total` lit toutes les origines de l'abonné).
+    """
+    try:
+        from api.config import get_settings
+        from services.bet_plan_snapshots import (
+            latest_prediction_run_id, record_plan_snapshot, subject_hash,
+        )
+        cotes = {}
+        for niv in out.get("niveaux") or []:
+            for pari in niv.get("paris") or []:
+                for h in pari.get("chevaux") or []:
+                    if h.get("numero") is not None and h.get("cote"):
+                        cotes[int(h["numero"])] = float(h["cote"])
+        await record_plan_snapshot(
+            db,
+            course_id=course.course_id,
+            plan=out,
+            profil=profil,
+            montant_demande=float(montant),
+            bankroll=float(bankroll) if bankroll is not None else None,
+            cotes_utilisees=cotes,
+            algo_config={"profil": profil, "plan_fige_servi": True,
+                         "source": "profil_run_log"},
+            emitted_at=datetime.now(timezone.utc),
+            course_start_at=course.date_heure,
+            subject=subject_hash(getattr(user, "user_id", None), get_settings().secret_key),
+            prediction_run_id=await latest_prediction_run_id(db, course.course_id),
+            origin="mise_plan_fige",
+        )
+    except Exception as e:  # noqa: BLE001 — l'audit ne casse jamais la réponse
+        log.warning("mise_plan.snapshot_fige_skip",
+                    course_id=getattr(course, "course_id", None), err=str(e)[:140])
 
 
 async def _record_plan_emission(

@@ -313,3 +313,77 @@ async def test_daily_exposure_reelle_bout_en_bout(db):
     # Un autre utilisateur n'est jamais compté dans l'exposition de celui-ci.
     other = bps.subject_hash("user-2", "secret")
     assert await bps.daily_exposure_total(db, other) == 0.0
+
+
+@pytest.mark.asyncio
+async def test_exposition_un_plan_par_course_et_profil(db):
+    """Chaque consultation d'un même conseil, marché en mouvement, écrit une ligne
+    (l'empreinte inclut gains et cotes). Mesuré en prod le 2026-09-28 : ×8,4 sur 30
+    jours. Seul le DERNIER plan de chaque (course, profil) compte ; deux profils
+    distincts restent deux plans ; le couple redemandé est exclu du cumul."""
+    import copy
+    from services import bet_plan_snapshots as bps
+    from db.models import BetPlanSnapshot, Course
+    subject = bps.subject_hash("user-exp", "secret")
+    maintenant = datetime.now(timezone.utc)
+    depart = maintenant + timedelta(hours=3)
+    for cid in ("EX1", "EX2"):
+        db.add(Course(course_id=cid, reunion_id="R1", numero=1, nom="T", date_heure=depart,
+                      hippodrome_nom="Pau", discipline="Plat", distance=2000,
+                      nb_partants=10, statut="a_venir"))
+
+    def _snap(cid, profil, gain, cote, montant, minutes):
+        plan = copy.deepcopy(_frozen_plan())
+        plan["niveaux"][0]["paris"][0]["gain_potentiel"] = gain
+        plan["niveaux"][0]["paris"][0]["mise"] = montant
+        plan["montant_total"] = montant
+        v = bps.build_plan_snapshot_values(
+            course_id=cid, plan=plan, profil=profil, montant_demande=montant,
+            cotes_utilisees={1: cote}, algo_config={},
+            emitted_at=maintenant - timedelta(minutes=minutes), course_start_at=depart,
+            subject=subject)
+        db.add(BetPlanSnapshot(**v))
+        return v
+
+    # EX1 équilibré consulté 3 fois (le marché bouge : 3 empreintes), dernier = 12 €.
+    a = _snap("EX1", "equilibre", 18.0, 3.0, 10.0, 30)
+    b = _snap("EX1", "equilibre", 19.0, 3.2, 10.0, 20)
+    c = _snap("EX1", "equilibre", 22.0, 3.5, 12.0, 10)
+    assert len({a["plan_hash"], b["plan_hash"], c["plan_hash"]}) == 3
+    # EX1 risqué (autre profil) et EX2.
+    d = _snap("EX1", "agressif", 50.0, 3.5, 5.0, 5)
+    e = _snap("EX2", "equilibre", 18.0, 2.0, 7.0, 1)
+    await db.commit()
+
+    total = await bps.daily_exposure_total(db, subject)
+    assert total == pytest.approx(c["montant_joue"] + d["montant_joue"] + e["montant_joue"])
+
+    # Redemande de EX1 équilibré : son ancien plan sort du cumul, remplacé par le nouveau.
+    sans = await bps.daily_exposure_total(db, subject, course_id="EX1", profil="equilibre")
+    assert sans == pytest.approx(d["montant_joue"] + e["montant_joue"])
+
+
+@pytest.mark.asyncio
+async def test_plan_fige_servi_compte_dans_l_exposition(db):
+    """Le plan figé servi après le gel (10 €) sortait avant l'enregistrement : il ne
+    comptait pas dans l'exposition du jour (audit du 2026-09-28)."""
+    from types import SimpleNamespace
+    from api.routes.courses import _record_frozen_emission
+    from api.config import get_settings
+    from services import bet_plan_snapshots as bps
+    from db.models import Course
+    depart = datetime.now(timezone.utc) + timedelta(minutes=8)
+    course = Course(course_id="FIG1", reunion_id="R1", numero=1, nom="T", date_heure=depart,
+                    hippodrome_nom="Pau", discipline="Plat", distance=2000, nb_partants=10,
+                    statut="a_venir")
+    db.add(course)
+    await db.commit()
+    user = SimpleNamespace(user_id="abonne-fige")
+    plan = _frozen_plan()
+    plan["montant_joue"] = 10.0
+    plan["niveaux"][0]["paris"][0]["chevaux"][0]["cote"] = 2.4
+    await _record_frozen_emission(db, course=course, out=plan, profil="equilibre",
+                                  montant=10.0, bankroll=100.0, user=user)
+    await db.commit()
+    sujet = bps.subject_hash("abonne-fige", get_settings().secret_key)
+    assert await bps.daily_exposure_total(db, sujet) == pytest.approx(10.0)
