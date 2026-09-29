@@ -220,9 +220,9 @@ def settle_pari(
     """
     Règle un pari unique.
 
-    `ordre_joue` (Quinté+ seulement) : le ticket a été joué dans l'ordre de
-    `numeros` — cas d'un ticket unitaire. Cinq sur cinq dans cet ordre exact paient
-    alors le rapport Ordre. False pour une combinaison issue d'un champ, réglée au
+    `ordre_joue` (Tiercé, Quarté+, Quinté+ « désordre ») : le ticket a été joué dans
+    l'ordre de `numeros` — cas d'un ticket unitaire. Arrivé dans cet ordre exact, il
+    paie alors le rapport Ordre. False pour une combinaison issue d'un champ, réglée au
     Désordre (on ne suppose pas un ordre que la formule n'a pas forcément couvert :
     jamais de surpaiement).
 
@@ -427,11 +427,20 @@ def settle_pari(
             # Le rapport agrégé est souvent le premier rapport publié : Ordre.
             # Pour les tickets désordre, seul le détail de la bonne combinaison
             # permet de déterminer un gain fiable.
+            # Ticket UNITAIRE joué dans l'ordre de `numeros` : arrivé dans cet ordre
+            # exact, le PMU paie le rang Ordre (même règle que le Quinté+ ci-dessous,
+            # audit du 2026-09-28). Le payer au Désordre sous-évaluait le gain.
+            def _dans_l_ordre(n: int) -> bool:
+                return (ordre_joue and len(numeros) == n and all(
+                    num_by_pos.get(i + 1) == int(numeros[i]) for i in range(n)))
+
             if type_pari == "Tiercé Désordre":
-                label, combination = "Désordre", sel
+                label, combination = ("Ordre" if _dans_l_ordre(3) else "Désordre"), sel
             elif type_pari in ("Quarté+ Désordre", "Quarté+"):
-                label, combination = (("Désordre", sel) if sel.issubset(top4)
-                                      else ("Bonus", sel & top3))
+                if sel.issubset(top4):
+                    label, combination = ("Ordre" if _dans_l_ordre(4) else "Désordre"), sel
+                else:
+                    label, combination = "Bonus", sel & top3
             elif sel.issubset(top5):
                 # Règle PMU du e-Quinté+ : Ordre = les 5 premiers dans l'ordre exact
                 # du ticket, Désordre = les 5 premiers dans un autre ordre.
