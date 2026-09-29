@@ -160,3 +160,13 @@ def test_generer_plan_avec_horse_contexts_annote_les_tickets():
     assert any(p.contexte_traceabilite is not None for p in tickets)
     out = mc.plan_to_dict(plan)
     assert "contexte_traceabilite" in out["niveaux"][0]["paris"][0]
+
+
+def test_argent_qui_rentre_est_favorable():
+    """mouvement_30min > 0 = cote en baisse (argent qui rentre) : contribution positive.
+    Seul signal marché fourni, pour isoler son signe."""
+    from ml.horse_context import _score_cote_enjeux
+
+    baisse = _score_cote_enjeux({"mouvement_30min": 0.3})
+    hausse = _score_cote_enjeux({"mouvement_30min": -0.3})
+    assert baisse.sous_score > 0 > hausse.sous_score
