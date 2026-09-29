@@ -38,6 +38,14 @@ PRICE_MAP = {
     "pro_annual":      settings.stripe_price_pro_annual,
 }
 
+# Prix en centimes de chaque price configuré (aperçu d'un changement de formule).
+PRIX_CENTS_PAR_PRICE = {
+    settings.stripe_price_starter_monthly: 1200,
+    settings.stripe_price_pro_monthly: 1900,
+    settings.stripe_price_starter_annual: 11500,
+    settings.stripe_price_pro_annual: 18200,
+}
+
 # Normalize plan names from Stripe price_id
 PLAN_FROM_PRICE = {
     settings.stripe_price_starter_monthly: "standard",
@@ -332,6 +340,11 @@ async def _empreintes_deja_prises(user: User, db: AsyncSession) -> bool:
 class CheckoutRequest(BaseModel):
     plan: str         # standard / expert (ou starter / pro compat)
     periodicite: str  # monthly / annual
+    # Abonné existant : le changement de formule n'est appliqué QU'APRÈS
+    # confirmation explicite. Sans elle, l'API renvoie un aperçu chiffré.
+    # (2026-09-29 : un clic sur un bouton « Standard » 8 s après une souscription
+    # Expert a rétrogradé un client qui venait de payer 19 €.)
+    confirmer: bool = False
 
 
 @router.post("/stripe/checkout")
@@ -366,6 +379,19 @@ async def create_checkout(
                 detail="Vous êtes déjà abonné à cette formule. "
                        "Gérez votre abonnement depuis votre profil.",
             )
+        if courant.statut == "past_due":
+            # Une facture est impayée sur la formule actuelle : changer de formule
+            # maintenant mélange deux prix sur une même période (cas du 26/09 :
+            # facture Expert réglée après un passage en Standard).
+            raise HTTPException(
+                status_code=409,
+                detail="Un prélèvement est en attente sur votre abonnement. Réglez-le "
+                       "depuis votre profil avant de changer de formule.",
+            )
+        if not body.confirmer:
+            return {"confirmation_requise": True,
+                    "apercu": _apercu_changement(user, courant, plan_cible,
+                                                 body.periodicite, price_id)}
         return await _changer_de_plan(user, vivants, plan_cible, body.periodicite,
                                       price_id, db)
 
@@ -474,6 +500,102 @@ async def create_checkout(
             "remise_parrainage": parrainage_filleul is not None}
 
 
+def _sens_changement(courant: Subscription, plan_cible: str, periodicite: str) -> str:
+    if RANG_PLAN.get(plan_cible, 0) > RANG_PLAN.get(courant.plan, 0):
+        return "hausse"
+    if RANG_PLAN.get(plan_cible, 0) < RANG_PLAN.get(courant.plan, 0):
+        return "baisse"
+    return "periodicite" if periodicite != courant.periodicite else "aucun"
+
+
+def _en_essai(sub_stripe: dict) -> bool:
+    return sub_stripe.get("status") == "trialing"
+
+
+def _mode_prorata(sens: str, sub_stripe: dict) -> str:
+    """Hausse (ou changement de périodicité) en période PAYÉE : la différence est
+    encaissée tout de suite. Reportée sur la prochaine facture, elle n'était
+    jamais payée si le client résiliait entre-temps — Expert gratuit jusqu'à
+    l'échéance. Baisse, ou tout changement pendant l'essai : crédit/débit
+    reporté sur la prochaine facture."""
+    if _en_essai(sub_stripe) or sens == "baisse":
+        return "create_prorations"
+    return "always_invoice"
+
+
+def _euros(cents: Optional[int]) -> str:
+    c = int(cents or 0)
+    return (f"{c / 100:.2f}".replace(".", ",") if c % 100 else f"{c // 100}") + " €"
+
+
+def _date_fr(ts: Optional[int]) -> str:
+    if not ts:
+        return "la prochaine échéance"
+    mois = ("janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août",
+            "septembre", "octobre", "novembre", "décembre")
+    d = datetime.fromtimestamp(int(ts), tz=timezone.utc)
+    return f"{d.day} {mois[d.month - 1]} {d.year}"
+
+
+def _apercu_changement(user: User, courant: Subscription, plan_cible: str,
+                       periodicite: str, price_id: str) -> dict:
+    """Ce qui va se passer, chiffré PAR STRIPE, avant que le client confirme."""
+    sub_stripe = stripe.Subscription.retrieve(courant.stripe_subscription_id)
+    item = sub_stripe["items"]["data"][0]
+    sens = _sens_changement(courant, plan_cible, periodicite)
+    mode = _mode_prorata(sens, sub_stripe)
+    en_essai = _en_essai(sub_stripe)
+    fin_periode = item.get("current_period_end") or sub_stripe.get("current_period_end")
+    prix_cible = PRIX_CENTS_PAR_PRICE.get(price_id)
+
+    immediat = ajustement = None
+    try:
+        apercu = stripe.Invoice.upcoming(
+            customer=sub_stripe.get("customer"),
+            subscription=courant.stripe_subscription_id,
+            subscription_items=[{"id": item["id"], "price": price_id}],
+            subscription_proration_behavior=mode,
+            subscription_proration_date=int(datetime.now(timezone.utc).timestamp()),
+        )
+        prorata = sum(int(ligne.get("amount") or 0) for ligne in apercu["lines"]["data"]
+                      if ligne.get("proration"))
+        if mode == "always_invoice":
+            immediat = max(prorata, 0)
+        else:
+            ajustement = prorata
+    except Exception as e:  # noqa: BLE001 — l'aperçu ne bloque pas, le message reste honnête
+        log.warning("stripe.apercu_changement_indisponible", user_id=user.user_id, error=str(e)[:150])
+
+    nom = plan_cible.capitalize()
+    unite = "/an" if periodicite == "annual" else "/mois"
+    prix_txt = f"{_euros(prix_cible)}{unite}" if prix_cible else "le tarif de la formule"
+    resilie = bool(sub_stripe.get("cancel_at_period_end") or sub_stripe.get("cancel_at"))
+    if en_essai:
+        message = (f"Passer en {nom} ? Votre essai gratuit continue jusqu'au "
+                   f"{_date_fr(sub_stripe.get('trial_end'))}. Aucun prélèvement aujourd'hui ; "
+                   f"ensuite {prix_txt}.")
+    elif mode == "always_invoice":
+        montant = (f"{_euros(immediat)} (différence au prorata jusqu'au {_date_fr(fin_periode)})"
+                   if immediat is not None else "La différence au prorata")
+        message = (f"Passer en {nom} maintenant ? {montant} sera prélevé aujourd'hui, "
+                   f"puis {prix_txt} à partir du {_date_fr(fin_periode)}.")
+    else:
+        credit = (f" Le temps non utilisé ({_euros(-ajustement)}) sera déduit de cette facture."
+                  if ajustement is not None and ajustement < 0 else "")
+        message = (f"Passer en {nom} maintenant ? Les fonctions de votre formule actuelle "
+                   f"s'arrêtent tout de suite. Prochaine facture le {_date_fr(fin_periode)} : "
+                   f"{prix_txt}.{credit}")
+    if resilie:
+        message += " Votre résiliation reste programmée : l'abonnement s'arrêtera à l'échéance."
+    return {
+        "sens": sens, "plan_actuel": courant.plan, "plan_cible": plan_cible,
+        "en_essai": en_essai, "montant_immediat_cents": immediat,
+        "ajustement_prochaine_facture_cents": ajustement,
+        "prochaine_echeance": fin_periode, "prix_cible_cents": prix_cible,
+        "resiliation_programmee": resilie, "message": message,
+    }
+
+
 async def _changer_de_plan(
     user: User,
     vivants: list[Subscription],
@@ -493,15 +615,45 @@ async def _changer_de_plan(
     courant = vivants[0]
     sub_stripe = stripe.Subscription.retrieve(courant.stripe_subscription_id)
     item_id = sub_stripe["items"]["data"][0]["id"]
+    sens = _sens_changement(courant, plan_cible, periodicite)
+    mode = _mode_prorata(sens, sub_stripe)
 
-    maj = stripe.Subscription.modify(
-        courant.stripe_subscription_id,
-        items=[{"id": item_id, "price": price_id}],
-        # Crédit/débit au prorata reporté sur la prochaine facture : le client
-        # obtient son nouveau plan tout de suite sans prélèvement surprise.
-        proration_behavior="create_prorations",
-        metadata={"user_id": user.user_id, "plan": plan_cible},
-    )
+    params: dict = {"items": [{"id": item_id, "price": price_id}], "proration_behavior": mode}
+    if mode == "always_invoice":
+        # La nouvelle formule n'est appliquée QUE si la différence est payée : une
+        # carte refusée ou une authentification 3-D Secure laisse la formule
+        # actuelle en place (`pending_update`, qui expire seul sous 23 h).
+        params["payment_behavior"] = "pending_if_incomplete"
+    else:
+        params["metadata"] = {"user_id": user.user_id, "plan": plan_cible}
+    try:
+        maj = stripe.Subscription.modify(courant.stripe_subscription_id, **params)
+    except stripe.error.CardError:
+        raise HTTPException(
+            status_code=402,
+            detail="Votre banque a refusé le paiement de la différence. "
+                   "Votre formule n'a pas changé.",
+        )
+
+    if maj.get("pending_update"):
+        # Paiement à finaliser (3-D Secure) ou refusé : rien ne change ici. Le
+        # webhook appliquera la formule si le client règle la facture.
+        facture = maj.get("latest_invoice")
+        if isinstance(facture, str):
+            facture = stripe.Invoice.retrieve(facture)
+        url = (facture or {}).get("hosted_invoice_url") or f"{settings.frontend_url}/profil"
+        log.warning("stripe.plan_change_paiement_requis", user_id=user.user_id, plan=plan_cible)
+        return {
+            "url": url, "change_de_plan": False, "paiement_requis": True, "plan": courant.plan,
+            "message": "Le paiement de la différence doit être confirmé auprès de votre "
+                       "banque. Votre formule changera dès qu'il sera validé.",
+        }
+    if mode == "always_invoice":
+        try:
+            stripe.Subscription.modify(courant.stripe_subscription_id,
+                                       metadata={"user_id": user.user_id, "plan": plan_cible})
+        except Exception as e:  # noqa: BLE001 — métadonnée informative seulement
+            log.warning("stripe.metadata_plan_non_posee", error=str(e)[:120])
 
     # Doublons hérités de l'ancien tunnel : un compte ne doit porter qu'UN
     # abonnement. Ceux encore en essai n'ont rien coûté, on les ferme sur-le-champ ;
@@ -539,12 +691,18 @@ async def _changer_de_plan(
 
     log.info("stripe.plan_change", user_id=user.user_id, plan=plan_cible,
              sub=courant.stripe_subscription_id, doublons_fermes=len(vivants) - 1)
+    if _en_essai(sub_stripe):
+        suite = "Votre essai gratuit continue ; aucun prélèvement aujourd'hui."
+    elif mode == "always_invoice":
+        suite = "La différence au prorata a été réglée."
+    else:
+        suite = "Le temps non utilisé est déduit de votre prochaine facture."
     return {
-        "url": f"{settings.frontend_url}/abonnement/succes?plan={plan_cible}&change=1",
+        "url": f"{settings.frontend_url}/abonnement/succes?plan={plan_cible}&change=1&sens={sens}"
+               + ("&essai=1" if _en_essai(sub_stripe) else ""),
         "change_de_plan": True,
         "plan": plan_cible,
-        "message": f"Votre abonnement est passé en {plan_cible.capitalize()}. "
-                   "La différence est ajustée au prorata sur votre prochaine facture.",
+        "message": f"Votre abonnement est passé en {plan_cible.capitalize()}. {suite}",
     }
 
 

@@ -1865,8 +1865,13 @@ async def revenus(
             uid_email = par_client.get(e.client_id or "")
             email = e.email or (uid_email[1] if uid_email else None)
             plan = _formule_payee(e.price_id, e.plan_prix, e.montant_cents, email)
+            # Différence réglée lors d'un passage Standard → Expert : ni un nouveau
+            # client, ni une échéance ordinaire.
+            nature = ("nouveau" if premier
+                      else "changement" if e.motif_facture == "subscription_update"
+                      else "renouvellement")
             lignes_paiement.append(_ligne_paiement(
-                e.cree_le, email, plan, e.montant_cents, "nouveau" if premier else "renouvellement",
+                e.cree_le, email, plan, e.montant_cents, nature,
                 frais=e.frais_cents, net=e.net_cents, rembourse=e.rembourse_cents,
                 charge_id=e.charge_id, recu_url=e.recu_url, facture_id=e.facture_id,
                 motif=e.description,

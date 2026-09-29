@@ -127,7 +127,7 @@ export default function ReleveDeclaration({
       new Date(p.date).toLocaleString("fr-FR", { timeZone: "Europe/Paris" }),
       p.email ?? "", p.plan === "expert" ? "Expert" : "Standard",
       csvMontant(p.montant_cents), csvMontant(p.rembourse_cents), csvMontant(p.frais_cents), csvMontant(p.net_cents),
-      p.nature === "nouveau" ? "Premier paiement" : "Renouvellement", p.charge_id ?? p.facture_id ?? "", p.recu_url ?? "",
+      p.nature === "nouveau" ? "Premier paiement" : p.nature === "changement" ? "Changement de formule" : "Renouvellement", p.charge_id ?? p.facture_id ?? "", p.recu_url ?? "",
     ]),
   ]);
 

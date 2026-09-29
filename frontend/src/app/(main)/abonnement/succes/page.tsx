@@ -18,6 +18,13 @@ function AbonnementSuccesContent() {
   // `change=1` : changement de formule sur l'abonnement existant, pas une
   // première souscription — dire « Bienvenue » serait faux.
   const changementDeFormule = searchParams.get("change") === "1";
+  const sens = searchParams.get("sens");
+  const pendantEssai = searchParams.get("essai") === "1";
+  const detailChangement = pendantEssai
+    ? "Votre essai gratuit continue : aucun prélèvement avant sa fin, puis le tarif de votre nouvelle formule."
+    : sens === "hausse" || sens === "periodicite"
+      ? "La différence au prorata a été réglée aujourd'hui ; ensuite, le tarif de votre nouvelle formule à chaque échéance."
+      : "Le temps non utilisé de votre ancienne formule est déduit de votre prochaine facture.";
 
   useEffect(() => {
     // Refresh user pour mettre à jour le plan après paiement Stripe
@@ -59,8 +66,7 @@ function AbonnementSuccesContent() {
               {changementDeFormule && (
                 <p className="text-muted-foreground text-sm mt-2">
                   Votre abonnement a été modifié — aucun second abonnement n&apos;a été
-                  créé. La différence de prix est ajustée au prorata sur votre
-                  prochaine facture.
+                  créé. {detailChangement}
                 </p>
               )}
             </div>

@@ -215,7 +215,7 @@ export interface PaiementRecu {
   frais_cents: number | null;
   net_cents: number | null;
   /** Premier encaissement du client, ou échéance suivante. */
-  nature: "nouveau" | "renouvellement";
+  nature: "nouveau" | "renouvellement" | "changement";
   motif: string | null;
   charge_id: string | null;
   /** Reçu Stripe officiel du paiement. */

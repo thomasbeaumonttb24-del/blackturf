@@ -307,7 +307,9 @@ const COLONNES_PAIEMENTS: Colonne<PaiementRecu>[] = [
     titre: "Nature",
     rendu: (p) => p.nature === "nouveau"
       ? <Etat ton="or">Premier paiement</Etat>
-      : <Etat ton="ok">Renouvellement</Etat>,
+      : p.nature === "changement"
+        ? <Etat ton="attention" titre="Différence au prorata réglée lors d'un changement de formule">Changement de formule</Etat>
+        : <Etat ton="ok">Renouvellement</Etat>,
   },
   {
     titre: "Date",

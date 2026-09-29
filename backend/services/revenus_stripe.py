@@ -80,6 +80,9 @@ class Encaissement:
     # une facture Expert a bien payé de l'Expert (cas réel du 2026-09-29).
     price_id: Optional[str] = None
     plan_prix: Optional[str] = None
+    # `subscription_update` = facture née d'un changement de formule (ou de la
+    # fin d'un essai refusé) ; `subscription_cycle` = échéance ordinaire.
+    motif_facture: Optional[str] = None
 
 
 @dataclass
@@ -178,6 +181,7 @@ def _encaissement(ch: Any) -> Optional[Encaissement]:
         description=_g(ch, "description"),
         price_id=price_id,
         plan_prix=plan_prix,
+        motif_facture=_g(facture, "billing_reason") if isinstance(facture, dict) else None,
     )
 
 
