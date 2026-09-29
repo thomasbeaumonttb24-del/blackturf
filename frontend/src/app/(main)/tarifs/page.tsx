@@ -48,6 +48,8 @@ const offersJsonLd = {
     { "@type": "Offer", name: "Gratuit", price: "0", priceCurrency: "EUR", url: "https://blackturf.fr/tarifs", category: "Abonnement mensuel" },
     { "@type": "Offer", name: "Standard", price: "12", priceCurrency: "EUR", url: "https://blackturf.fr/tarifs", category: "Abonnement mensuel" },
     { "@type": "Offer", name: "Expert", price: "19", priceCurrency: "EUR", url: "https://blackturf.fr/tarifs", category: "Abonnement mensuel" },
+    { "@type": "Offer", name: "Standard annuel", price: "115.20", priceCurrency: "EUR", url: "https://blackturf.fr/tarifs", category: "Abonnement annuel" },
+    { "@type": "Offer", name: "Expert annuel", price: "182.40", priceCurrency: "EUR", url: "https://blackturf.fr/tarifs", category: "Abonnement annuel" },
   ],
 };
 
@@ -158,7 +160,7 @@ export default function TarifsPage() {
               <span className="text-4xl font-extrabold">12€</span>
               <span className="text-muted-foreground">/mois</span>
             </div>
-            <p className="text-xs text-muted-foreground mb-6">ou 115,20 €/an (−20 %)</p>
+            <p className="text-xs text-muted-foreground mb-6">ou 115,20 €/an, soit 9,60 €/mois (−20 %)</p>
             <ul className="space-y-3 mb-8">
               {[
                 { label: "Prédictions IA : 5 courses/jour", icon: null },
@@ -182,6 +184,18 @@ export default function TarifsPage() {
               variant="brand-outline"
               className="w-full"
             />
+            <CheckoutButton
+              plan="standard"
+              periodicite="annual"
+              label="À l'année : 115,20 € (−20 %)"
+              variant="outline"
+              size="default"
+              className="mt-2 w-full"
+            />
+            <p className="mt-1 text-center text-[11px] leading-snug text-muted-foreground">
+              Engagement 12 mois, payé en une fois ; résiliable à tout moment pour la fin de l&apos;année.
+              Rappel par e-mail un mois avant la reconduction.
+            </p>
             {/* « Sans CB requis » était FAUX : la session Stripe est créée avec
                 payment_method_collection="always" (api/routes/stripe_routes.py), donc la carte
                 est exigée depuis la mise en place de l'essai unique par compte. La FAQ de
@@ -202,7 +216,7 @@ export default function TarifsPage() {
               <span className="text-4xl font-extrabold">19€</span>
               <span className="text-muted-foreground">/mois</span>
             </div>
-            <p className="text-xs text-muted-foreground mb-6">ou 182,40 €/an (−20 %)</p>
+            <p className="text-xs text-muted-foreground mb-6">ou 182,40 €/an, soit 15,20 €/mois (−20 %)</p>
             <ul className="space-y-3 mb-8">
               {[
                 "Tout Standard",
@@ -226,6 +240,18 @@ export default function TarifsPage() {
               variant="brand"
               className="w-full"
             />
+            <CheckoutButton
+              plan="expert"
+              periodicite="annual"
+              label="À l'année : 182,40 € (−20 %)"
+              variant="outline"
+              size="default"
+              className="mt-2 w-full"
+            />
+            <p className="mt-1 text-center text-[11px] leading-snug text-muted-foreground">
+              Engagement 12 mois, payé en une fois ; résiliable à tout moment pour la fin de l&apos;année.
+              Rappel par e-mail un mois avant la reconduction.
+            </p>
             {/* « Sans CB requis » était FAUX : la session Stripe est créée avec
                 payment_method_collection="always" (api/routes/stripe_routes.py), donc la carte
                 est exigée depuis la mise en place de l'essai unique par compte. La FAQ de

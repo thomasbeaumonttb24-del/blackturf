@@ -356,6 +356,19 @@ async def job_relances_paiement() -> None:
         log.error("jobs.relances_paiement.error", error=str(e))
 
 
+async def job_rappel_reconduction() -> None:
+    """1x/jour — rappel légal avant reconduction d'un abonnement annuel (L215-1)."""
+    try:
+        from db.database import AsyncSessionLocal
+        from services.reconduction_annuelle import envoyer_rappels
+        async with AsyncSessionLocal() as session:
+            n = await envoyer_rappels(session)
+        if n:
+            log.info("jobs.rappel_reconduction.done", envoyes=n)
+    except Exception as e:
+        log.error("jobs.rappel_reconduction.error", error=str(e))
+
+
 async def job_resolve_courses_sans_resultat() -> None:
     """1x/jour — clôture les courses passées restées sans résultat.
 
@@ -699,6 +712,15 @@ def start_scheduler() -> None:
         id="relances_paiement",
         replace_existing=True,
         misfire_grace_time=1800,
+    )
+
+    # Rappel légal avant reconduction des abonnements annuels, en journée.
+    scheduler.add_job(
+        job_rappel_reconduction,
+        CronTrigger(hour=11, minute=10, timezone="Europe/Paris"),
+        id="rappel_reconduction",
+        replace_existing=True,
+        misfire_grace_time=6 * 3600,
     )
 
     # Palmarès à jour dans la minute qui suit chaque course intégrée.

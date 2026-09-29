@@ -25,13 +25,18 @@ export function CheckoutButton({ plan, periodicite, label, variant = "brand", si
   // Abonné : ce bouton CHANGE sa formule — il le dit, et ne propose jamais
   // « Essayer 7 jours gratuit » ni sa propre formule.
   const abonne = Boolean(user?.abonnement_gerable) && (user?.plan === "standard" || user?.plan === "expert");
-  const formuleActuelle = abonne && user?.plan === plan;
+  // Déjà abonné : le passage mensuel ↔ annuel se fait sur demande (il refacture
+  // tout et déplace l'échéance) — le bouton annuel ne propose donc rien.
+  const annuelPourAbonne = abonne && periodicite === "annual";
+  const formuleActuelle = (abonne && user?.plan === plan && periodicite === "monthly") || annuelPourAbonne;
   const nomPlan = plan === "expert" ? "Expert" : "Standard";
-  const libelle = formuleActuelle
-    ? "Votre formule actuelle"
-    : abonne
-      ? `Passer en ${nomPlan} — ${plan === "expert" ? "19" : "12"} €/mois`
-      : user?.remise_parrainage && /essai|essayer/i.test(label) ? "S'abonner — 5 € offerts" : label;
+  const libelle = annuelPourAbonne
+    ? "Annuel : sur demande (contact@blackturf.fr)"
+    : formuleActuelle
+      ? "Votre formule actuelle"
+      : abonne
+        ? `Passer en ${nomPlan} — ${plan === "expert" ? "19" : "12"} €/mois`
+        : user?.remise_parrainage && /essai|essayer/i.test(label) ? "S'abonner — 5 € offerts" : label;
 
   async function startCheckout() {
     if (!user) {

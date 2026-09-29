@@ -158,6 +158,42 @@ def resiliation(via_stripe: bool) -> tuple[str, str]:
     return D.document("Résiliation enregistrée", "Votre demande de résiliation est bien prise en compte.", rangees), texte
 
 
+def rappel_reconduction(prenom: Optional[str], plan: str, echeance, montant_cents: int) -> tuple[str, str]:
+    """Information préalable à la reconduction d'un abonnement annuel (L215-1)."""
+    mois = ("janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août",
+            "septembre", "octobre", "novembre", "décembre")
+    date_txt = f"{echeance.day} {mois[echeance.month - 1]} {echeance.year}"
+    nom = "Expert" if plan == "expert" else "Standard"
+    prix = f"{montant_cents / 100:.2f}".replace(".", ",") + " €"
+    detail = (f"Votre abonnement annuel {nom} arrive à échéance le {date_txt}. Sans action de "
+              f"votre part, il sera reconduit pour un an et {prix} seront prélevés à cette date.")
+    choix = ("Vous pouvez ne pas le reconduire : il suffit de résilier depuis votre profil "
+             "(Profil → Abonnement → Résilier) avant le " + date_txt + ". Vous gardez alors "
+             "l’accès jusqu’à l’échéance, et aucun prélèvement n’aura lieu.")
+    carte = (
+        D.surtitre("Ce qui va se passer")
+        + f'<div style="font-size:14px;line-height:22px;color:{C["slate7"]}">{detail}</div>'
+        + f'<div style="margin-top:14px;font-size:14px;line-height:22px;color:{C["slate7"]}">{choix}</div>'
+        + f'<div style="margin-top:14px;font-size:14px;line-height:22px;color:{C["slate7"]}">Une question ? '
+          f'<a href="mailto:contact@blackturf.fr" style="color:{C["or"]};font-weight:700">contact@blackturf.fr</a>.</div>'
+    )
+    rangees = (
+        D.barre_logo("Votre abonnement")
+        + D.entete(None, "Abonnement annuel", f"Échéance le {date_txt}",
+                   "Information préalable à la reconduction de votre abonnement.", icone="valide")
+        + _carte_claire(carte)
+        + _action("Gérer mon abonnement", SITE + "/profil", "")
+        + D.pied("Message lié à votre abonnement blackturf.fr.")
+    )
+    saut = chr(10)
+    texte = saut.join([
+        detail, "", choix.replace(chr(8217), chr(39)), "",
+        f"Gérer mon abonnement : {SITE}/profil",
+        "Une question : contact@blackturf.fr", "", D.RESPONSABLE,
+    ])
+    return D.document("Échéance de votre abonnement annuel", detail, rangees), texte
+
+
 # Où tombera le crédit, selon la situation du parrain (cf. services/parrainage.situation_credit).
 _OU_VA_LE_CREDIT = {
     "facture": "ils seront déduits automatiquement de votre prochaine facture.",

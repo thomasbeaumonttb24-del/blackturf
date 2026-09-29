@@ -356,3 +356,35 @@ async def test_parrain_pas_credite_sur_une_difference_au_prorata(db):
         assert appels == [filleul.user_id]
     finally:
         P._lien_du_filleul = orig
+
+
+# ── 9. Abonnement annuel : rappel légal avant reconduction (L215-1), une fois
+async def test_rappel_reconduction_annuel_une_seule_fois(db, monkeypatch):
+    from services import reconduction_annuelle as RA
+    envois = []
+
+    async def _email(**kw):
+        envois.append(kw["to"])
+    import services.alerts as alerts
+    monkeypatch.setattr(alerts, "send_email", _email)
+    maintenant = datetime.now(timezone.utc)
+    u = await _user(db, plan="expert", stripe_customer_id="cus_an")
+    s = await _abo(db, u, plan="expert", statut="active", periodicite="annual")
+    s.periode_fin = maintenant + timedelta(days=40)
+    u2 = await _user(db, plan="standard", stripe_customer_id="cus_mois")
+    s2 = await _abo(db, u2, plan="standard", statut="active")  # mensuel : pas concerné
+    s2.periode_fin = maintenant + timedelta(days=40)
+    await db.commit()
+
+    assert await RA.envoyer_rappels(db, maintenant) == 1
+    assert await RA.envoyer_rappels(db, maintenant) == 0  # jamais deux fois
+    assert envois == [u.email]
+    ev = (await db.execute(select(SubscriptionEvent).where(
+        SubscriptionEvent.type == "rappel_reconduction"))).scalar_one()
+    assert ev.montant_cents == 18240
+
+
+async def test_mail_de_reconduction_dit_date_montant_et_comment_resilier():
+    from services.email_compte import rappel_reconduction
+    html, texte = rappel_reconduction("Léa", "standard", datetime(2027, 3, 5, tzinfo=timezone.utc), 11520)
+    assert "5 mars 2027" in texte and "115,20 €" in texte and "Résilier" in texte
