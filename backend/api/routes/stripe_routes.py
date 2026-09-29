@@ -1071,6 +1071,11 @@ async def _handle_payment_succeeded(invoice: dict, db: AsyncSession):
         return
 
     user = await _find_user_by_customer(invoice.get("customer"), db)
+    # Formule FACTURÉE (prix de la ligne), pas celle du compte : un abonné peut
+    # régler une facture Expert après être repassé en Standard (2026-09-29).
+    from services.revenus_stripe import ligne_facturee
+    prix_facture = ligne_facturee(invoice)[0]
+    plan_facture = PLAN_FROM_PRICE.get(prix_facture) if prix_facture else None
     sub = None
     if sub_id:
         sub = (await db.execute(
@@ -1089,7 +1094,8 @@ async def _handle_payment_succeeded(invoice: dict, db: AsyncSession):
                                   "motif": invoice.get("billing_reason"),
                                   "client_stripe": invoice.get("customer"),
                                   "abonnement_pas_encore_connu": sub is None,
-                                  "compte_inconnu": user is None})
+                                  "compte_inconnu": user is None,
+                                  "plan_facture": plan_facture})
         if user is not None:
             await parrainage.sur_paiement(user, invoice, db)
         await db.commit()
@@ -1120,6 +1126,7 @@ async def _handle_payment_succeeded(invoice: dict, db: AsyncSession):
                               # État CONSTATÉ après traitement, jamais une
                               # comparaison avant/après : cf. `_handle_payment_failed`.
                               "plan_apres": user.plan,
+                              "plan_facture": plan_facture,
                               "acces_ouvert": user.plan != "free"})
     # Premier vrai paiement d'un filleul : c'est lui, et lui seul, qui crédite le
     # parrain. Les factures à 0 € sont écartées plus haut.

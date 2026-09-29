@@ -242,7 +242,12 @@ export interface MoisRevenu {
   renouvellements_cents: number;
   par_formule: Record<Formule, number>;
   echecs_cents: number;
+  /** Abonnements dont le prélèvement a échoué ce mois-ci (un par abonnement, pas par tentative). */
   nb_echecs: number;
+  /** Parmi eux, ceux qui ont payé depuis. */
+  nb_echecs_regles?: number;
+  /** Tentatives Stripe refusées (réessais compris). */
+  nb_tentatives_echouees?: number;
   nb_clients: number;
   panier_moyen_cents: number | null;
   cumul_cents: number;

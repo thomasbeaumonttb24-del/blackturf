@@ -191,3 +191,84 @@ async def test_seuls_les_debits_reussis_et_captures_sont_de_l_argent_encaisse():
     assert (ok.montant_cents, ok.frais_cents, ok.net_cents, ok.email) == (1200, 43, 1157, "a@x.fr")
     assert _encaissement({**base, "status": "failed", "paid": False}) is None
     assert _encaissement({**base, "status": "succeeded", "paid": True, "captured": False}) is None
+
+
+# ─────────────────────────────────────────────────────────────
+# 2026-09-29 : facture Expert 19 € réglée par un abonné repassé en Standard
+# entre l'échec et le paiement. L'écran affichait « Standard » (formule actuelle
+# du compte) et annonçait 19 € au prochain prélèvement (plus gros montant payé).
+# ─────────────────────────────────────────────────────────────
+async def test_ligne_facturee_prend_la_ligne_principale_hors_prorata():
+    from services.revenus_stripe import ligne_facturee
+    facture = {"lines": {"data": [
+        {"amount": -700, "price": {"id": "price_exp", "metadata": {"plan": "expert_monthly"}}},
+        {"amount": 1200, "pricing": {"price_details": {"price": "price_std"}}},
+    ]}}
+    assert ligne_facturee(facture) == ("price_std", None)
+    assert ligne_facturee({"lines": {"data": [
+        {"amount": 1900, "price": {"id": "price_exp", "metadata": {"plan": "expert_monthly"}}}]}}) \
+        == ("price_exp", "expert_monthly")
+    assert ligne_facturee(None) == (None, None)
+
+
+async def test_revenus_formule_payee_et_prochain_montant(client: AsyncClient, admin_headers, db, monkeypatch):
+    from api.config import get_settings
+    from api.routes import stripe_routes
+    from services import revenus_stripe
+    from services.revenus_stripe import Encaissement, Grand_livre
+    now = datetime.now(timezone.utc)
+    u = User(user_id=str(uuid.uuid4()), email="yas@x.fr", plan="standard", stripe_customer_id="cus_y")
+    db.add(u)
+    await db.flush()
+    db.add(Subscription(sub_id=str(uuid.uuid4()), user_id=u.user_id, stripe_subscription_id="sub_y",
+                        plan="standard", periodicite="monthly", statut="active",
+                        periode_debut=now - timedelta(days=1), periode_fin=now + timedelta(days=3)))
+    db.add(SubscriptionEvent(event_id=str(uuid.uuid4()), user_id=u.user_id, email="yas@x.fr",
+                             type="paiement_recu", plan="standard", stripe_subscription_id="sub_y",
+                             montant_cents=1900, created_at=now - timedelta(minutes=30)))
+    await db.commit()
+
+    livre = Grand_livre(lu_le=now.timestamp())
+    # Montant atypique (remise) : seule la ligne facturée dit que c'était de l'Expert.
+    livre.encaissements = [Encaissement("ch_y", now - timedelta(minutes=30), 1400, 0, 50, 1350, "eur",
+                                        "cus_y", None, "in_y", None, "Subscription update",
+                                        price_id="price_exp")]
+    monkeypatch.setattr(get_settings(), "stripe_secret_key", "sk_test_local")
+    monkeypatch.setitem(stripe_routes.PLAN_FROM_PRICE, "price_exp", "expert")
+    monkeypatch.setattr(revenus_stripe, "lire", lambda cle, depuis, forcer=False: livre)
+    monkeypatch.setattr(revenus_stripe, "prochains_montants", lambda cle, ids, forcer=False: {"sub_y": 500})
+
+    data = (await client.get("/admin/api/revenus?mois=2&mois_prevision=2", headers=admin_headers)).json()
+    m = data["mois"][-1]
+    assert m["paiements"][0]["plan"] == "expert"
+    assert m["paiements"][0]["email"] == "yas@x.fr"
+    assert m["par_formule"] == {"standard": 0, "expert": 1400}
+    ech = {e["email"]: e for e in data["echeancier"]}["yas@x.fr"]
+    assert ech["montant_cents"] == 500            # prochaine facture calculée par Stripe (prorata)
+    futurs = [p["prevu_cents"] for p in data["prevision"]]
+    assert futurs[0] == 500 and all(v == 1200 for v in futurs[1:])  # puis prix Standard
+
+
+async def test_revenus_echecs_comptes_par_abonnement_pas_par_tentative(client: AsyncClient, admin_headers, db):
+    now = datetime.now(timezone.utc)
+    u = User(user_id=str(uuid.uuid4()), email="retry@x.fr", plan="standard")
+    v = User(user_id=str(uuid.uuid4()), email="perdu@x.fr", plan="free")
+    db.add_all([u, v])
+    for i in range(4):  # Stripe réessaie la même facture : 4 tentatives, 1 échec
+        db.add(SubscriptionEvent(event_id=str(uuid.uuid4()), user_id=u.user_id, email="retry@x.fr",
+                                 type="paiement_echoue", plan="standard", stripe_subscription_id="sub_r",
+                                 montant_cents=1200, created_at=now - timedelta(minutes=60 - i)))
+    db.add(SubscriptionEvent(event_id=str(uuid.uuid4()), user_id=u.user_id, email="retry@x.fr",
+                             type="paiement_recu", plan="standard", stripe_subscription_id="sub_r",
+                             montant_cents=1200, created_at=now - timedelta(minutes=10)))
+    for i in range(2):
+        db.add(SubscriptionEvent(event_id=str(uuid.uuid4()), user_id=v.user_id, email="perdu@x.fr",
+                                 type="paiement_echoue", plan="expert", stripe_subscription_id="sub_p",
+                                 montant_cents=1900, created_at=now - timedelta(minutes=50 - i)))
+    await db.commit()
+
+    m = (await client.get("/admin/api/revenus?mois=2", headers=admin_headers)).json()["mois"][-1]
+    assert m["nb_echecs"] == 2
+    assert m["echecs_cents"] == 1200 + 1900
+    assert m["nb_tentatives_echouees"] == 6
+    assert m["nb_echecs_regles"] == 1

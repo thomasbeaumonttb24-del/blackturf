@@ -340,6 +340,18 @@ function Ecart({ a, b }: { a: number; b: number | null | undefined }) {
   return <span className={cn("font-medium", v >= 0 ? "text-emerald-700" : "text-red-700")}>{signedPct(v, 0)}</span>;
 }
 
+/** « 3 réglés depuis · 5 impayés · 39 tentatives » : un échec n'est pas un client perdu. */
+function echecsDetail(m: MoisRevenu) {
+  const regles = m.nb_echecs_regles ?? 0;
+  const restants = m.nb_echecs - regles;
+  const parts = [
+    regles ? `${regles} réglé${regles > 1 ? "s" : ""} depuis` : null,
+    restants ? `${restants} toujours impayé${restants > 1 ? "s" : ""}` : null,
+    m.nb_tentatives_echouees && m.nb_tentatives_echouees > m.nb_echecs ? `${m.nb_tentatives_echouees} tentatives` : null,
+  ].filter(Boolean);
+  return parts.join(" · ");
+}
+
 function DetailMois({ m, precedent }: { m: MoisRevenu; precedent?: MoisRevenu }) {
   const cases = [
     { label: "Encaissé (CA)", v: euros(m.ca_cents, 2), a: m.ca_cents, b: precedent?.ca_cents },
@@ -349,7 +361,7 @@ function DetailMois({ m, precedent }: { m: MoisRevenu; precedent?: MoisRevenu })
     { label: "Panier moyen", v: euros(m.panier_moyen_cents, 2), a: m.panier_moyen_cents ?? 0, b: precedent?.panier_moyen_cents },
     {
       label: "Prélèvements échoués",
-      v: m.nb_echecs ? `${m.nb_echecs} · ${euros(m.echecs_cents)}` : "Aucun",
+      v: m.nb_echecs ? `${m.nb_echecs} abonné${m.nb_echecs > 1 ? "s" : ""} · ${euros(m.echecs_cents)}` : "Aucun",
       a: null as number | null, b: null,
     },
   ];
@@ -394,7 +406,7 @@ function DetailMois({ m, precedent }: { m: MoisRevenu; precedent?: MoisRevenu })
               <dt className="text-xs text-muted-foreground">{c.label}</dt>
               <dd className="mt-1 text-lg font-semibold tabular-nums text-foreground">{c.v}</dd>
               <dd className="mt-0.5 text-xs text-muted-foreground">
-                {c.a != null ? <><Ecart a={c.a} b={c.b} /> vs mois précédent</> : m.nb_echecs ? "accès coupé, relances en cours" : "sur le mois"}
+                {c.a != null ? <><Ecart a={c.a} b={c.b} /> vs mois précédent</> : m.nb_echecs ? echecsDetail(m) : "sur le mois"}
               </dd>
             </div>
           ))}

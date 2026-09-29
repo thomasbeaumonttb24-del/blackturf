@@ -1804,6 +1804,20 @@ async def revenus(
         (em or "").lower(): _formule(plan_abo.get(uid) or p) for uid, em, _c, p in comptes
     }
     PLAN_PAR_MONTANT = {v: _formule(k) for k, v in PRIX_MENSUEL_CENTS.items()}
+    from api.routes.stripe_routes import PLAN_FROM_PRICE
+
+    def _formule_payee(price_id, plan_prix, montant, email) -> str:
+        """Formule de CE paiement — ce que Stripe a facturé, jamais la formule
+        actuelle du client. Cas réel (2026-09-29) : facture Expert 19 € réglée
+        par un abonné repassé en Standard entre-temps ; l'écran l'affichait
+        « Standard ». L'e-mail n'est plus qu'un dernier recours."""
+        if price_id and PLAN_FROM_PRICE.get(price_id):
+            return _formule(PLAN_FROM_PRICE[price_id])
+        if plan_prix:  # métadonnée du prix : « expert_monthly »
+            base = str(plan_prix).split("_")[0]
+            if _formule(base) in ("standard", "expert"):
+                return _formule(base)
+        return PLAN_PAR_MONTANT.get(montant) or plan_par_email.get((email or "").lower()) or "standard"
 
     # ── Journal interne (sert au rapprochement, et de repli) ──
     journal = (await db.execute(
@@ -1846,7 +1860,7 @@ async def revenus(
                 premiers.add(qui)
             uid_email = par_client.get(e.client_id or "")
             email = e.email or (uid_email[1] if uid_email else None)
-            plan = plan_par_email.get((email or "").lower()) or PLAN_PAR_MONTANT.get(e.montant_cents) or "standard"
+            plan = _formule_payee(e.price_id, e.plan_prix, e.montant_cents, email)
             lignes_paiement.append(_ligne_paiement(
                 e.cree_le, email, plan, e.montant_cents, "nouveau" if premier else "renouvellement",
                 frais=e.frais_cents, net=e.net_cents, rembourse=e.rembourse_cents,
@@ -1899,8 +1913,13 @@ async def revenus(
             if sid:
                 vus.add(sid)
             d = ev.created_at if ev.created_at.tzinfo else ev.created_at.replace(tzinfo=timezone.utc)
+            plan_ev = _formule(detail.get("plan_facture") or ev.plan)
+            if not detail.get("plan_facture"):
+                # Journal antérieur au 2026-09-29 : `plan` est la formule du
+                # compte au moment du paiement, pas celle facturée.
+                plan_ev = PLAN_PAR_MONTANT.get(int(ev.montant_cents or 0)) or plan_ev
             lignes_paiement.append(_ligne_paiement(
-                d, ev.email, _formule(ev.plan), int(ev.montant_cents or 0),
+                d, ev.email, plan_ev, int(ev.montant_cents or 0),
                 "nouveau" if premier else "renouvellement",
                 motif=detail.get("motif"), facture_id=detail.get("facture"), source="journal",
             ))
@@ -1912,8 +1931,9 @@ async def revenus(
             "net_cents": 0, "verse_cents": 0, "nb_paiements": 0, "nb_remboursements": 0,
             "nouveaux_cents": 0, "renouvellements_cents": 0,
             "par_formule": {"standard": 0, "expert": 0},
-            "echecs_cents": 0, "nb_echecs": 0, "frais_connus": livre is not None,
-            "clients": set(), "paiements": [],
+            "echecs_cents": 0, "nb_echecs": 0, "nb_echecs_regles": 0, "nb_tentatives_echouees": 0,
+            "frais_connus": livre is not None,
+            "clients": set(), "paiements": [], "_echecs": {},
         }
         for k in cles_mois
     }
@@ -1942,12 +1962,41 @@ async def revenus(
         b = buckets.get(_mois_de(v["date"], tz))
         if b is not None:
             b["verse_cents"] += v["montant_cents"]
+    # Prélèvements échoués : UN par abonnement et par mois, pas un par tentative.
+    # Stripe réessaie la même facture (J+2, J+4…) et chaque essai écrit un
+    # `paiement_echoue` : sommer les tentatives affichait « 39 · 629 € » pour
+    # 8 abonnés en septembre 2026. Un échec est « réglé » si un paiement du même
+    # abonnement (ou du même client) est arrivé ensuite.
+    def _utc(d):
+        return d if d.tzinfo else d.replace(tzinfo=timezone.utc)
+
+    regles_par_cle: dict[str, list[datetime]] = {}
+    for ev in journal:
+        if ev.type == "paiement_recu":
+            for k_ in (ev.stripe_subscription_id, (ev.email or "").lower()):
+                if k_:
+                    regles_par_cle.setdefault(k_, []).append(_utc(ev.created_at))
+    for lp in lignes_paiement:
+        if lp["email"]:
+            regles_par_cle.setdefault(lp["email"].lower(), []).append(lp["date"])
     for ev in journal:
         if ev.type == "paiement_echoue":
             b = buckets.get(_mois_de(ev.created_at, tz))
-            if b is not None:
-                b["nb_echecs"] += 1
-                b["echecs_cents"] += int(ev.montant_cents or 0)
+            if b is None:
+                continue
+            b["nb_tentatives_echouees"] += 1
+            cle_ = ev.stripe_subscription_id or (ev.email or "").lower() or ev.event_id
+            e_ = b["_echecs"].setdefault(cle_, {"montant": 0, "dernier": _utc(ev.created_at),
+                                               "email": (ev.email or "").lower()})
+            e_["montant"] = max(e_["montant"], int(ev.montant_cents or 0))
+            e_["dernier"] = max(e_["dernier"], _utc(ev.created_at))
+    for b in buckets.values():
+        for cle_, e_ in b["_echecs"].items():
+            b["nb_echecs"] += 1
+            b["echecs_cents"] += e_["montant"]
+            apres = regles_par_cle.get(cle_, []) + regles_par_cle.get(e_["email"], [])
+            if any(d > e_["dernier"] for d in apres):
+                b["nb_echecs_regles"] += 1
 
     serie = []
     cumul = 0
@@ -1957,7 +2006,7 @@ async def revenus(
         cumul += ca
         b["paiements"].sort(key=lambda p: p["date"], reverse=True)
         serie.append({
-            **{kk: vv for kk, vv in b.items() if kk != "clients"},
+            **{kk: vv for kk, vv in b.items() if kk not in ("clients", "_echecs")},
             # Chiffre d'affaires encaissé du mois = débits réussis − remboursements.
             "ca_cents": ca,
             "nb_clients": len(b["clients"]),
@@ -1977,10 +2026,26 @@ async def revenus(
         .where(Subscription.statut.in_(("active", "trialing", "cancel_at_period_end", "past_due")))
     )).all()
 
+    # Montant de la prochaine facture : calculé PAR STRIPE quand on le joint
+    # (formule actuelle, prorata d'un changement de formule, remise, crédit).
+    # L'ancien « plus gros montant déjà payé » annonçait 19 € pour un abonné
+    # repassé en Standard (12 €). Sans Stripe : prix catalogue de la formule
+    # ACTUELLE ; le dernier montant payé ne sert plus que pour l'annuel.
+    prochains: dict[str, int] = {}
+    if livre is not None:
+        a_venir = [sub.stripe_subscription_id for sub, _u in lignes
+                   if sub.statut in ("active", "trialing") and sub.stripe_subscription_id]
+        try:
+            prochains = await asyncio.to_thread(revenus_stripe.prochains_montants, cle, a_venir, actualiser)
+        except Exception as e:  # noqa: BLE001
+            log.error("admin.revenus.prochaines_factures_indisponibles", error=str(e)[:300])
+
     echeances = []
     prevu_par_mois: dict[str, int] = {}
     for sub, user in lignes:
-        montant = montants.get(sub.stripe_subscription_id) or PRIX_MENSUEL_CENTS.get(sub.plan, 0)
+        catalogue = ((montants.get(sub.stripe_subscription_id) if sub.periodicite == "annual" else None)
+                     or PRIX_MENSUEL_CENTS.get(sub.plan, 0))
+        montant = prochains.get(sub.stripe_subscription_id, catalogue)
         essai_fin = sub.essai_fin
         if essai_fin is not None and essai_fin.tzinfo is None:
             essai_fin = essai_fin.replace(tzinfo=timezone.utc)
@@ -2018,8 +2083,10 @@ async def revenus(
         d, i = prochaine, 0
         while d < horizon and i < 40:
             if d >= now:
-                cle = _mois_de(d, tz)
-                prevu_par_mois[cle] = prevu_par_mois.get(cle, 0) + montant
+                cle_mois = _mois_de(d, tz)
+                # Seule la PROCHAINE facture porte un éventuel prorata ; les
+                # suivantes reviennent au prix de la formule.
+                prevu_par_mois[cle_mois] = prevu_par_mois.get(cle_mois, 0) + (montant if i == 0 else catalogue)
             i += 1
             d = _ajoute_mois(prochaine, pas * i)
 
