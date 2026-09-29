@@ -1853,6 +1853,13 @@ async def _run_nightly_retraining_unlocked() -> None:
                 else "pipeline.profil_weights_done",
                 n_runs=_plw.get("n_observed_runs", _plw.get("n_total_runs")),
             )
+    # Carte type de pari × contexte (ml.contexte_paris) : paris CANONIQUES réglés aux
+    # vrais rapports sur toutes les courses, joués ou non par les plans. Lue par le
+    # moteur de plans via le cache de ml.reglages_appris.
+    async with etape(AsyncSessionLocal, "contexte_paris"):
+        from ml.contexte_paris import calculer_et_sauver as _carte_contexte
+        async with AsyncSessionLocal() as cp_session:
+            await _carte_contexte(cp_session)
     # Ré-apprend la calibration estimé→réel du RAPPORT par (profil × type) depuis les
     # pronos figés réglés → le gate de bande s'applique au rapport RÉELLEMENT attendu :
     # un type qui paie sous la tranche de son profil (ex. Placé favori ×1.3 en prudent)

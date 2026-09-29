@@ -805,6 +805,20 @@ HANDICAP_TYPES_EXCLUS = frozenset({
 })
 
 
+# Carte apprise type de pari × contexte (ml.contexte_paris), appliquée aux poids appris.
+# ÉTEINTE : mesurée hors échantillon le 2026-09-29 — carte apprise sur 3 234 courses
+# (< 11/08), plans rejoués sur 2 333 courses (11/08 → 29/09), 10 €, heat 0,2, ROI
+# winsorisé ×30, écart apparié (IC 95 % bootstrap) :
+#     prudent  −11,9 → −11,7  [−0,2 ; +0,5]
+#     modéré    −1,9 →  −3,7  [−4,2 ; +0,5]
+#     risqué   −14,3 → −13,9  [−2,0 ; +3,1]
+# Rien de mieux que le moteur actuel : à ce volume, le contexte fin (hippodrome
+# exclu, terrain, champ, handicap) n'ajoute pas d'information utile au-delà des
+# règles déjà posées (handicap). La carte reste calculée chaque nuit ; à remesurer
+# avec `bench_plans.py --carte-fin` quand l'historique aura doublé.
+CONTEXTE_PARIS_ACTIF = False
+
+
 def est_handicap(course_info: Optional[dict]) -> bool:
     """Course à handicap (HANDICAP, HANDICAP_DIVISE, HANDICAP_DE_CATEGORIE…), lu dans
     `categorie_particularite` du PMU. Inconnu → False (comportement d'avant)."""
@@ -1492,6 +1506,17 @@ def generer_plan(
             pass
     palier = _palier(montant)
     roi_weights = roi_weights or {}
+    if CONTEXTE_PARIS_ACTIF:
+        # Carte type de pari × contexte (ml.contexte_paris) : module le poids appris
+        # de chaque type selon ce qu'il rend DANS CE contexte de course. Cache vide
+        # (pas encore appris, ou lecture impossible) → poids inchangés.
+        try:
+            from ml.contexte_paris import appliquer_facteurs, carte_en_cache, facteurs_contexte
+            _fct = facteurs_contexte(carte_en_cache(), course_info)
+            if _fct:
+                roi_weights = appliquer_facteurs(roi_weights, _fct)
+        except Exception as e:  # noqa: BLE001 — sans carte, plan d'avant
+            log.warning("mise_plan.contexte_paris_ignore", err=str(e)[:140])
     heat = max(-1.0, min(1.0, float(heat or 0.0)))
     cfg = _adapter_contexte(_effective_config(profil, heat), course_info)
 

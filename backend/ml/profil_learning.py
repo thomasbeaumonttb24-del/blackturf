@@ -217,7 +217,7 @@ async def record_profil_runs(session: AsyncSession, course_id: str,
                (SELECT COUNT(*) FROM participations pa
                  WHERE pa.course_id = c.course_id
                    AND COALESCE(pa.non_partant, false) = false) AS nb_courants,
-               c.categorie_particularite
+               c.categorie_particularite, c.terrain_officiel
         FROM courses c
         LEFT JOIN hippodromes h ON h.nom = c.hippodrome_nom
         WHERE c.course_id = :cid
@@ -259,6 +259,8 @@ async def record_profil_runs(session: AsyncSession, course_id: str,
     course_info["nb_partants_courants"] = course[10] or None
     # Contexte handicap (mêmes sources que /mise-plan, cf. course_info_bets).
     course_info["categorie_particularite"] = course[11]
+    course_info["discipline"] = _discipline
+    course_info["terrain_officiel"] = course[12]
 
     # Contexte d'apprentissage réel (mêmes sources que /mise-plan)
     try:

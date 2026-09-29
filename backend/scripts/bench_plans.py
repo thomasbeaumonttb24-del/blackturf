@@ -546,7 +546,7 @@ async def _charger(debut, fin, limit):
             ci_r = (await s.execute(text("""
                 SELECT est_quinte, est_quarte, est_tierce, est_2sur4, nb_partants,
                        paris_disponibles, discipline, date_heure, hippodrome_nom,
-                       categorie_particularite
+                       categorie_particularite, terrain_officiel
                 FROM courses WHERE course_id = :c"""), {"c": cid})).fetchone()
             res = (await s.execute(text("""
                 SELECT classement, rapports, rapports_detail FROM resultats
@@ -560,6 +560,7 @@ async def _charger(debut, fin, limit):
             ci["nb_partants"] = ci_r[4] or len(vivants)
             ci["discipline"] = ci_r[6]
             ci["categorie_particularite"] = ci_r[9]
+            ci["terrain_officiel"] = ci_r[10]
             rang1 = max(vivants, key=lambda p: float(p["proba_top1"] or 0))["numero"]
             favori = min(vivants, key=lambda p: float(p["cote_pmu"]))["numero"]
             data.append({
@@ -599,6 +600,7 @@ async def _poids(session, cles):
 # Worker
 # ──────────────────────────────────────────────────────────────────────────────
 _G = {}
+_CARTE: dict = {}
 
 
 def _init(variant, heat, rc, ev, poids):
@@ -617,6 +619,9 @@ def _run_course(d):
         preds, desaccord = _G["transform"](d)
     for profil in PROFILS:
         rw = _G["poids"].get(f"{profil}|{d['discipline']}|{d['nb']}") or {}
+        if _CARTE:
+            from ml.contexte_paris import appliquer_facteurs, facteurs_contexte
+            rw = appliquer_facteurs(rw, facteurs_contexte(_CARTE, d["ci"]))
         try:
             plan = plan_to_dict(generer_plan(
                 MONTANT, profil, preds, d["ci"], None, rw, _G["heat"], None,
@@ -767,6 +772,9 @@ def main():
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--resume", nargs="*", default=None, help="résumer des CSV existants")
     ap.add_argument("--segments", action="store_true")
+    ap.add_argument("--carte-fin", default=None,
+                    help="applique la carte contexte (ml.contexte_paris) apprise sur les "
+                         "courses AVANT cette date — hors échantillon si ≤ --debut")
     a = ap.parse_args()
 
     if a.resume:
@@ -791,6 +799,16 @@ def main():
         await s.close()
         return heat, rc, ev, poids
     heat, rc, ev, poids = loop.run_until_complete(_prep())
+    if a.carte_fin:
+        async def _carte():
+            from db.database import AsyncSessionLocal
+            from ml.contexte_paris import apprendre_carte, charger_courses
+            f = _dt.datetime.fromisoformat(a.carte_fin).replace(tzinfo=_dt.timezone.utc)
+            async with AsyncSessionLocal() as s:
+                return apprendre_carte(await charger_courses(s, fin=f))
+        _CARTE.update(loop.run_until_complete(_carte()))   # hérité par fork
+        print(f"carte contexte apprise < {a.carte_fin} : {_CARTE['n_courses']} courses, "
+              f"{len(_CARTE['cases'])} cases", flush=True)
     print(f"heat={heat:.3f}  poids appris={len(poids)} contextes  variant={a.variant}", flush=True)
 
     import multiprocessing as mp

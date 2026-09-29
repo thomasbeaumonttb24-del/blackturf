@@ -70,13 +70,15 @@ async def rafraichir(session: Optional[AsyncSession] = None, force: bool = False
         from ml.harville_calibration import charger_exposants
         from ml.melange_arrivees import charger as charger_melange
         from ml.sharpness_calibration import charger_exposant
+        from ml.contexte_paris import charger as charger_contexte
     except Exception as e:                                       # noqa: BLE001
         log.warning("reglages_appris.import_impossible", err=str(e)[:140])
         return False
 
     async def _tout(s: AsyncSession) -> None:
         for nom, chargeur in (("alpha", charger_alpha), ("nettete", charger_exposant),
-                              ("harville", charger_exposants), ("melange", charger_melange)):
+                              ("harville", charger_exposants), ("melange", charger_melange),
+                              ("contexte_paris", charger_contexte)):
             try:
                 await chargeur(s)
             except Exception as e:                               # noqa: BLE001
