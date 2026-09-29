@@ -135,6 +135,10 @@ const COLONNES_ESSAIS: Colonne<AbonneLigne>[] = [
 const COLONNES_OFFERTS: Colonne<CompteOffert>[] = [
   { titre: "Compte", rendu: (o) => <CelluleCompte email={o.email} />, className: "max-w-[300px]" },
   { titre: "Accès", rendu: (o) => <BadgeFormule plan={o.plan} /> },
+  {
+    titre: "Jusqu'au",
+    rendu: (o) => <span className="whitespace-nowrap" title={o.motif ?? undefined}>{o.jusqu_au ? dateCourte(o.jusqu_au) : "sans fin"}</span>,
+  },
   { titre: "Inscrit le", rendu: (o) => <span className="whitespace-nowrap">{dateCourte(o.created_at)}</span> },
   {
     titre: "Dernière connexion",
@@ -419,7 +423,7 @@ export default function AbonnementsPage() {
               colonnes={COLONNES_OFFERTS}
               cle={(o) => o.user_id}
               label="Accès offerts"
-              vide="Aucun accès offert. Un plan payant accordé à la main depuis « Comptes » apparaît ici."
+              vide="Aucun accès offert. Offrez-en un depuis la fiche d'un compte (Comptes → le compte → Accès offert)."
             />
           )}
           {onglet === "journal" && (

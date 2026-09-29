@@ -107,6 +107,8 @@ export interface CompteOffert {
   user_id: string;
   email: string;
   plan: Formule;
+  jusqu_au?: string | null;
+  motif?: string | null;
   created_at: string;
   last_login: string | null;
 }
@@ -340,6 +342,7 @@ export interface UserDetail {
     bankroll_initiale: number | null; email_verified: boolean; auth_method: string;
     stripe_client: boolean; created_at: string; updated_at: string; last_login: string | null;
   };
+  acces_offert?: { plan: string; jusqu_au: string | null; motif: string | null; depuis: string; actif: boolean } | null;
   portefeuille: {
     capital_initial: number; solde_actuel: number; mise_totale: number; gain_net: number;
     roi: number | null; nb_paris: number; nb_gagnes: number; nb_perdus: number;

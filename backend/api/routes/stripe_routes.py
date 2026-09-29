@@ -155,9 +155,23 @@ async def _plan_effectif(user_id: str, db: AsyncSession,
     """
     subs = [s for s in await _subs_vivantes(user_id, db, sauf_stripe_id=sauf_stripe_id)
             if s.statut in STATUTS_ACCES]
-    if not subs:
+    plans = [s.plan for s in subs]
+    # Accès offert à la main (jeu concours…) : il compte comme un abonnement. Sans
+    # lui, le premier événement Stripe du compte effaçait le cadeau.
+    from services.acces_offert import plan_offert_actif
+    offert = await plan_offert_actif(db, user_id)
+    if offert:
+        plans.append(offert)
+    if not plans:
         return "free"
-    return max((s.plan for s in subs), key=lambda p: RANG_PLAN.get(p, 0))
+    return max(plans, key=lambda p: RANG_PLAN.get(p, 0))
+
+
+async def _avec_offert(user_id: str, plan: str, db: AsyncSession) -> str:
+    """`plan` d'un abonnement, relevé par un éventuel accès offert plus haut."""
+    from services.acces_offert import plan_offert_actif
+    offert = await plan_offert_actif(db, user_id)
+    return max([plan] + ([offert] if offert else []), key=lambda p: RANG_PLAN.get(p, 0))
 
 
 def _a_moyen_de_paiement(sub: dict) -> bool:
@@ -1189,7 +1203,7 @@ async def _handle_subscription_created(sub: dict, db: AsyncSession):
             user.essai_utilise_at = datetime.now(timezone.utc)
             log.info("stripe.essai_consomme", user_id=user.user_id, plan=plan)
         if not sans_carte:
-            user.plan = plan
+            user.plan = await _avec_offert(user.user_id, plan, db)
 
     if essai_refuse:
         await journaliser(db, "essai_refuse_carte_reutilisee", user, subscription,
@@ -1278,7 +1292,7 @@ async def _handle_subscription_updated(sub: dict, db: AsyncSession):
     user = await _find_user_by_customer(sub.get("customer"), db)
     if user:
         if subscription.statut in STATUTS_ACCES:
-            user.plan = plan
+            user.plan = await _avec_offert(user.user_id, plan, db)
             if subscription.essai_fin is not None and user.essai_utilise_at is None:
                 user.essai_utilise_at = datetime.now(timezone.utc)
         else:

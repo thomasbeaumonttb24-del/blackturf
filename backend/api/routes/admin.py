@@ -233,6 +233,15 @@ async def list_users(
     return result
 
 
+async def _acces_offert_public(db: AsyncSession, user_id: str) -> Optional[dict]:
+    from services.acces_offert import dernier_acces_offert
+    don = await dernier_acces_offert(db, user_id)
+    return None if don is None else {
+        "plan": don["plan"], "jusqu_au": don["jusqu_au"], "motif": don["motif"],
+        "depuis": don["depuis"], "actif": don["actif"],
+    }
+
+
 @router.get("/users/{user_id}")
 async def get_user_detail(
     user_id: str,
@@ -358,6 +367,7 @@ async def get_user_detail(
             "updated_at": user.updated_at,
             "last_login": user.last_login_at,
         },
+        "acces_offert": await _acces_offert_public(db, user.user_id),
         "portefeuille": {
             "capital_initial": round(cap0, 2),
             "solde_actuel": round(cap0 + net_tot, 2),
@@ -434,21 +444,57 @@ async def change_user_plan(
     db: AsyncSession = Depends(get_db),
     _=Depends(require_admin),
 ):
-    """Change le plan d'un utilisateur manuellement (gift / test)."""
+    """Ancienne route « changer le plan » : passe désormais par l'accès offert
+    (journalisé, respecté par les webhooks). `free` retire l'accès offert."""
+    from services import acces_offert as AO
     new_plan = body.get("plan")
-    if not new_plan or new_plan not in {"free", "standard", "expert", "starter"}:
+    if not new_plan or new_plan not in {"free", "standard", "expert"}:
         raise HTTPException(status_code=400, detail="Plan invalide. Valeurs: free/standard/expert")
-
-    result = await db.execute(select(User).where(User.user_id == user_id))
-    user = result.scalar_one_or_none()
+    user = (await db.execute(select(User).where(User.user_id == user_id))).scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=404, detail="Utilisateur introuvable")
-
     old_plan = user.plan
-    user.plan = new_plan
-    await db.commit()
-    log.info("admin.change_plan", user_id=user_id, old=old_plan, new=new_plan)
-    return {"ok": True, "user_id": user_id, "old_plan": old_plan, "new_plan": new_plan}
+    if new_plan == "free":
+        await AO.retirer(db, user, par="admin")
+    else:
+        await AO.offrir(db, user, new_plan, body.get("jours"), body.get("motif") or "", par="admin")
+    return {"ok": True, "user_id": user_id, "old_plan": old_plan, "new_plan": user.plan}
+
+
+@router.post("/users/{user_id}/acces-offert")
+async def offrir_acces(
+    user_id: str,
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """Offre Standard ou Expert, pour `jours` jours (absent = sans fin).
+    Respecté par tous les recalculs de plan ; journalisé comme preuve."""
+    from services import acces_offert as AO
+    user = (await db.execute(select(User).where(User.user_id == user_id))).scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="Utilisateur introuvable")
+    jours = body.get("jours")
+    if jours is not None and (not isinstance(jours, int) or not 1 <= jours <= 3650):
+        raise HTTPException(status_code=400, detail="Durée invalide (1 à 3650 jours, ou vide = sans fin)")
+    try:
+        res = await AO.offrir(db, user, body.get("plan"), jours, body.get("motif") or "", par=admin.email)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"ok": True, **res}
+
+
+@router.delete("/users/{user_id}/acces-offert")
+async def retirer_acces(
+    user_id: str,
+    db: AsyncSession = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    from services import acces_offert as AO
+    user = (await db.execute(select(User).where(User.user_id == user_id))).scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="Utilisateur introuvable")
+    return {"ok": True, "plan": await AO.retirer(db, user, par=admin.email)}
 
 
 @router.patch("/users/{user_id}")
@@ -465,7 +511,9 @@ async def update_user(
 
     # is_admin VOLONTAIREMENT EXCLU : pas d'escalade de privilège via l'API (un admin
     # ne peut pas se/ promouvoir admin). La promotion admin se fait en SQL contrôlé.
-    allowed = {"plan", "is_active", "profil_risque"}
+    # `plan` retiré : l'écrire à la main était effacé au premier événement Stripe.
+    # Offrir un accès passe par POST /users/{id}/acces-offert.
+    allowed = {"is_active", "profil_risque"}
     # Garde anti auto-verrouillage : un admin ne peut pas se désactiver lui-même.
     if user_id == admin.user_id and body.get("is_active") is False:
         raise HTTPException(status_code=400, detail="Auto-désactivation interdite")
@@ -473,6 +521,16 @@ async def update_user(
         if k in allowed:
             setattr(user, k, v)
     await db.commit()
+    if "plan" in body:
+        # Compatibilité : un plan posé ici devient un accès offert sans fin
+        # (« free » le retire) — respecté par les webhooks, journalisé.
+        from services import acces_offert as AO
+        if body["plan"] == "free":
+            await AO.retirer(db, user, par=admin.email)
+        elif body["plan"] in AO.PLANS_OFFRABLES:
+            await AO.offrir(db, user, body["plan"], None, "", par=admin.email)
+        else:
+            raise HTTPException(status_code=400, detail="Plan invalide. Valeurs: free/standard/expert")
     log.info("admin.update_user", admin_id=admin.user_id, user_id=user_id,
              changes={k: body[k] for k in body if k in allowed})
     return {"ok": True}
@@ -1655,6 +1713,14 @@ async def abonnements(
         return {"starter": "standard", "pro": "expert"}.get(plan or "", plan or "standard")
 
     ids_abonnes = {user.user_id for _, user in lignes}
+    from services.acces_offert import dernier_acces_offert
+    dons_actifs = {}
+    for (uid,) in (await db.execute(
+        select(SubscriptionEvent.user_id).where(SubscriptionEvent.type == "acces_offert").distinct()
+    )).all():
+        don = await dernier_acces_offert(db, uid) if uid else None
+        if don and don["actif"]:
+            dons_actifs[uid] = don
     par_formule = {f: {"payants": 0, "essais": 0, "offerts": 0} for f in ("standard", "expert")}
     repartition = {"comptes": 0, "payants": 0, "essais": 0, "offerts": 0, "gratuits": 0}
     offerts = []
@@ -1666,11 +1732,15 @@ async def abonnements(
             case_, formule = "payants", _formule(ids_payants[u.user_id])
         elif u.user_id in ids_essai:
             case_, formule = "essais", _formule(ids_essai[u.user_id])
-        elif u.plan in PRIX_MENSUEL_CENTS and u.user_id not in ids_abonnes:
-            case_, formule = "offerts", _formule(u.plan)
+        elif (u.user_id in dons_actifs
+              or (u.plan in PRIX_MENSUEL_CENTS and u.user_id not in ids_abonnes)):
+            don = dons_actifs.get(u.user_id)
+            case_, formule = "offerts", _formule(don["plan"] if don else u.plan)
             offerts.append({
                 "user_id": u.user_id, "email": u.email, "plan": formule,
                 "created_at": u.created_at, "last_login": u.last_login_at,
+                "jusqu_au": don["jusqu_au"] if don else None,
+                "motif": don["motif"] if don else None,
             })
         else:
             case_, formule = "gratuits", None

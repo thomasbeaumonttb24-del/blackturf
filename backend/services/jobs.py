@@ -356,6 +356,20 @@ async def job_relances_paiement() -> None:
         log.error("jobs.relances_paiement.error", error=str(e))
 
 
+async def job_expirer_acces_offerts() -> None:
+    """Toutes les heures — un accès offert arrivé à échéance rend au compte le
+    plan que ses abonnements justifient."""
+    try:
+        from db.database import AsyncSessionLocal
+        from services.acces_offert import expirer_acces_offerts
+        async with AsyncSessionLocal() as session:
+            n = await expirer_acces_offerts(session)
+        if n:
+            log.info("jobs.acces_offerts_expires", n=n)
+    except Exception as e:
+        log.error("jobs.expirer_acces_offerts.error", error=str(e))
+
+
 async def job_rappel_reconduction() -> None:
     """1x/jour — rappel légal avant reconduction d'un abonnement annuel (L215-1)."""
     try:
@@ -710,6 +724,14 @@ def start_scheduler() -> None:
         job_relances_paiement,
         CronTrigger(minute=35, hour="10-20", timezone="Europe/Paris"),
         id="relances_paiement",
+        replace_existing=True,
+        misfire_grace_time=1800,
+    )
+
+    scheduler.add_job(
+        job_expirer_acces_offerts,
+        CronTrigger(minute=12),
+        id="expirer_acces_offerts",
         replace_existing=True,
         misfire_grace_time=1800,
     )

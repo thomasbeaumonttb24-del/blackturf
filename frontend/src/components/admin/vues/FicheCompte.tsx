@@ -24,6 +24,7 @@ import {
   eur, num, pct, signedEur, signedPct, tone,
 } from "../ui";
 import { PROFIL_NET_LABELS, type UserDetail } from "../types";
+import AccesOffert from "./AccesOffert";
 
 function badgeResultat(r: string | null) {
   if (r === "gagne") return <Badge variant="success" className="text-[11px]">Gagné</Badge>;
@@ -52,7 +53,7 @@ const STATUTS_SUB: Record<string, string> = {
 };
 
 export default function FicheCompte({ userId, onClose }: { userId: string; onClose: () => void }) {
-  const { data, isLoading } = useSWR<UserDetail>(
+  const { data, isLoading, mutate } = useSWR<UserDetail>(
     ["/admin-user-detail", userId],
     () => adminApi.userDetail(userId).then((r) => r.data),
     // Fiche ouverte = paris et abonnement suivis en direct, comme le reste de la console.
@@ -136,6 +137,8 @@ export default function FicheCompte({ userId, onClose }: { userId: string; onClo
                   </Champ>
                 </dl>
               </section>
+
+              {!data.user.is_admin && <AccesOffert data={data} onChange={() => mutate()} />}
 
               {/* Parrainage : par qui ce compte est arrivé, et qui il a amené. */}
               {data.parrainage && (data.parrainage.parraine_par || data.parrainage.filleuls.length > 0 || data.parrainage.code) && (

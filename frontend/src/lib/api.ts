@@ -352,6 +352,11 @@ export const adminApi = {
     api.get("/users", { baseURL: `${API_URL}/admin/api`, params }),
   userDetail: (id: string) =>
     api.get(`/users/${id}`, { baseURL: `${API_URL}/admin/api` }),
+  // Accès offert (jeu concours…) : journalisé, respecté par Stripe, expire seul.
+  offrirAcces: (id: string, data: { plan: "standard" | "expert"; jours: number | null; motif?: string }) =>
+    api.post(`/users/${id}/acces-offert`, data, { baseURL: `${API_URL}/admin/api` }),
+  retirerAcces: (id: string) =>
+    api.delete(`/users/${id}/acces-offert`, { baseURL: `${API_URL}/admin/api` }),
   updateUser: (id: string, data: Record<string, unknown>) =>
     api.patch(`/users/${id}`, data, { baseURL: `${API_URL}/admin/api` }),
   adjustBankroll: (id: string, montant: number, note?: string) =>
