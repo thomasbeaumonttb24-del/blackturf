@@ -43,14 +43,22 @@ def _aware(d: Optional[datetime]) -> Optional[datetime]:
     return d.replace(tzinfo=timezone.utc) if d is not None and d.tzinfo is None else d
 
 
-def prochaine_relance(premier_refus: datetime, tentatives: int) -> Optional[datetime]:
+def prochaine_relance(premier_refus: datetime, tentatives: int,
+                      derniere_relance: Optional[datetime] = None) -> Optional[datetime]:
     """Date de la relance suivante, `None` quand il n'y en a plus.
 
     `tentatives` = prélèvements déjà tentés sur la facture (1 après le refus initial).
+    `derniere_relance` garde l'écart du calendrier (4 jours entre J+3 et J+7) quand
+    la tâche rattrape un retard : sans lui, un impayé vu pour la première fois
+    après J+7 était prélevé deux fois à une heure d'écart.
     """
     if tentatives < 1 or tentatives >= TENTATIVES_MAX:
         return None
-    return _aware(premier_refus) + timedelta(days=RELANCES_JOURS[tentatives - 1])
+    echeance = _aware(premier_refus) + timedelta(days=RELANCES_JOURS[tentatives - 1])
+    if derniere_relance is not None and tentatives >= 2:
+        ecart = RELANCES_JOURS[tentatives - 1] - RELANCES_JOURS[tentatives - 2]
+        echeance = max(echeance, _aware(derniere_relance) + timedelta(days=ecart))
+    return echeance
 
 
 async def premier_refus(db: AsyncSession, facture_id: str) -> Optional[datetime]:
@@ -77,6 +85,22 @@ def couper_collecte_stripe(facture_id: str) -> None:
         stripe.Invoice.modify(facture_id, auto_advance=False)
     except Exception as e:  # noqa: BLE001
         log.warning("relances.coupure_stripe_echouee", facture=facture_id, error=str(e)[:150])
+
+
+async def relances_faites(db: AsyncSession, facture_id: str) -> tuple[int, Optional[datetime]]:
+    """Relances déjà tentées par cette tâche sur la facture, et la date de la
+    dernière, lues au journal.
+
+    On ne peut PAS se fier à `attempt_count` de Stripe : un `Invoice.pay` lancé
+    par l'API ne l'incrémente pas (seules ses propres relances automatiques
+    comptent). Le 21-22/09, la relance « J+3 » est ainsi repartie toutes les
+    heures : 10 prélèvements refusés sur une même carte, jusqu'à ce que Stripe
+    annule lui-même le PaymentIntent.
+    """
+    dates = [_aware(e.created_at) for e in (await db.execute(
+        select(SubscriptionEvent).where(SubscriptionEvent.type == "relance_paiement")
+    )).scalars().all() if (e.detail or {}).get("facture") == facture_id]
+    return len(dates), max(dates, default=None)
 
 
 async def _facture_ouverte(db: AsyncSession, sub: Subscription) -> Optional[str]:
@@ -152,15 +176,26 @@ async def traiter_impayes(db: AsyncSession, maintenant: Optional[datetime] = Non
                Subscription.stripe_subscription_id.isnot(None))
     )).all()
 
-    for sub, user in impayes:
+    # Clés relevées d'avance : un `rollback` sur une erreur expire tous les objets de
+    # la session, et relire un attribut expiré hors `await` lève MissingGreenlet.
+    # C'est ce qui masquait la vraie erreur et arrêtait toute la boucle au premier
+    # impayé en échec (facture au PaymentIntent annulé, du 22/09 au 29/09).
+    cles = [(sub.sub_id, sub.stripe_subscription_id, user.user_id if user else None)
+            for sub, user in impayes]
+
+    for sub_id, stripe_sub_id, user_id in cles:
         try:
+            # `get` recharge sous `await` ce qu'un rollback précédent a expiré.
+            sub = await db.get(Subscription, sub_id)
+            user = await db.get(User, user_id) if user_id else None
             facture_id = await _facture_ouverte(db, sub)
             if not facture_id:
                 continue
             facture = stripe.Invoice.retrieve(facture_id)
             if facture.get("status") == "paid":
                 continue  # le webhook de paiement rend l'accès
-            tentatives = facture.get("attempt_count") or 1
+            n_relances, derniere = await relances_faites(db, facture_id)
+            tentatives = max(facture.get("attempt_count") or 1, 1 + n_relances)
 
             if facture.get("status") != "open" or tentatives >= TENTATIVES_MAX:
                 if await _clore(db, sub, user, facture, "relances_epuisees"):
@@ -172,32 +207,42 @@ async def traiter_impayes(db: AsyncSession, maintenant: Optional[datetime] = Non
 
             debut = await premier_refus(db, facture_id) or datetime.fromtimestamp(
                 facture.get("created") or maintenant.timestamp(), tz=timezone.utc)
-            echeance = prochaine_relance(debut, tentatives)
+            echeance = prochaine_relance(debut, tentatives, derniere)
             if echeance is None or maintenant < echeance:
                 bilan["attente"] += 1
                 continue
 
+            refus_stripe = None
             try:
                 stripe.Invoice.pay(facture_id)
             except stripe.error.CardError:
                 pass  # refus bancaire : le webhook `invoice.payment_failed` le journalise
+            except stripe.error.StripeError as e:
+                # Facture non prélevable (ex. PaymentIntent annulé par Stripe) : la
+                # tentative compte quand même, sinon elle repartirait à chaque heure.
+                refus_stripe = getattr(e, "code", None) or type(e).__name__
+                log.warning("relances.prelevement_impossible", sub=stripe_sub_id,
+                            facture=facture_id, error=str(e)[:150])
             bilan["relances"] += 1
 
             facture = stripe.Invoice.retrieve(facture_id)
+            detail = {"facture": facture_id, "numero": tentatives,
+                      "resultat": facture.get("status")}
+            if refus_stripe:
+                detail["erreur"] = refus_stripe
             await journaliser(db, "relance_paiement", user, sub, notifier=False,
-                              montant_cents=facture.get("amount_due"),
-                              detail={"facture": facture_id, "numero": tentatives,
-                                      "resultat": facture.get("status")})
+                              montant_cents=facture.get("amount_due"), detail=detail)
             await db.commit()
             if facture.get("status") == "paid":
                 bilan["payes"] += 1
-            elif (facture.get("attempt_count") or 0) >= TENTATIVES_MAX:
+            elif max(tentatives + 1, facture.get("attempt_count") or 0) >= TENTATIVES_MAX:
                 if await _clore(db, sub, user, facture, "derniere_relance_refusee"):
                     bilan["clos"] += 1
         except Exception as e:  # noqa: BLE001
             bilan["erreurs"] += 1
             await db.rollback()
-            log.error("relances.erreur", sub=sub.stripe_subscription_id, error=str(e)[:200])
+            log.error("relances.erreur", sub=stripe_sub_id,
+                      error=f"{type(e).__name__}: {str(e)[:200]}")
 
     log.info("relances.bilan", **bilan)
     return bilan

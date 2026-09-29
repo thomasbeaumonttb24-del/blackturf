@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 import stripe
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 import api.routes.stripe_routes as sr
 import services.relances_paiement as rp
@@ -22,10 +22,12 @@ MAINTENANT = datetime.now(timezone.utc)
 class FauxStripe:
     """Une facture ouverte et ce qu'on en fait."""
 
-    def __init__(self, tentatives: int, paiement_passe: bool = False):
+    def __init__(self, tentatives: int, paiement_passe: bool = False,
+                 erreur_pay: Exception | None = None):
         self.facture = {"id": "in_test", "status": "open", "attempt_count": tentatives,
                         "auto_advance": True, "amount_due": 1900, "created": 0}
         self.paiement_passe = paiement_passe
+        self.erreur_pay = erreur_pay
         self.appels: list[str] = []
 
     def installer(self, monkeypatch):
@@ -36,7 +38,10 @@ class FauxStripe:
 
         def pay(fid):
             f.appels.append("pay")
-            f.facture["attempt_count"] += 1
+            # Comme le vrai Stripe : un `pay` lancé par l'API n'incrémente PAS
+            # `attempt_count` (seules ses relances automatiques le font).
+            if f.erreur_pay is not None:
+                raise f.erreur_pay
             if f.paiement_passe:
                 f.facture["status"] = "paid"
                 return dict(f.facture)
@@ -73,15 +78,16 @@ def sans_email(monkeypatch):
     monkeypatch.setattr(alerts, "send_email", _rien)
 
 
-async def _impaye(db, premier_refus_il_y_a_j: float) -> tuple[User, Subscription]:
+async def _impaye(db, premier_refus_il_y_a_j: float,
+                  stripe_sub_id: str = "sub_impaye") -> tuple[User, Subscription]:
     u = User(user_id=str(uuid.uuid4()), email=f"{uuid.uuid4().hex[:6]}@x.fr", plan="free",
-             stripe_customer_id="cus_impaye")
-    s = Subscription(sub_id=str(uuid.uuid4()), user_id=u.user_id, stripe_subscription_id="sub_impaye",
+             stripe_customer_id=f"cus_{stripe_sub_id}")
+    s = Subscription(sub_id=str(uuid.uuid4()), user_id=u.user_id, stripe_subscription_id=stripe_sub_id,
                      plan="expert", periodicite="monthly", statut="past_due",
                      periode_debut=MAINTENANT, periode_fin=MAINTENANT + timedelta(days=30))
     db.add_all([u, s])
     db.add(SubscriptionEvent(event_id=str(uuid.uuid4()), user_id=u.user_id, email=u.email,
-                             type="paiement_echoue", stripe_subscription_id="sub_impaye",
+                             type="paiement_echoue", stripe_subscription_id=stripe_sub_id,
                              detail={"facture": "in_test", "tentative": 1},
                              created_at=MAINTENANT - timedelta(days=premier_refus_il_y_a_j)))
     await db.commit()
@@ -100,6 +106,8 @@ async def test_calendrier_deux_relances_puis_plus_rien():
     assert rp.prochaine_relance(t0, 1) == t0 + timedelta(days=3)
     assert rp.prochaine_relance(t0, 2) == t0 + timedelta(days=7)
     assert rp.prochaine_relance(t0, 3) is None
+    # Rattrapage : relance 1 faite en retard à J+8 → relance 2 pas avant J+12.
+    assert rp.prochaine_relance(t0, 2, t0 + timedelta(days=8)) == t0 + timedelta(days=12)
 
 
 async def test_rien_avant_j3(db, monkeypatch):
@@ -204,3 +212,89 @@ async def test_le_webhook_du_premier_refus_coupe_les_relances_stripe(db, monkeyp
         SubscriptionEvent.type == "paiement_echoue"))).scalar_one()
     relance = datetime.fromtimestamp(evt.detail["prochaine_relance"], tz=timezone.utc)
     assert abs((relance - avant_webhook) - timedelta(days=3)) < timedelta(minutes=5)
+
+
+async def _relance_journalisee(db, u: User, s: Subscription, il_y_a_h: float) -> None:
+    db.add(SubscriptionEvent(event_id=str(uuid.uuid4()), user_id=u.user_id, email=u.email,
+                             type="relance_paiement", stripe_subscription_id=s.stripe_subscription_id,
+                             detail={"facture": "in_test", "numero": 1, "resultat": "open"},
+                             created_at=MAINTENANT - timedelta(hours=il_y_a_h)))
+    await db.commit()
+
+
+async def test_relances_comptees_au_journal_pas_par_attempt_count(db, monkeypatch):
+    """Cas réel du 21-22/09 : Stripe laisse `attempt_count` à 1 après un `pay` manuel,
+    la relance J+3 repartait chaque heure (10 refus sur une carte). Deux relances
+    au journal suffisent à clore, sans nouveau prélèvement."""
+    stripe_ = FauxStripe(tentatives=1).installer(monkeypatch)
+    u, s = await _impaye(db, premier_refus_il_y_a_j=11)
+    await _relance_journalisee(db, u, s, il_y_a_h=26)
+    await _relance_journalisee(db, u, s, il_y_a_h=25)
+
+    bilan = await rp.traiter_impayes(db)
+
+    assert "pay" not in stripe_.appels
+    assert bilan["clos"] == 1
+    await db.refresh(s)
+    assert s.statut == "canceled"
+
+
+async def test_facture_non_prelevable_comptee_comme_tentative(db, monkeypatch):
+    """PaymentIntent annulé par Stripe (22/09 15:35) : `pay` lève une erreur non
+    bancaire. La tentative est journalisée, et ne repart pas à l'heure suivante."""
+    erreur = stripe.error.InvalidRequestError("PaymentIntent annulé.", None,
+                                              code="payment_intent_unexpected_state")
+    stripe_ = FauxStripe(tentatives=1, erreur_pay=erreur).installer(monkeypatch)
+    u, s = await _impaye(db, premier_refus_il_y_a_j=3.1)
+
+    bilan = await rp.traiter_impayes(db)
+    await rp.traiter_impayes(db)
+
+    assert bilan["erreurs"] == 0
+    assert stripe_.appels.count("pay") == 1
+    relance = (await db.execute(select(SubscriptionEvent).where(
+        SubscriptionEvent.type == "relance_paiement"))).scalar_one()
+    assert relance.detail["erreur"] == "payment_intent_unexpected_state"
+
+
+async def test_une_erreur_n_arrete_pas_la_boucle(db, monkeypatch):
+    """Du 22/09 au 29/09 : l'erreur d'un impayé faisait `rollback`, le `log` relisait
+    `sub.stripe_subscription_id` expiré → MissingGreenlet sorti de la boucle, et les
+    autres impayés n'étaient plus jamais traités."""
+    stripe_ = FauxStripe(tentatives=1).installer(monkeypatch)
+    u1, s1 = await _impaye(db, premier_refus_il_y_a_j=3.1, stripe_sub_id="sub_casse")
+    u2, s2 = await _impaye(db, premier_refus_il_y_a_j=3.1, stripe_sub_id="sub_sain")
+    await db.execute(update(SubscriptionEvent)
+                     .where(SubscriptionEvent.stripe_subscription_id == "sub_casse")
+                     .values(detail={"facture": "in_casse", "tentative": 1}))
+    await db.commit()
+
+    retrieve_sain = stripe.Invoice.retrieve
+
+    def retrieve(fid):
+        if fid == "in_casse":
+            raise RuntimeError("panne réseau")
+        return retrieve_sain(fid)
+
+    monkeypatch.setattr(stripe.Invoice, "retrieve", retrieve)
+
+    bilan = await rp.traiter_impayes(db)
+
+    assert bilan["erreurs"] == 1
+    assert bilan["relances"] == 1 and stripe_.appels.count("pay") == 1
+    assert (await _journal(db, u2))[-1] == "relance_paiement"
+
+
+async def test_impaye_decouvert_apres_j7_pas_deux_prelevements_dans_l_heure(db, monkeypatch):
+    """Cas de sub_1UIPDFF… (1er refus le 22/09, jamais relancé avant le 29/09) :
+    la relance 1 part, la relance 2 attend quatre jours au lieu d'une heure."""
+    stripe_ = FauxStripe(tentatives=1).installer(monkeypatch)
+    u, s = await _impaye(db, premier_refus_il_y_a_j=7.3)
+
+    await rp.traiter_impayes(db)
+    bilan = await rp.traiter_impayes(db, maintenant=MAINTENANT + timedelta(hours=1))
+
+    assert stripe_.appels.count("pay") == 1
+    assert bilan["attente"] == 1
+    await db.refresh(s)
+    assert s.statut == "past_due"
