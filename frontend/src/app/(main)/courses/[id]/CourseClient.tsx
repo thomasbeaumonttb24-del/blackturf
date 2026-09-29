@@ -2422,22 +2422,40 @@ export default function CoursePage({
   // le classement complet n'a aucune raison de déclencher cet appel.
   const { data: apercu } = useApercuAnalyse(predictions && predictions.length ? null : id);
 
+  // Le prono est recalculé jusqu'au gel (cycle ~20 min + dernier recalcul à T-11).
+  // Un chargement unique laissait l'onglet Partants sur un calcul périmé pendant
+  // que Plan de mise, interrogé au clic, servait le plan figé du calcul suivant :
+  // 29092026R5C5, n°10 affiché « 17,0 au prono · 7 % » contre « joué à 5,1 · 18 % »
+  // (constaté 2026-09-29). On recharge donc chaque minute tant que la course est à
+  // venir — en silence, et SANS remplacer l'état si le calcul n'a pas changé :
+  // un nouveau tableau `predictions` relance l'effet /analyse (quota 500/j).
+  const calculeARef = useRef<string | null>(null);
   useEffect(() => {
     if (!user || ["free", "decouverte"].includes(user.plan)) return;
-    setLoadingPred(true);
-    predictionsApi.get(id, 100)
-      .then((res) => {
-        setPredictions(res.data.predictions);
-        setPredMeta({
-          calcule_a: res.data.calcule_a ?? null,
-          cotes_figees: Boolean(res.data.cotes_figees),
-          confiance: res.data.confiance ?? null,
-          confiance_contexte: res.data.confiance_contexte ?? null,
-        });
-      })
-      .catch(() => setPredictions(null))
-      .finally(() => setLoadingPred(false));
-  }, [id, user]);
+    let cancelled = false;
+    const load = (silencieux: boolean) => {
+      if (!silencieux) setLoadingPred(true);
+      return predictionsApi.get(id, 100)
+        .then((res) => {
+          if (cancelled) return;
+          const calculeA = res.data.calcule_a ?? null;
+          if (silencieux && calculeA === calculeARef.current) return;
+          calculeARef.current = calculeA;
+          setPredictions(res.data.predictions);
+          setPredMeta({
+            calcule_a: calculeA,
+            cotes_figees: Boolean(res.data.cotes_figees),
+            confiance: res.data.confiance ?? null,
+            confiance_contexte: res.data.confiance_contexte ?? null,
+          });
+        })
+        .catch(() => { if (!cancelled && !silencieux) setPredictions(null); })
+        .finally(() => { if (!cancelled && !silencieux) setLoadingPred(false); });
+    };
+    load(false);
+    const iv = course?.statut === "a_venir" ? setInterval(() => load(true), 60000) : null;
+    return () => { cancelled = true; if (iv) clearInterval(iv); };
+  }, [id, user, course?.statut]);
 
   // Load narrative analysis (Standard+) — aussi post-course (facteurs par cheval
   // = transparence "le modèle analyse bien plus que la cote").
@@ -2484,6 +2502,7 @@ export default function CoursePage({
         setLoadingPred(true);
         predictionsApi.get(id, 100)
           .then((res) => {
+            calculeARef.current = res.data.calcule_a ?? null;
             setPredictions(res.data.predictions);
             setPredMeta({
               calcule_a: res.data.calcule_a ?? null,
