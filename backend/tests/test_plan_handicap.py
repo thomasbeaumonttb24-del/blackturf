@@ -51,7 +51,8 @@ def test_config_handicap_retire_les_combinaisons_larges():
 
 def test_config_hors_handicap_inchangee():
     base = mc._effective_config("agressif", 0.0)
-    assert mc._adapter_contexte(base, _info("COURSE_A_CONDITIONS")) is base
+    info = dict(_info("COURSE_A_CONDITIONS"), nb_partants=12)
+    assert mc._adapter_contexte(base, info) is base
 
 
 @pytest.mark.parametrize("profil", ["conservateur", "equilibre", "agressif"])
@@ -78,3 +79,20 @@ def test_risque_handicap_gagnant_sec_seulement():
 def test_modere_handicap_garde_les_couples():
     cfg = mc._adapter_contexte(mc._effective_config("equilibre", 0.0), _info("HANDICAP"))
     assert "Couplé Placé" in cfg["types"] and "Couplé Gagnant" in cfg["types"]
+
+
+def _info_champ(n):
+    return {"nb_partants": n, "est_quinte": False, "est_quarte": True, "est_tierce": True,
+            "est_2sur4": True, "est_trio": True, "paris_disponibles": None,
+            "categorie_particularite": "COURSE_A_CONDITIONS"}
+
+
+def test_trio_gros_lot_coupe_a_15_partants():
+    cfg = mc._adapter_contexte(mc._effective_config("agressif", 0.0), _info_champ(16))
+    assert "Trio" not in cfg["types"] and not cfg["loterie"]
+
+
+def test_trio_gros_lot_garde_sous_15_partants():
+    for n in (8, 12, 14):
+        cfg = mc._adapter_contexte(mc._effective_config("agressif", 0.0), _info_champ(n))
+        assert "Trio" in cfg["types"] and "Trio" in cfg["loterie"]

@@ -591,6 +591,16 @@ PROFIL_CONFIG = {
         "types": {"Couplé Gagnant", "Couplé Ordre", "2sur4", "Simple Gagnant",
                   "Trio", "Tiercé Désordre", "Quarté+ Désordre", "Quinté+ Désordre"},
         "loterie": {"Trio"},
+        # Ticket « gros lot » coupé à 15 partants et plus (2026-09-29). Le trio y gagne
+        # 2,3 % du temps pour un rapport moyen de 15,6 € (retour 0,37 € par euro), contre
+        # 4,3 % × 16,4 € à 12-14 partants (0,70 €) : au-delà, la chance baisse et le
+        # rapport ne monte plus. Rejeu bench_plans 5 560 courses, profil risqué, ROI BRUT
+        # (gros gains inclus — c'est eux que ce ticket achète) :
+        #     trio partout           +7,3 %   (≤10/08 +19,3 · >10/08 −9,3)
+        #     trio sauf 15+          +8,8 %   (≤10/08 +21,1 · >10/08 −8,1)  ← retenu
+        #     trio 12-14 seulement   +6,9 % · trio ≤11 +4,0 % · ≤8 +1,6 % · sans trio +2,0 %
+        # Gains ≥ 150 € : 117 → 116 (le potentiel de gros gain est conservé).
+        "loterie_champ_max": 14,
         # HANDICAP (2026-09-29) : en plus des combinaisons larges retirées à tous les
         # profils (HANDICAP_TYPES_EXCLUS), le risqué n'y joue plus de couplés — il ne
         # garde que le gagnant sec (rang ≤ 3, rapport ≥ ×10). Rejeu bench_plans,
@@ -829,6 +839,20 @@ def est_handicap(course_info: Optional[dict]) -> bool:
 def _adapter_contexte(cfg: dict, course_info: Optional[dict]) -> dict:
     """Retire du profil les types de pari que le contexte de course rend perdants
     (mesuré, cf. HANDICAP_TYPES_EXCLUS). Ne touche ni aux tranches ni aux mises."""
+    # Ticket « gros lot » réservé aux petits champs (cf. `loterie_champ_max`).
+    _cmax = cfg.get("loterie_champ_max")
+    _cmin = cfg.get("loterie_champ_min")
+    if (_cmax or _cmin) and cfg.get("loterie"):
+        try:
+            _n = int((course_info or {}).get("nb_partants_courants")
+                     or (course_info or {}).get("nb_partants") or 0)
+        except (TypeError, ValueError):
+            _n = 0
+        if (_cmax and _n > _cmax) or (_cmin and _n and _n < _cmin):
+            cfg = dict(cfg)
+            if cfg.get("types") is not None:
+                cfg["types"] = frozenset(cfg["types"]) - cfg["loterie"]
+            cfg["loterie"] = frozenset()
     if not HANDICAP_TYPES_EXCLUS or not est_handicap(course_info):
         return cfg
     cfg = dict(cfg)
@@ -906,6 +930,9 @@ def _effective_config(profil: str, heat: float) -> dict:
         # Types « gros lot » (cf. LOTERIE_MAX_TICKETS) : exemptés du gate dur de
         # l'apprentissage, plafonnés en nombre. Contrat produit → non modulé.
         "loterie": frozenset(base.get("loterie") or ()),
+        # Taille de champ max pour jouer le ticket « gros lot » (None = partout).
+        "loterie_champ_max": base.get("loterie_champ_max"),
+        "loterie_champ_min": base.get("loterie_champ_min"),
         # Types retirés EN PLUS en course à handicap (cf. _adapter_contexte).
         "handicap_exclus": frozenset(base.get("handicap_exclus") or ()),
     }

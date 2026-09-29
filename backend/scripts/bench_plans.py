@@ -461,7 +461,32 @@ def _v_x9_sans_handicap():
     _v_x9()
 
 
+def _v_trio_c8():
+    from services import mise_calculator as mc
+    mc.PROFIL_CONFIG["agressif"]["loterie_champ_max"] = 8
+
+
+def _v_trio_c11():
+    from services import mise_calculator as mc
+    mc.PROFIL_CONFIG["agressif"]["loterie_champ_max"] = 11
+
+
+def _v_trio_12_14():
+    from services import mise_calculator as mc
+    mc.PROFIL_CONFIG["agressif"]["loterie_champ_min"] = 12
+    mc.PROFIL_CONFIG["agressif"]["loterie_champ_max"] = 14
+
+
+def _v_trio_sauf15():
+    from services import mise_calculator as mc
+    mc.PROFIL_CONFIG["agressif"]["loterie_champ_max"] = 14
+
+
 VARIANTS = {
+    "trio_12_14": _v_trio_12_14,
+    "trio_sauf15": _v_trio_sauf15,
+    "trio_c8": _v_trio_c8,
+    "trio_c11": _v_trio_c11,
     "sans_handicap": _v_sans_handicap,
     "handicap_simples": _v_handicap_simples,
     "handicap_large": _v_handicap_large,
