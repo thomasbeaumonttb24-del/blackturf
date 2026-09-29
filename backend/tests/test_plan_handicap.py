@@ -68,12 +68,11 @@ def test_motif_handicap_explique():
     assert "handicap" in motif.lower()
 
 
-def test_risque_handicap_gagnant_sec_seulement():
+def test_risque_handicap_garde_couples_et_gagnant():
     cfg = mc._adapter_contexte(mc._effective_config("agressif", 0.0), _info("HANDICAP"))
-    assert not ({"Couplé Gagnant", "Couplé Ordre", "Couplé Placé"} & cfg["types"])
-    assert "Simple Gagnant" in cfg["types"]
+    assert {"Couplé Gagnant", "Simple Gagnant"} <= cfg["types"]
     plan = mc.generer_plan(10, "agressif", _field(), _info("HANDICAP"), respect_montant=True)
-    assert _types(plan) <= {"Simple Gagnant"}
+    assert not ({mc._fam(t) for t in _types(plan)} & mc.HANDICAP_TYPES_EXCLUS)
 
 
 def test_modere_handicap_garde_les_couples():

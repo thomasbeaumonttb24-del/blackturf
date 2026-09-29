@@ -601,17 +601,16 @@ PROFIL_CONFIG = {
         #     trio 12-14 seulement   +6,9 % · trio ≤11 +4,0 % · ≤8 +1,6 % · sans trio +2,0 %
         # Gains ≥ 150 € : 117 → 116 (le potentiel de gros gain est conservé).
         "loterie_champ_max": 14,
-        # HANDICAP (2026-09-29) : en plus des combinaisons larges retirées à tous les
-        # profils (HANDICAP_TYPES_EXCLUS), le risqué n'y joue plus de couplés — il ne
-        # garde que le gagnant sec (rang ≤ 3, rapport ≥ ×10). Rejeu bench_plans,
-        # 1 099 handicaps (11/06 → 29/09), 10 €, heat 0,2, ROI brut du profil :
-        #     avant                     −13,3 % (≤ 10/08)   −20,4 % (> 10/08)
-        #     sans Trio/2sur4/Multi      −0,4 %              −8,8 %
-        #     + sans couplés             +4,2 %              +2,2 %   ← retenu
-        # Positif sur les deux périodes, winsorisé identique (aucun gain > ×30 ne le
-        # porte). Contrepartie assumée : plan à un seul ticket en handicap. Mesuré et
-        # NON retenu sur prudent/modéré (−1,6/−0,6 et +4,1/−2,7 : bruit).
-        "handicap_exclus": {"Couplé Gagnant", "Couplé Ordre", "Couplé Placé"},
+        # HANDICAP : types retirés EN PLUS de HANDICAP_TYPES_EXCLUS. Rejeu bench_plans,
+        # 1 099 handicaps (11/06 → 29/09), 10 €, profil risqué, ROI brut ≤10/08 · >10/08,
+        # gains ≥ 150 € / ≥ 300 € / plus gros gain :
+        #     avant le 29/09             −13,3 · −20,4    26 / 4 / 773 €
+        #     sans Trio/2sur4/Multi       −0,4 ·  −8,8    30 / 6 / 773 €   ← retenu
+        #     + sans couplés (29/09)      +4,2 ·  +2,2    13 / 0 / 299 €
+        # Le gagnant sec seul rapportait plus mais supprimait tout gain > 300 € en
+        # handicap : ce sont les couplés d'outsiders qui les produisent. Arbitrage de
+        # l'exploitant du 29/09 : les gros gains font partie du contrat du profil.
+        "handicap_exclus": set(),
         "objectif": "gain",
         # Ancrage STRICT : posé le 2026-09-01, RETIRÉ le 2026-09-02 après mesure.
         #
