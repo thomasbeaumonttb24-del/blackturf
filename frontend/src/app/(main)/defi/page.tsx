@@ -74,7 +74,7 @@ function LotUnique({ lot, lancement, mois }: { lot: DefiRegles["recompenses"][nu
             <Crown className="h-6 w-6" aria-hidden="true" />
           </span>
           <div className="min-w-0 flex-1">
-            <div className="text-[10.5px] font-bold uppercase tracking-[0.14em] text-amber-700">Le lot du mois · 1<sup>er</sup> du classement</div>
+            <div className="text-[10.5px] font-bold uppercase tracking-[0.14em] text-amber-700">Le lot du mois</div>
             <div className="mt-0.5 font-display text-[20px] font-bold leading-tight text-slate-900 sm:text-[22px]">
               {lot.jours} jours {planLabel(lot.plan)} offerts
             </div>
@@ -102,13 +102,12 @@ function Hero({ mois, enCours, setMois, regles, classement }: {
   return (
     <header className={cn(DEFI_FOND, "relative isolate overflow-hidden rounded-[28px] px-5 pb-6 pt-6 ring-1 ring-amber-900/10 shadow-[inset_0_1px_0_#fff,0_30px_60px_-44px_rgba(120,53,15,.7)] sm:px-8 sm:pb-8 sm:pt-8")}>
       <DecorRayons className="-z-10" />
-      <TropheeSvg className="pointer-events-none absolute -right-6 top-4 -z-10 w-44 opacity-95 sm:right-6 sm:top-6 sm:w-56" />
 
       <div className="flex flex-wrap items-center justify-between gap-3">
         <span className="inline-flex items-center gap-1.5 rounded-full bg-white/80 px-2.5 py-1 text-[10.5px] font-bold uppercase tracking-[0.14em] text-amber-800 shadow-sm ring-1 ring-inset ring-amber-200">
           <Sparkles className="h-3 w-3" aria-hidden="true" /> Concours gratuit · sans argent réel
         </span>
-        <div className="flex items-center gap-1 rounded-2xl bg-white/85 p-1 shadow-sm ring-1 ring-inset ring-amber-200 backdrop-blur">
+        <div className="flex w-full items-center justify-between gap-1 rounded-2xl bg-white/85 p-1 shadow-sm ring-1 ring-inset ring-amber-200 backdrop-blur min-[420px]:w-auto">
           <button type="button" aria-label="Mois précédent" disabled={mois <= PREMIER_MOIS_DEFI} onClick={() => setMois(decalerMois(mois, -1))}
             className="inline-flex h-9 w-9 items-center justify-center rounded-xl text-slate-500 hover:bg-amber-50 hover:text-slate-900 disabled:opacity-25">
             <ChevronLeft className="h-4 w-4" />
@@ -121,11 +120,14 @@ function Hero({ mois, enCours, setMois, regles, classement }: {
         </div>
       </div>
 
-      <div className="mt-5 max-w-[26rem] sm:max-w-md">
-        <h1 className="font-display text-[32px] font-bold leading-[1.05] tracking-tight text-slate-900 sm:text-[42px]">
+      {/* Titre et trophée côte à côte, chacun dans sa colonne : le trophée ne passe
+          plus sous le sélecteur de mois ni sous le texte, à aucune largeur. */}
+      <div className="mt-6 grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-3 sm:mt-4 sm:gap-x-8">
+        <h1 className="min-w-0 font-display text-[34px] font-bold leading-[1.05] tracking-tight text-slate-900 sm:self-end sm:text-[42px]">
           Défi du <span className="bg-gradient-to-b from-amber-500 to-amber-800 bg-clip-text text-transparent">mois</span>
         </h1>
-        <p className="mt-2.5 text-[14px] leading-relaxed text-slate-700">
+        <TropheeSvg className="pointer-events-none w-24 opacity-95 sm:row-span-2 sm:mr-2 sm:w-44" />
+        <p className="col-span-2 max-w-md text-[14px] leading-relaxed text-slate-700 sm:col-span-1 sm:self-start">
           {formatNombre(regles.capital_mensuel, 2)} points offerts chaque mois, vos pronostics sur les vraies courses,
           réglés au rapport PMU officiel. Le meilleur solde du mois gagne {regles.recompenses[0]?.jours ?? 30} jours {planLabel(regles.recompenses[0]?.plan ?? "expert")}.
         </p>
