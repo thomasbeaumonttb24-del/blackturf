@@ -122,10 +122,6 @@ class ConnectionManager:
         for ws in dead:
             self.disconnect(user_id, ws)
 
-    async def broadcast(self, payload: dict):
-        """Envoie à tous les utilisateurs connectés."""
-        for user_id in list(self._connections.keys()):
-            await self.send(user_id, payload)
 
 
 manager = ConnectionManager()
@@ -367,6 +363,24 @@ async def ws_value_bets(websocket: WebSocket, token: str = Query(default="")):
 # ─────────────────────────────────────────────
 # Alertes in-app user
 # ─────────────────────────────────────────────
+# `alertes:broadcast` atteint TOUS les comptes connectés, Free compris, sans
+# délai : il ne relaie que des trames sans contenu réservé à un plan (la bulle
+# de la Communauté). Un pari de valeur n'y a pas sa place — il suit la règle de
+# `services.valuebets_visibilite` (Free jamais, Standard à +15 min) et passe par
+# `alertes:{user_id}`, publié par un code qui connaît le plan du destinataire.
+CANAL_BROADCAST = "alertes:broadcast"
+TYPES_BROADCAST_AUTORISES = frozenset({"chat_message"})
+
+
+def _trame_diffusable(canal, data) -> bool:
+    """False pour une trame du canal commun dont le type n'est pas sur la liste blanche."""
+    if isinstance(canal, bytes):
+        canal = canal.decode(errors="replace")
+    if canal != CANAL_BROADCAST:
+        return True
+    return isinstance(data, dict) and data.get("type") in TYPES_BROADCAST_AUTORISES
+
+
 @router.websocket("/user/alertes")
 async def ws_user_alertes(websocket: WebSocket, token: str = Query(default="")):
     """Canal d'alertes in-app personnalisées avec ping/pong heartbeat."""
@@ -383,13 +397,15 @@ async def ws_user_alertes(websocket: WebSocket, token: str = Query(default="")):
     ping_task: asyncio.Task | None = None
 
     try:
-        await pubsub.subscribe(f"alertes:{user_id}", "alertes:broadcast")
+        await pubsub.subscribe(f"alertes:{user_id}", CANAL_BROADCAST)
 
         async def listen():
             async for msg in pubsub.listen():
                 if msg["type"] == "message":
                     try:
                         data = json.loads(msg["data"])
+                        if not _trame_diffusable(msg.get("channel"), data):
+                            continue
                         await websocket.send_json(data)
                     except Exception:
                         pass
@@ -470,13 +486,6 @@ async def push_alert_to_user(user_id: str, payload: dict):
         log.error("ws.push_alert.failed", user_id=user_id, error=str(e))
 
 
-async def broadcast_alert(payload: dict):
-    """Broadcast à tous les utilisateurs connectés."""
-    try:
-        redis = await get_redis()
-        await redis.publish("alertes:broadcast", json.dumps(payload))
-    except Exception as e:
-        log.error("ws.broadcast.failed", error=str(e))
 
 
 # ─────────────────────────────────────────────

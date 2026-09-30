@@ -95,3 +95,29 @@ async def test_endpoint_setup_explique_le_secret_manquant(
 async def test_endpoint_setup_reste_reserve_aux_admins(client: AsyncClient, auth_headers, avec_secret):
     resp = await client.post("/api/v1/telegram/setup-webhook", headers=auth_headers)
     assert resp.status_code == 403
+
+
+@pytest.mark.parametrize("commande", ["/vb", "/alerte 2", "/alerte"])
+async def test_aucun_pari_de_valeur_ni_abonnement_sur_telegram(monkeypatch, commande):
+    """Un chat Telegram n'est lié à aucun compte : le bot ne peut pas appliquer la
+    règle de visibilité par plan. `/vb` et `/alerte` renvoient vers le site et
+    n'écrivent plus d'abonnement (plus aucun envoi `broadcast_vb_alert`)."""
+    envoyes = []
+
+    async def _send(chat_id, text, parse_mode="HTML"):
+        envoyes.append(text)
+        return True
+
+    redis = AsyncMock()
+
+    async def _get_redis():
+        return redis
+
+    import db.redis_client
+    monkeypatch.setattr(telegram_bot, "_send", _send)
+    monkeypatch.setattr(db.redis_client, "get_redis", _get_redis)
+    await telegram_bot.handle_update(
+        {"message": {"chat": {"id": 7}, "text": commande, "from": {"first_name": "T"}}})
+    assert envoyes == [telegram_bot.MSG_VALUE_BETS_SUR_LE_SITE]
+    redis.hset.assert_not_called()
+    assert not hasattr(telegram_bot, "broadcast_vb_alert")

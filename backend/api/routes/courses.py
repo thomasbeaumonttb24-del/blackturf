@@ -1947,14 +1947,24 @@ async def get_mise_plan(
             status_code=409,
             detail="Pronostic pas encore disponible pour cette course — réessayez une fois l'analyse IA publiée.")
 
-    # Value bets
-    vb_q = (
-        _s(ValueBet)
-        .join(Participation, Participation.participation_id == ValueBet.participation_id)
-        .where(Participation.course_id == course_id)
-        .where(ValueBet.actif.is_(True))
-    )
-    vbs = {v.participation_id: v for v in (await db.execute(vb_q)).scalars()}
+    # Value bets — même règle de visibilité que la fiche et /value-bets
+    # (`services.valuebets_visibilite`) : Free n'en voit aucun, Standard avec 15 min
+    # de retard, Expert en direct. Sans ce filtre, le plan de mise servait à un
+    # Standard, sans délai, les ★ que la page dédiée lui retarde. Les paris de
+    # valeur ne font qu'annoter le plan (aucun effet sur la sélection).
+    from services.valuebets_visibilite import (
+        PLANS_AVEC_VALUE_BETS, visible as _vb_visible, course_etrangere as _course_etrangere)
+    vbs: dict = {}
+    if user.plan in PLANS_AVEC_VALUE_BETS:
+        _etranger = await _course_etrangere(db, course.hippodrome_nom)
+        vb_q = (
+            _s(ValueBet)
+            .join(Participation, Participation.participation_id == ValueBet.participation_id)
+            .where(Participation.course_id == course_id)
+            .where(ValueBet.actif.is_(True))
+        )
+        vbs = {v.participation_id: v for v in (await db.execute(vb_q)).scalars()
+               if _vb_visible(v, user.plan, etranger=_etranger)}
 
     # COTES : AVANT le gel (T-10), l'estimatif suit le marché LIVE (même cote que le
     # tableau et le widget « Marché EN DIRECT »). APRÈS le gel, on utilise la cote FIGÉE
