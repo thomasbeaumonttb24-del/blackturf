@@ -175,6 +175,7 @@ async def list_users(
             "email": u.email,
             "nom": u.nom,
             "prenom": u.prenom,
+            "pseudo": u.pseudo,
             "plan": u.plan,
             "profil_risque": u.profil_risque,
             "is_active": u.is_active,

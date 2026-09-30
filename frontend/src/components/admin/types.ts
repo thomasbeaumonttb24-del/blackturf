@@ -317,6 +317,7 @@ export interface CompteLigne {
   email: string;
   nom: string | null;
   prenom: string | null;
+  pseudo?: string | null;
   plan: string;
   profil_risque: string;
   is_active: boolean;

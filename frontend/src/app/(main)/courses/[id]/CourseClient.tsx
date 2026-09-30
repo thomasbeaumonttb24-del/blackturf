@@ -2680,7 +2680,7 @@ export default function CoursePage({
     partants: "La fiche détaillée de chaque cheval",
     marche: "Cotes en direct et argent engagé",
     plan: "Vos paris selon votre budget",
-    defi: "Misez vos points, visez un abonnement offert",
+    defi: "Misez vos points, visez 30 jours Expert",
     resultats: "Arrivée officielle et rapports",
   };
   /** Change d'onglet — depuis la barre, un raccourci ou un lien interne. Avec un

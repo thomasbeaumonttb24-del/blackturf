@@ -264,7 +264,7 @@ export default function ComptesPage() {
         ) : (
           <CartesOuTableau
             cartes={liste.map((u) => {
-              const nom = [u.prenom, u.nom].filter(Boolean).join(" ") || "Sans nom";
+              const nom = [u.prenom, u.nom].filter(Boolean).join(" ") || u.pseudo || "Sans nom";
               return (
                 <Carte key={u.user_id} ton={!u.is_active ? "attention" : "neutre"}>
                   <button
@@ -363,7 +363,7 @@ export default function ComptesPage() {
                   </thead>
                   <tbody>
                     {liste.map((u) => {
-                      const nom = [u.prenom, u.nom].filter(Boolean).join(" ") || "Sans nom";
+                      const nom = [u.prenom, u.nom].filter(Boolean).join(" ") || u.pseudo || "Sans nom";
                       return (
                         <tr
                           key={u.user_id}

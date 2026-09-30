@@ -98,7 +98,7 @@ Le joueur apparaîtra en « Joueur XXXX » au classement et devra en choisir un 
     };
   }, [onClose]);
 
-  const nom = data ? [data.user.prenom, data.user.nom].filter(Boolean).join(" ") || "Sans nom" : "";
+  const nom = data ? [data.user.prenom, data.user.nom].filter(Boolean).join(" ") || data.user.pseudo || "Sans nom" : "";
 
   return (
     <div
@@ -229,7 +229,7 @@ Le joueur apparaîtra en « Joueur XXXX » au classement et devra en choisir un 
                   <Tuile
                     label="Solde"
                     valeur={pts(data.defi.solde)}
-                    sub={data.defi.rang != null ? `${data.defi.rang}e du classement` : "non classé"}
+                    sub={data.defi.rang != null ? `${data.defi.rang}${data.defi.rang === 1 ? "er" : "e"} du classement` : "non classé"}
                   />
                   <Tuile
                     label="Points nets"
