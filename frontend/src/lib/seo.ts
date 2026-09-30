@@ -776,20 +776,24 @@ export async function fetchTrackRecord(): Promise<SeoTrackRecord | null> {
 
 /**
  * Palmarès public (paris gagnés, total encaissé) — pré-remplit le hero de
- * /track-record. Caché côté API (Redis) ; plafonné à 3 s pour qu'une API lente ne
+ * /track-record. Caché côté API (Redis) ; plafonné à 10 s (la régénération ISR tourne en arrière-plan, le visiteur ne l'attend pas) pour qu'une API lente ne
  * retienne pas la page : sans lui, le client le recharge comme avant.
  */
 export async function fetchPalmaresPublic(): Promise<Record<string, unknown> | null> {
-  try {
-    const res = await fetch(`${API}/stats/palmares-public`, {
-      next: { revalidate: 60 },
-      signal: AbortSignal.timeout(3000),
-    });
-    if (!res.ok) return null;
-    return (await res.json()) as Record<string, unknown>;
-  } catch {
-    return null;
-  }
+  // Plafond par course et non par `signal: AbortSignal.timeout()` : avec un signal,
+  // le fetch de Next ne passe pas par son cache de données et, en régénération ISR
+  // en prod, revenait `null` à chaque fois (hero servi en chargement).
+  const lecture = (async () => {
+    try {
+      const res = await fetch(`${API}/stats/palmares-public`, { next: { revalidate: 60 } });
+      if (!res.ok) return null;
+      return (await res.json()) as Record<string, unknown>;
+    } catch {
+      return null;
+    }
+  })();
+  const plafond = new Promise<null>((resolve) => setTimeout(() => resolve(null), 10_000));
+  return Promise.race([lecture, plafond]);
 }
 
 /**
