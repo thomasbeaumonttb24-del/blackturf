@@ -15,8 +15,6 @@ export const DEFI_REGLES_DEFAUT = {
   verrou_minutes: 0,
   recompenses: [
     { rang: 1, plan: "expert", jours: 30 },
-    { rang: 2, plan: "standard", jours: 30 },
-    { rang: 3, plan: "standard", jours: 30 },
   ],
 };
 

@@ -462,7 +462,7 @@ export function PlanSite({ d }: { d: DonneesSite }) {
         />
         <Atout
           titre="Le Défi du mois"
-          texte="Vos paris en points, réglés aux vrais rapports PMU. Le meilleur solde gagne un abonnement."
+          texte="Vos paris en points, réglés aux vrais rapports PMU. Le meilleur solde du mois gagne 30 jours Expert."
         />
         <Atout
           titre="Alerté dès qu'un signal sort"

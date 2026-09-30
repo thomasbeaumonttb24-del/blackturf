@@ -100,6 +100,7 @@ async def regles():
                         for r, (p, j) in sorted(defi.RECOMPENSES.items())],
         "types": [{k: v for k, v in t.items() if k != "drapeau"} for t in defi.CATALOGUE_DEFI],
         "mois": defi.mois_courant(),
+        "premier_mois": defi.PREMIER_MOIS,
     }
 
 

@@ -205,7 +205,7 @@ async def envoyer_rappels(session, now: Optional[datetime] = None) -> int:
                            f"Défi : encore {manque} pari{'s' if manque > 1 else ''} pour être classé",
                            f"Plus que {jr} jour{'s' if jr > 1 else ''} : il faut "
                            f"{MIN_PARIS_CLASSEMENT} paris dans le mois pour figurer au classement "
-                           f"et viser les récompenses."))
+                           f"et viser la 1re place."))
             continue
         # 3. Dernière ligne droite pour le haut du classement.
         if l["rang"] and l["rang"] <= 10 and jr <= 3:

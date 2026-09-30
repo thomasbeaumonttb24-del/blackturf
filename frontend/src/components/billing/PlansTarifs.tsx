@@ -22,7 +22,7 @@ const DECOUVERTE = [
   "Comparateur de 2 chevaux, duels, pronos presse",
   "Classement complet de l'algorithme : 1 course/jour",
   "Plan de mise sur cette même course",
-  "Défi du mois : un abonnement à gagner",
+  "Défi du mois : 30 jours Expert à gagner",
 ];
 
 const STANDARD = [

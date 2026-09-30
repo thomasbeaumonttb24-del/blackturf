@@ -276,21 +276,20 @@ async def test_scenario_complet_du_defi(client, db, inscrire, admin_headers):
     a_, m_ = map(int, mois.split("-"))
     debut_suivant = datetime(a_ + (m_ == 12), m_ % 12 + 1, 2, 12, tzinfo=timezone.utc)
     r1 = await defi.attribuer_recompense(db, mois, 1, now=debut_suivant)
-    r2 = await defi.attribuer_recompense(db, mois, 2, now=debut_suivant)
-    r3 = await defi.attribuer_recompense(db, mois, 3, now=debut_suivant)
     assert (r1.user_id, r1.statut, r1.plan_offert) == (alice.user_id, "applique", "expert")
-    assert (r2.user_id, r2.statut) == (chloe.user_id, "manuel")       # déjà Expert : geste manuel
-    assert (r3.user_id, r3.statut, r3.plan_offert) == (bruno.user_id, "applique", "standard")
+    # Un seul lot, au 1er : Chloé (2e) et Bruno (3e) ne gagnent rien.
+    for rang in (2, 3):
+        with pytest.raises(defi.DefiErreur, match="Aucune récompense"):
+            await defi.attribuer_recompense(db, mois, rang, now=debut_suivant)
     with pytest.raises(defi.DefiErreur, match="déjà attribuée"):
         await defi.attribuer_recompense(db, mois, 1, now=debut_suivant)
     await db.refresh(alice)
     await db.refresh(bruno)
-    assert (alice.plan, bruno.plan) == ("expert", "standard")
+    assert (alice.plan, bruno.plan) == ("expert", "free")
     palmares = (await client.get(f"{API}/palmares")).json()
-    assert [(p["rang"], p["nom"]) for p in palmares if p["mois"] == mois] == [
-        (1, "Alice"), (2, "Chloe"), (3, "Bruno")]
+    assert [(p["rang"], p["nom"]) for p in palmares if p["mois"] == mois] == [(1, "Alice")]
 
-    assert await defi.expirer_recompenses(db, now=debut_suivant + timedelta(days=31)) == 2
+    assert await defi.expirer_recompenses(db, now=debut_suivant + timedelta(days=31)) == 1
     await db.refresh(alice)
     await db.refresh(bruno)
     await db.refresh(chloe)

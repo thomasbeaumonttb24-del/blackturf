@@ -80,14 +80,14 @@ const FEATURE_MAIN = {
 const FEATURES = [
   { icon: Zap, title: "Seulement la vraie valeur", desc: "Un pari n'est signalé que si la probabilité réelle dépasse ce que paie la cote. Des chiffres, pas un coup de cœur.", ...ICON_GOLD },
   { icon: Calculator, title: "Plan de mise sur mesure", desc: "Vous donnez votre budget, vous recevez une répartition sécurité / rendement / coup selon votre profil.", ...ICON_GOLD },
-  { icon: Trophy, title: "Le Défi du mois", desc: "Pariez vos points sur les courses, réglés aux vrais rapports PMU. Le meilleur solde du mois gagne un abonnement.", ...ICON_GOLD },
+  { icon: Trophy, title: "Le Défi du mois", desc: "Pariez vos points sur les courses, réglés aux vrais rapports PMU. Le meilleur solde du mois gagne 30 jours Expert.", ...ICON_GOLD },
   { icon: Bell, title: "Alertes & assistant", desc: "Push, e-mail, digest matinal. Et vos questions sur une course, en langage naturel.", ...ICON_GOLD },
   { icon: Database, title: "100 % données réelles", desc: "Programme et résultats PMU officiels. Aucun chiffre inventé : une donnée inconnue reste « — ».", ...ICON_GOLD },
 ];
 
 const PLANS = [
   { name: "Découverte", price: "0€", period: "/mois", desc: "Découvrez la plateforme",
-    features: ["Programme du jour", "Marché des cotes en direct", "1 pronostic complet/jour", "Défi du mois : un abonnement à gagner", "Statistiques publiques vérifiées"],
+    features: ["Programme du jour", "Marché des cotes en direct", "1 pronostic complet/jour", "Défi du mois : 30 jours Expert à gagner", "Statistiques publiques vérifiées"],
     cta: "Commencer gratuitement", href: "/inscription", popular: false },
   { name: "Standard", price: "12€", period: "/mois", desc: "L'essentiel pour parier mieux",
     features: ["5 pronostics/jour", "Top 3 paris de valeur (délai 15 min)", "Calculateur de mise", "Alertes push & e-mail", "Historique des résultats"],

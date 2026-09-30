@@ -237,6 +237,8 @@ export type DefiRegles = {
   max_paris_par_course: number;
   verrou_minutes: number;
   recompenses: { rang: number; plan: string; jours: number }[];
+  /** Mois de lancement du défi (« 2026-10 ») : un seul lot ce mois-là. */
+  premier_mois?: string;
   types: DefiTypeInfo[];
   mois: string;
 };

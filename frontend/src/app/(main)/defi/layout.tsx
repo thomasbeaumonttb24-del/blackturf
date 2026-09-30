@@ -10,7 +10,7 @@ export const dynamic = "force-dynamic";
 // d'en ouvrir un pour jouer.
 const TITLE = "Défi du mois : concours de pronostics PMU gratuit";
 const DESCRIPTION =
-  "Le concours de pronostics BlackTurf : 1 000 points par mois, des paris réglés au rapport PMU officiel, et un abonnement offert au meilleur solde.";
+  "Le concours de pronostics BlackTurf : 1 000 points par mois, des paris réglés au rapport PMU officiel, et 30 jours Expert offerts au meilleur solde.";
 
 export const metadata: Metadata = {
   title: TITLE,

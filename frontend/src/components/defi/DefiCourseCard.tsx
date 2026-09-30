@@ -255,7 +255,7 @@ export function DefiCourseCard({ courseId, partants, connecte, prefill, voirPlan
         <div className="p-5">
           <CompteGratuitCta
             titre="Jouez le Défi du mois"
-            texte={`${formatNombre(regles.capital_mensuel, 2)} points offerts chaque mois pour parier sur les courses. Le meilleur solde remporte un abonnement offert.`}
+            texte={`${formatNombre(regles.capital_mensuel, 2)} points offerts chaque mois pour parier sur les courses. Le meilleur solde du mois gagne 30 jours Expert.`}
             avantages={[
               `${formatNombre(regles.capital_mensuel, 2)} points renouvelés chaque 1er du mois`,
               "Vos propres chevaux, ou ceux du plan de mise",

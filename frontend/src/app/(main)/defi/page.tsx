@@ -59,6 +59,41 @@ const MEDAILLES_PRIX = [
   "from-[#F7D2B0] via-[#E1A06C] to-[#B8733E] text-[#6B3B14]",
 ];
 
+// Prix affiché de la formule offerte (PlansTarifs) : donne sa valeur au lot.
+const PRIX_MENSUEL: Record<string, string> = { expert: "19 €", standard: "12 €" };
+
+/** Le lot du mois quand il n'y en a qu'un : une seule carte, franche, avec le
+ *  rappel du mois de lancement (un seul gagnant, plus de lots ensuite). */
+function LotUnique({ lot, lancement, mois }: { lot: DefiRegles["recompenses"][number]; lancement: boolean; mois: string }) {
+  const prix = PRIX_MENSUEL[lot.plan];
+  return (
+    <div className="mt-6 rounded-[20px] bg-gradient-to-r from-amber-300 via-amber-500 to-amber-300 p-[1.5px] shadow-[0_18px_36px_-24px_rgba(120,53,15,.8)]">
+      <div className="overflow-hidden rounded-[18.5px] bg-white">
+        <div className="flex items-center gap-4 px-4 py-4 sm:px-5">
+          <span className={cn("relative inline-flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-gradient-to-b shadow-[inset_0_1px_0_rgba(255,255,255,.7),0_6px_14px_-6px_rgba(120,53,15,.7)] ring-[3px] ring-amber-100", MEDAILLES_PRIX[0])}>
+            <Crown className="h-6 w-6" aria-hidden="true" />
+          </span>
+          <div className="min-w-0 flex-1">
+            <div className="text-[10.5px] font-bold uppercase tracking-[0.14em] text-amber-700">Le lot du mois · 1<sup>er</sup> du classement</div>
+            <div className="mt-0.5 font-display text-[20px] font-bold leading-tight text-slate-900 sm:text-[22px]">
+              {lot.jours} jours {planLabel(lot.plan)} offerts
+            </div>
+            <div className="mt-0.5 text-[12.5px] text-slate-600">
+              Au meilleur solde du mois{prix ? <> · abonnement d&apos;une valeur de {prix}</> : null}
+            </div>
+          </div>
+        </div>
+        {lancement && (
+          <div className="flex items-start gap-2 border-t border-amber-100 bg-amber-50/80 px-4 py-2.5 text-[12.5px] leading-snug text-slate-700 sm:px-5">
+            <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600" aria-hidden="true" />
+            <span><b className="text-slate-900">Mois de lancement : un seul gagnant.</b> Dès {moisLabel(decalerMois(mois, 1)).toLowerCase()}, il y aura plus de lots à gagner.</span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function Hero({ mois, enCours, setMois, regles, classement }: {
   mois: string; enCours: boolean; setMois: (m: string) => void; regles: DefiRegles; classement?: DefiClassement;
 }) {
@@ -92,7 +127,7 @@ function Hero({ mois, enCours, setMois, regles, classement }: {
         </h1>
         <p className="mt-2.5 text-[14px] leading-relaxed text-slate-700">
           {formatNombre(regles.capital_mensuel, 2)} points offerts chaque mois, vos pronostics sur les vraies courses,
-          réglés au rapport PMU officiel. Le meilleur solde remporte un abonnement.
+          réglés au rapport PMU officiel. Le meilleur solde du mois gagne {regles.recompenses[0]?.jours ?? 30} jours {planLabel(regles.recompenses[0]?.plan ?? "expert")}.
         </p>
       </div>
 
@@ -114,21 +149,25 @@ function Hero({ mois, enCours, setMois, regles, classement }: {
         )}
       </div>
 
-      <ul className="mt-6 grid grid-cols-1 gap-2.5 sm:grid-cols-3">
-        {regles.recompenses.map((r, i) => (
-          <li key={r.rang} className={cn("relative flex items-center gap-3 overflow-hidden rounded-2xl bg-white/90 px-3.5 py-3 shadow-[0_10px_24px_-18px_rgba(120,53,15,.7)] ring-1 ring-inset backdrop-blur",
-            r.rang === 1 ? "ring-amber-300" : "ring-amber-900/10")}>
-            <span className={cn("relative inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-gradient-to-b font-display text-[15px] font-bold shadow-[inset_0_1px_0_rgba(255,255,255,.7),0_4px_10px_-4px_rgba(120,53,15,.6)] ring-2 ring-white", MEDAILLES_PRIX[i] ?? MEDAILLES_PRIX[2])}>
-              {r.rang === 1 ? <Crown className="h-5 w-5" /> : r.rang}
-            </span>
-            <div className="min-w-0">
-              <div className="text-[11px] font-semibold uppercase tracking-[0.1em] text-slate-500">{r.rang}{r.rang === 1 ? "er" : "e"} du mois</div>
-              <div className="text-[15px] font-bold text-slate-900">{r.jours} jours {planLabel(r.plan)}</div>
-              <div className="text-[11px] text-slate-500">offerts au gagnant</div>
-            </div>
-          </li>
-        ))}
-      </ul>
+      {regles.recompenses.length === 1 ? (
+        <LotUnique lot={regles.recompenses[0]} lancement={mois === (regles.premier_mois ?? PREMIER_MOIS_DEFI)} mois={mois} />
+      ) : (
+        <ul className="mt-6 grid grid-cols-1 gap-2.5 sm:grid-cols-3">
+          {regles.recompenses.map((r, i) => (
+            <li key={r.rang} className={cn("relative flex items-center gap-3 overflow-hidden rounded-2xl bg-white/90 px-3.5 py-3 shadow-[0_10px_24px_-18px_rgba(120,53,15,.7)] ring-1 ring-inset backdrop-blur",
+              r.rang === 1 ? "ring-amber-300" : "ring-amber-900/10")}>
+              <span className={cn("relative inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-gradient-to-b font-display text-[15px] font-bold shadow-[inset_0_1px_0_rgba(255,255,255,.7),0_4px_10px_-4px_rgba(120,53,15,.6)] ring-2 ring-white", MEDAILLES_PRIX[i] ?? MEDAILLES_PRIX[2])}>
+                {r.rang === 1 ? <Crown className="h-5 w-5" /> : r.rang}
+              </span>
+              <div className="min-w-0">
+                <div className="text-[11px] font-semibold uppercase tracking-[0.1em] text-slate-500">{r.rang}{r.rang === 1 ? "er" : "e"} du mois</div>
+                <div className="text-[15px] font-bold text-slate-900">{r.jours} jours {planLabel(r.plan)} offerts</div>
+                <div className="text-[11px] text-slate-500">offerts au gagnant</div>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
     </header>
   );
 }
@@ -245,7 +284,7 @@ function Reglement({ regles }: { regles: DefiRegles }) {
         <li>Un pari gagnant rapporte <b>points misés × rapport PMU officiel</b> (pour 1 € misé) publié à l&apos;arrivée, le même pour tous les joueurs, quel que soit l&apos;opérateur où chacun joue en vrai. Tiercé, Quarté+ et Quinté+ sont réglés comme un ticket PMU : rapport Ordre si l&apos;ordre joué est exact, sinon Désordre, sinon Bonus. Une formule à plusieurs chevaux (2sur4 ou Pick5 au-delà du minimum) répartit la mise sur ses combinaisons ; le Multi est réglé au rapport de la formule jouée (en 4, 5, 6 ou 7). Un cheval non-partant, une course annulée ou un rapport jamais publié dans les 72 heures remboursent la mise.</li>
         <li>Le pari porte l&apos;étiquette « Plan BlackTurf » quand il reprend un pari du plan de mise que vous avez consulté sur la course, « Perso » sinon. L&apos;étiquette n&apos;a pas d&apos;effet sur le classement.</li>
         <li>Sont classés les joueurs ayant engagé au moins <b>{regles.min_paris_classement} paris</b> dans le mois, par solde décroissant ; à égalité, le plus grand nombre de paris gagnants puis le premier pari le plus ancien l&apos;emportent.</li>
-        <li>Récompenses : {lots}. Elles sont remises après la clôture du mois, une fois tous les paris réglés et les comptes vérifiés. Un abonné payant reçoit l&apos;équivalent en déduction de son abonnement. Les récompenses sont nominatives et ne s&apos;échangent pas contre de l&apos;argent.</li>
+        <li>Récompense : {lots}{regles.premier_mois && regles.mois === regles.premier_mois ? ` pour le mois de lancement (${moisLabel(regles.premier_mois)}) ; d'autres lots s'ajouteront les mois suivants` : ""}. Elle est remise après la clôture du mois, une fois tous les paris réglés et le compte vérifié. Un abonné payant reçoit l&apos;équivalent en déduction de son abonnement. La récompense est nominative et ne s&apos;échange pas contre de l&apos;argent.</li>
         <li><b>Un seul compte par personne.</b> BlackTurf peut vérifier l&apos;identité des gagnants et exclure du défi, sans récompense, tout compte multiple, automatisé ou ayant contourné les règles.</li>
         <li>Les comptes de l&apos;équipe BlackTurf jouent hors concours. BlackTurf peut modifier ou arrêter le défi ; un mois commencé se termine avec les règles en vigueur à son début.</li>
       </ol>
@@ -295,7 +334,7 @@ export default function DefiPage() {
         <div className={cn(CARTE, "p-5")}>
           <CompteGratuitCta
             titre="Entrez dans le défi"
-            texte={`Un compte gratuit suffit : ${formatNombre(regles.capital_mensuel, 2)} points chaque mois pour parier sur les courses, et un abonnement à gagner.`}
+            texte={`Un compte gratuit suffit : ${formatNombre(regles.capital_mensuel, 2)} points chaque mois pour parier sur les courses, et 30 jours Expert à gagner.`}
             avantages={[
               "Participation gratuite, sans argent réel",
               "Vos propres chevaux, ou ceux du plan de mise",

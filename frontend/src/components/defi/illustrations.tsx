@@ -102,11 +102,7 @@ export function DecorRayons({ className }: { className?: string }) {
         <radialGradient id={`g${id}`} cx="1" cy="0" r="1">
           <stop offset="0" stopColor="#F59E0B" stopOpacity=".22" /><stop offset=".6" stopColor="#F59E0B" stopOpacity="0" />
         </radialGradient>
-        <pattern id={`d${id}`} width="12" height="12" patternUnits="userSpaceOnUse">
-          <circle cx="1.5" cy="1.5" r="1" fill="#B45309" opacity=".09" />
-        </pattern>
       </defs>
-      <rect width="400" height="240" fill={`url(#d${id})`} />
       <g transform="translate(400 0)" fill="#F59E0B" opacity=".07">
         {Array.from({ length: 14 }).map((_, i) => (
           <path key={i} d="M0 0L-420 -26L-420 26Z" transform={`rotate(${90 + i * 13})`} />

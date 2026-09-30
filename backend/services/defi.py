@@ -58,10 +58,10 @@ DELAI_RAPPORT_MAX = timedelta(hours=72)
 PREMIER_MOIS = os.getenv("DEFI_PREMIER_MOIS", "2026-10")
 
 # Rang → (plan offert, durée). Remis par l'admin après vérification du compte.
+# Un seul lot, au 1er (décision du 2026-09-30) : trois lots coûtaient jusqu'à
+# 43 € par mois quand les gagnants sont déjà abonnés payants.
 RECOMPENSES: dict[int, tuple[str, int]] = {
     1: ("expert", 30),
-    2: ("standard", 30),
-    3: ("standard", 30),
 }
 _NIVEAU_PLAN = {"free": 0, "decouverte": 0, "standard": 1, "starter": 1, "expert": 2, "pro": 2}
 
