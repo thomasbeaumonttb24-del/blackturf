@@ -503,8 +503,8 @@ export function DefiCourseCard({ courseId, partants, connecte, prefill, onPrefil
                   </p>
                   {MISE_BASE_PMU[type] && (
                     <p className="mt-1.5 text-[11px] leading-relaxed text-slate-500">
-                      Le PMU affiche ce rapport pour une mise de {MISE_BASE_PMU[type]} ; au défi, il est ramené à 1 point
-                      (rapport officiel « pour 1 € »). Même rendement.
+                      Le PMU affiche ce rapport pour une mise de {MISE_BASE_PMU[type]} ; le défi utilise le rapport officiel
+                      ramené à 1 €, avec 1 point = 1 €. Même rendement.
                     </p>
                   )}
                   <button type="button" onClick={valider} disabled={!pret || envoi}
