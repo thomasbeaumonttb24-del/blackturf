@@ -562,9 +562,9 @@ class TestSettleMulti:
     def test_mini_multi_en_6_prend_la_bonne_formule(self):
         # Cas réel R3C1 (Mini Multi 10-13 partants) : en 6 = 8 €, jamais 120 (en 4).
         detail = {"e_mini_multi": [
-            {"combinaison": "5-4-3-8", "rapport": 120.0, "libelle": "e-Mini Multi en 4"},
-            {"combinaison": "5-4-3-8", "rapport": 24.0,  "libelle": "e-Mini Multi en 5"},
-            {"combinaison": "5-4-3-8", "rapport": 8.0,   "libelle": "e-Mini Multi en 6"},
+            {"combinaison": "4-3-2-1", "rapport": 120.0, "libelle": "e-Mini Multi en 4"},
+            {"combinaison": "4-3-2-1", "rapport": 24.0,  "libelle": "e-Mini Multi en 5"},
+            {"combinaison": "4-3-2-1", "rapport": 8.0,   "libelle": "e-Mini Multi en 6"},
         ]}
         r = settle_pari("Mini Multi en 6", [1, 2, 3, 4, 5, 6], self.CL,
                         {"e_mini_multi": 120.0, "e_multi": 99.0}, 12,
