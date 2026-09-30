@@ -126,7 +126,8 @@ async def get_classement(
     affichees = [l for l in lignes if l["classe"]][:top] if top else lignes
     return {
         "mois": m,
-        "nb_joueurs": len(lignes),
+        # Hors concours (équipe) exclus, comme dans la console : un seul chiffre partout.
+        "nb_joueurs": sum(1 for l in lignes if not l.get("hors_concours")),
         "nb_classes": sum(1 for l in lignes if l["classe"]),
         "lignes": [_ligne_publique(l, moi) for l in affichees],
         "ma_ligne": _ligne_publique(ma, moi) if ma else None,

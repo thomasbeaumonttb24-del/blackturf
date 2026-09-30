@@ -114,11 +114,13 @@ export function OriginePari({ origine }: { origine: DefiPari["origine"] }) {
   );
 }
 
+const NB = "\u00a0";
+
 export function ResultatPari({ p }: { p: DefiPari }) {
   const net = netPari(p);
-  if (net == null) return <span className="text-[12px] text-slate-500 tabular-nums">{p.points} pts engagés</span>;
+  if (net == null) return <span className="whitespace-nowrap text-[12px] text-slate-500 tabular-nums">{p.points}{NB}pts engagés</span>;
   return (
-    <span className={cn("font-display text-[14px] font-bold tabular-nums",
+    <span className={cn("whitespace-nowrap font-display text-[14px] font-bold tabular-nums",
       net > 0 ? "text-emerald-700" : net < 0 ? "text-rose-700" : "text-slate-600")}>
       {formatPts(net, true)}
       {p.statut === "gagne" && p.rapport != null && p.points_retour != null && (
@@ -216,14 +218,14 @@ export function DefiEntete({ surtitre, titre, sousTitre, droite, compact = false
   return (
     <div className={cn(DEFI_FOND, "relative isolate overflow-hidden border-b border-amber-900/10", compact ? "px-4 pb-4 pt-4" : "px-5 pb-5 pt-5")}>
       <DecorRayons className="-z-10" />
-      <div className="flex items-start gap-3">
+      <div className="flex flex-wrap items-start gap-3">
         <DefiEmbleme taille={compact ? 40 : 46} />
-        <div className="min-w-0 flex-1 pt-0.5">
+        <div className="min-w-[11rem] flex-1 pt-0.5">
           {surtitre && <div className="text-[10px] font-bold uppercase tracking-[0.16em] text-amber-700">{surtitre}</div>}
           <h2 className={cn("font-display font-bold leading-tight text-slate-900", compact ? "text-[15.5px]" : "text-[18px]")}>{titre}</h2>
           {sousTitre && <p className="mt-0.5 text-[11.5px] leading-snug text-slate-600">{sousTitre}</p>}
         </div>
-        {droite && <div className="flex shrink-0 flex-col items-end gap-1.5">{droite}</div>}
+        {droite && <div className="ml-auto flex shrink-0 flex-col items-end gap-1.5">{droite}</div>}
       </div>
       {children}
     </div>

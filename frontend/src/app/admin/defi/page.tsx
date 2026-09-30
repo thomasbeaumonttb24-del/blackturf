@@ -100,7 +100,7 @@ export default function AdminDefiPage() {
       <EnTetePage
         titre="Défi du mois"
         icone={<Medal className="h-4 w-4" />}
-        desc="Vérifiez le 1er du mois clos, puis remettez sa récompense (30 jours Expert). Le plan offert expire tout seul et le plan précédent revient, sauf si le joueur a souscrit entre-temps."
+        desc="Vérifiez le vainqueur du mois clos, puis remettez sa récompense (30 jours Expert). Le plan offert expire tout seul et le plan précédent revient, sauf si le joueur a souscrit entre-temps."
         actions={
           <div className="flex items-center gap-1 rounded-xl border border-border p-1">
             <button type="button" aria-label="Mois précédent" disabled={mois <= PREMIER_MOIS_DEFI} onClick={() => setMois(decaler(mois, -1))}

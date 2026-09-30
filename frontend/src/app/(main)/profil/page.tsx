@@ -91,7 +91,7 @@ const RISK_OPTIONS = [
     value: "conservateur" as const,
     icon: "🛡️",
     label: "Prudent",
-    desc: "Mises faibles, capital protégé",
+    desc: "Mises faibles, risque limité",
     color: "text-blue-700",
     activeBorder: "border-blue-400 bg-blue-50",
     dot: "bg-blue-500",

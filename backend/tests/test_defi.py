@@ -16,6 +16,15 @@ pytestmark = pytest.mark.asyncio
 MAINTENANT = datetime.now(timezone.utc)
 
 
+def _depart_par_defaut() -> datetime:
+    """Dans 2 h, sans jamais passer au mois suivant (heure de Paris) : lancée le
+    dernier soir du mois après 22 h, la suite créait des courses du mois d'après
+    et les paris partaient — à raison — sur le mois suivant."""
+    local = MAINTENANT.astimezone(defi.PARIS_TZ)
+    suivant = (local.replace(day=28) + timedelta(days=4)).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    return min(MAINTENANT + timedelta(hours=2), suivant.astimezone(timezone.utc) - timedelta(minutes=1))
+
+
 @pytest.fixture(autouse=True)
 def _cache_classement_vide(monkeypatch):
     # Hors tests du lancement : le défi est réputé ouvert depuis longtemps.
@@ -38,7 +47,7 @@ async def _user(db, email="joueur@blackturf.fr", **champs) -> User:
 async def _course(db, course_id="C1", *, depart=None, statut="a_venir", nb=10,
                   non_partants=(), paris_disponibles=None) -> Course:
     c = Course(course_id=course_id, reunion_id="R1", numero=1, numero_reunion=1,
-               date_heure=depart or MAINTENANT + timedelta(hours=2),
+               date_heure=depart or _depart_par_defaut(),
                hippodrome_nom="Vincennes", discipline="Attelé", distance=2700,
                nb_partants=nb, statut=statut, paris_disponibles=paris_disponibles)
     db.add(c)

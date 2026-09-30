@@ -129,7 +129,7 @@ export function Footer() {
               href={INSTAGRAM.url}
               target="_blank"
               rel="me noopener noreferrer"
-              className="mt-2 inline-flex items-center gap-1.5 text-xs font-medium text-gray-600 transition-colors hover:text-brand-gold-dark"
+              className="ml-4 mt-2 inline-flex items-center gap-1.5 text-xs font-medium text-gray-600 transition-colors hover:text-brand-gold-dark"
             >
               <Instagram className="h-3.5 w-3.5" /> {INSTAGRAM.pseudo}
             </a>

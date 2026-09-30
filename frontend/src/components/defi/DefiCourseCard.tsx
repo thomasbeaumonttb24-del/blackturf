@@ -365,7 +365,7 @@ export function DefiCourseCard({ courseId, partants, connecte, prefill, onPrefil
                 </p>
               )}
               <Etape n={1} titre="Type de pari"
-                droite={<span className="text-[11px] text-slate-500">{types.length} pari{types.length > 1 ? "s" : ""} ouvert{types.length > 1 ? "s" : ""} sur cette course</span>}>
+                droite={<span className="text-[11px] text-slate-500">{types.length} type{types.length > 1 ? "s" : ""} de pari ouvert{types.length > 1 ? "s" : ""}</span>}>
                 {prefillRefuse && (
                   <p className="mb-3 rounded-xl bg-amber-50 px-3 py-2 text-[12px] text-amber-900 ring-1 ring-inset ring-amber-200">
                     Le {prefillRefuse} n&apos;est pas ouvert par le PMU sur cette course : choisissez un autre pari.
@@ -485,7 +485,7 @@ export function DefiCourseCard({ courseId, partants, connecte, prefill, onPrefil
                     <div className="flex flex-wrap items-center gap-1.5 text-[14px] font-bold text-slate-900">
                       {nomTicket}
                       {chevaux.length > 0
-                        ? chevaux.map((n, i) => <span key={n} className="inline-flex items-center gap-1">{i > 0 && <span className="text-slate-400">{aOrdre ? "–" : "+"}</span>}<CasaqueNumero numero={n} /></span>)
+                        ? chevaux.map((n, i) => <span key={n} className="inline-flex items-center gap-1"><CasaqueNumero numero={n} />{i < chevaux.length - 1 && <span className="text-slate-400">{aOrdre ? "–" : "+"}</span>}</span>)
                         : <span className="text-[12.5px] font-medium text-slate-400">choisissez {min === max ? `${min} cheva${min > 1 ? "ux" : "l"}` : `${min} à ${max} chevaux`}</span>}
                     </div>
                     <span className="font-display text-[15px] font-bold tabular-nums text-slate-900">{pointsJoues} pts</span>
@@ -504,12 +504,15 @@ export function DefiCourseCard({ courseId, partants, connecte, prefill, onPrefil
                   {MISE_BASE_PMU[type] && (
                     <p className="mt-1.5 text-[11px] leading-relaxed text-slate-500">
                       Le PMU affiche ce rapport pour une mise de {MISE_BASE_PMU[type]} ; au défi, il est ramené à 1 point
-                      (rapport officiel « pour 1 € »). Même rendement, sans arrondi.
+                      (rapport officiel « pour 1 € »). Même rendement, sans arrondi.
                     </p>
                   )}
                   <button type="button" onClick={valider} disabled={!pret || envoi}
-                    className="mt-3 inline-flex min-h-[50px] w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-b from-amber-600 to-amber-800 px-4 text-[14px] font-bold text-white shadow-[inset_0_1px_0_rgba(255,255,255,.25),0_10px_20px_-12px_rgba(146,64,14,.9)] transition-opacity disabled:cursor-not-allowed disabled:opacity-45">
-                    {envoi ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+                    className={cn("mt-3 inline-flex min-h-[50px] w-full items-center justify-center gap-2 rounded-xl px-4 text-[14px] font-bold transition-colors disabled:cursor-not-allowed",
+                      pret || envoi
+                        ? "bg-gradient-to-b from-amber-600 to-amber-800 text-white shadow-[inset_0_1px_0_rgba(255,255,255,.25),0_10px_20px_-12px_rgba(146,64,14,.9)]"
+                        : "bg-stone-200 text-stone-600 ring-1 ring-inset ring-stone-300")}>
+                    {envoi ? <Loader2 className="h-4 w-4 animate-spin" /> : pret ? <Check className="h-4 w-4" /> : null}
                     {chevaux.length < min
                       ? `Choisissez encore ${min - chevaux.length} cheva${min - chevaux.length > 1 ? "ux" : "l"}`
                       : `Valider mon pari · ${pointsJoues} pts`}
@@ -518,9 +521,7 @@ export function DefiCourseCard({ courseId, partants, connecte, prefill, onPrefil
                     <span className={cn("inline-flex items-center gap-1 font-semibold", msRestant < 5 * 60_000 ? "text-orange-700" : "text-slate-600")}>
                       <Timer className="h-3 w-3" aria-hidden="true" /> {dureeRestante(msRestant)}
                     </span>
-                    <span aria-hidden="true">·</span>
                     <span>Fermeture à {new Date(data.limite).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Paris" })} (heure de Paris), départ annoncé</span>
-                    <span aria-hidden="true">·</span>
                     <span>{restants} pari{restants > 1 ? "s" : ""} restant{restants > 1 ? "s" : ""} sur cette course</span>
                   </div>
                 </div>
@@ -534,6 +535,9 @@ export function DefiCourseCard({ courseId, partants, connecte, prefill, onPrefil
                 </span>
                 {data.avant_lancement ? `Le Défi du mois ouvre le 1er ${moisLabel(regles.premier_mois ?? "2026-10").toLowerCase()} : les courses d'avant ne comptent pas.`
                   : data.statut_course === "annule" ? "Course annulée par le PMU : les paris engagés sont remboursés."
+                  : data.statut_course === "termine"
+                    ? (mesParis.length > 0 ? "Course terminée : vos paris sont réglés ci-dessous, au rapport PMU officiel."
+                      : "Course terminée : les paris sont fermés. L'arrivée officielle est dans l'onglet Résultats.")
                   : !ouvert ? "Paris fermés : l'heure de départ annoncée est passée. Le résultat de vos paris s'affiche ici après l'arrivée."
                   : types.length === 0 ? "Aucun pari du défi n'est ouvert par le PMU sur cette course."
                   : restants <= 0 ? `Vous avez joué vos ${regles.max_paris_par_course} paris sur cette course.`
@@ -553,7 +557,7 @@ export function DefiCourseCard({ courseId, partants, connecte, prefill, onPrefil
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-1.5 text-[13px] font-bold text-slate-900">
                         {p.type_pari}
-                        {p.chevaux.map((n, i) => <span key={n} className="inline-flex items-center gap-1">{i > 0 && <span className="text-slate-400">{estAOrdre(p.type_pari) ? "–" : "+"}</span>}<CasaqueNumero numero={n} /></span>)}
+                        {p.chevaux.map((n, i) => <span key={n} className="inline-flex items-center gap-1"><CasaqueNumero numero={n} />{i < p.chevaux.length - 1 && <span className="text-slate-400">{estAOrdre(p.type_pari) ? "–" : "+"}</span>}</span>)}
                       </div>
                       <div className="mt-1.5 flex flex-wrap gap-1.5"><StatutPari statut={p.statut} /><OriginePari origine={p.origine} /></div>
                     </div>

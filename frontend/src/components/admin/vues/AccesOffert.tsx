@@ -107,7 +107,7 @@ export default function AccesOffert({ data, onChange }: { data: UserDetail; onCh
           <label className="flex min-w-[10rem] flex-1 flex-col gap-1">
             <span className="text-muted-foreground">Motif (visible par vous seul)</span>
             <input value={motif} onChange={(e) => setMotif(e.target.value)} maxLength={200}
-              placeholder="Gagnant du défi d'octobre" className="h-8 rounded-lg border border-border bg-white px-2" />
+              placeholder="Geste commercial, test…" className="h-8 rounded-lg border border-border bg-white px-2" />
           </label>
           <button
             type="button" onClick={offrir} disabled={enCours}

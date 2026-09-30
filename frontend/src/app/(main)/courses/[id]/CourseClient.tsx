@@ -3786,7 +3786,9 @@ export default function CoursePage({
           hippodromeNom={course.hippodrome_nom}
           // Visiteur sans compte, course à venir : orienté vers le compte gratuit
           // (plus d'envoi du classement par e-mail, cf. pronostic_email.py).
-          actif={!user && ["a_venir", "en_cours"].includes(course.statut)}
+          // Pas sur l’onglet Défi : sa carte propose déjà le compte gratuit, et
+          // l’encart la recouvrait (deux « Créer mon compte » empilés).
+          actif={!user && ongletActif !== "defi" && ["a_venir", "en_cours"].includes(course.statut)}
         />
       )}
     </div>

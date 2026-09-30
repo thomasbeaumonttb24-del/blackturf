@@ -18,6 +18,7 @@ export const AVANTAGES_COMPTE_GRATUIT = [
   "Classement IA complet sur 1 course par jour",
   "1 plan de mise calculé sur votre budget par jour",
   "7 jours d'essai offerts (Standard ou Expert)",
+  "Défi du mois : 30 jours Expert à gagner",
 ];
 
 export function CompteGratuitCta({

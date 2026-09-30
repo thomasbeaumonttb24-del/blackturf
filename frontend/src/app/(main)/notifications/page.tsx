@@ -238,7 +238,7 @@ export default function NotificationsPage() {
               disabled={markingAll}
             >
               <CheckCheck className="w-3.5 h-3.5" />
-              {markingAll ? "En cours…" : "Tout marquer lu"}
+              {markingAll ? "En cours…" : "Tout marquer comme lu"}
             </Button>
           )}
         </div>

@@ -28,8 +28,8 @@ export function etapesDefi({ capital = 1000, pointsMin = 10, pointsMax = 100,
     { icone: Flag, court: "Points × rapport PMU",
       titre: "Gagnez au rapport officiel",
       texte: "Pari gagnant = points misés × rapport PMU officiel. Le classement bouge après chaque arrivée." },
-    { icone: Crown, court: `${prix.jours} j ${planLabel(prix.plan)} au 1er`,
-      titre: `${prix.jours} jours ${planLabel(prix.plan)} au 1er`,
+    { icone: Crown, court: `${prix.jours} j ${planLabel(prix.plan)} au vainqueur`,
+      titre: `${prix.jours} jours ${planLabel(prix.plan)} au vainqueur`,
       texte: `Le meilleur solde du mois remporte ${prix.jours} jours ${planLabel(prix.plan)} offerts.` },
   ];
 }

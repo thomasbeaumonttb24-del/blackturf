@@ -331,7 +331,7 @@ Le joueur apparaîtra en « Joueur XXXX » au classement et devra en choisir un 
                       </div>
                     }
                     tableau={
-                      <div className="max-h-[26rem] overflow-y-auto rounded-xl border border-border">
+                      <div className="max-h-[26rem] overflow-auto rounded-xl border border-border">
                         <DefilementX label="Historique des paris" bleed={false}>
                           <table className="w-full min-w-[760px] border-collapse">
                             <thead className="sticky top-0 z-10 bg-muted/80 backdrop-blur">

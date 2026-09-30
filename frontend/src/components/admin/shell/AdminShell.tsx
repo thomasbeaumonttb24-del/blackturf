@@ -188,7 +188,7 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
             Administration
           </div>
           <div className="truncate text-sm font-semibold leading-tight">
-            {courante?.label ?? "Console"}
+            {pathname.startsWith("/admin/defi") ? "Défi du mois" : courante?.label ?? "Console"}
           </div>
         </div>
         {alertes.total > 0 && (
