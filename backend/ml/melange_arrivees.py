@@ -111,6 +111,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ml.learning_steps import _vers_datetime
+from ml.prediction_evaluation import sans_modeles_retires
 
 log = structlog.get_logger(module="melange_arrivees")
 
@@ -547,7 +548,7 @@ async def _charger_courses(session: AsyncSession) -> list[dict]:
         JOIN (SELECT course_id, count(*) AS n FROM participations
                WHERE COALESCE(non_partant, false) = false
                GROUP BY course_id) np ON np.course_id = pe.course_id
-        WHERE pe.is_replayable = true
+        WHERE pe.is_replayable = true{sans_modeles_retires('pe')}
           AND pe.proba_top1_raw IS NOT NULL
           AND pe.proba_top1 IS NOT NULL
           AND COALESCE(pa.non_partant, false) = false

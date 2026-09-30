@@ -172,8 +172,11 @@ def _score_cote_enjeux(feats: dict) -> SignalCategory:
         return SignalCategory(False, brut, None, "aucun signal marché (mouvement/décote/SPI/pool)")
     parts = []
     if mvt is not None:
-        # Cote qui BAISSE (mouvement négatif) = argent qui rentre = favorable.
-        parts.append(_clip(-mvt))
+        # `mouvement_30min` = (cote il y a 30 min − cote actuelle) / cote il y a 30 min
+        # (ml.features) : POSITIF quand la cote BAISSE, c'est-à-dire quand l'argent
+        # rentre — favorable. Le signe était inversé jusqu'au 2026-09-28 : la
+        # traçabilité présentait l'argent qui rentre comme une objection.
+        parts.append(_clip(mvt))
     if dec is not None:
         parts.append(_clip(2.0 * dec - 1.0))
     if spi is not None:

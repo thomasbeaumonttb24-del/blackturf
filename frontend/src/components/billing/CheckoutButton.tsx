@@ -22,7 +22,21 @@ export function CheckoutButton({ plan, periodicite, label, variant = "brand", si
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   // Filleul : l'essai n'existe pas pour lui, le bouton annonce sa remise.
-  const libelle = user?.remise_parrainage && /essai|essayer/i.test(label) ? "S'abonner — 5 € offerts" : label;
+  // Abonné : ce bouton CHANGE sa formule — il le dit, et ne propose jamais
+  // « Essayer 7 jours gratuit » ni sa propre formule.
+  const abonne = Boolean(user?.abonnement_gerable) && (user?.plan === "standard" || user?.plan === "expert");
+  // Déjà abonné : le passage mensuel ↔ annuel se fait sur demande (il refacture
+  // tout et déplace l'échéance) — le bouton annuel ne propose donc rien.
+  const annuelPourAbonne = abonne && periodicite === "annual";
+  const formuleActuelle = (abonne && user?.plan === plan && periodicite === "monthly") || annuelPourAbonne;
+  const nomPlan = plan === "expert" ? "Expert" : "Standard";
+  const libelle = annuelPourAbonne
+    ? "Annuel : sur demande (contact@blackturf.fr)"
+    : formuleActuelle
+      ? "Votre formule actuelle"
+      : abonne
+        ? `Passer en ${nomPlan} — ${plan === "expert" ? "19" : "12"} €/mois`
+        : user?.remise_parrainage && /essai|essayer/i.test(label) ? "S'abonner — 5 € offerts" : label;
 
   async function startCheckout() {
     if (!user) {
@@ -33,11 +47,25 @@ export function CheckoutButton({ plan, periodicite, label, variant = "brand", si
 
     setLoading(true);
     try {
-      const response = await api.post("/stripe/checkout", { plan, periodicite });
-      // Compte déjà abonné à une AUTRE formule : le backend a modifié l'abonnement
-      // existant au lieu d'en ouvrir un second (aucun passage par Stripe Checkout,
-      // donc aucun second prélèvement). Il n'y a plus qu'à confirmer.
-      if (response.data.change_de_plan) {
+      let response = await api.post("/stripe/checkout", { plan, periodicite });
+      // Compte déjà abonné à une AUTRE formule : rien n'est modifié tant que le
+      // client n'a pas lu et accepté ce qui va se passer (montant prélevé
+      // aujourd'hui, crédit, prochaine facture), chiffré par Stripe. Le
+      // 2026-09-29, un clic à 8 s d'une souscription Expert l'avait rétrogradé.
+      if (response.data.confirmation_requise) {
+        const message: string = response.data.apercu?.message || `Passer en ${nomPlan} ?`;
+        if (!window.confirm(message)) {
+          setLoading(false);
+          return;
+        }
+        // Même date de prorata que l'aperçu : le montant débité est celui annoncé.
+        response = await api.post("/stripe/checkout", {
+          plan, periodicite, confirmer: true, proration_date: response.data.apercu?.proration_date,
+        });
+      }
+      if (response.data.paiement_requis) {
+        toast.info(response.data.message || "Paiement à confirmer auprès de votre banque");
+      } else if (response.data.change_de_plan) {
         toast.success(response.data.message || "Votre formule a été modifiée");
       }
       window.location.assign(response.data.url);
@@ -60,7 +88,7 @@ export function CheckoutButton({ plan, periodicite, label, variant = "brand", si
       variant={variant}
       className={className || "w-full"}
       size={size}
-      disabled={loading || authLoading}
+      disabled={loading || authLoading || formuleActuelle}
       onClick={startCheckout}
     >
       {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : libelle}

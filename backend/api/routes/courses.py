@@ -1165,7 +1165,7 @@ async def get_programme_apercu(
     """
     import json
     target = jour or jour_courses()
-    cache_key = f"programme:apercu:{target.isoformat()}"
+    cache_key = f"programme:apercu:v2:{target.isoformat()}"  # v2 : sans accord_marche avant la course
 
     try:
         redis = await get_redis()
@@ -1186,7 +1186,8 @@ async def get_programme_apercu(
                pa.cote_pmu       AS cote_pmu,
                pr.rang_predit    AS rang_predit,
                pr.proba_top1     AS proba_top1,
-               pr.confidence_score AS confiance
+               pr.confidence_score AS confiance,
+               c.statut          AS statut
           FROM predictions pr
           JOIN participations pa ON pa.participation_id = pr.participation_id
           JOIN courses c         ON c.course_id = pr.course_id
@@ -1211,7 +1212,7 @@ async def get_programme_apercu(
         agg = par_course.setdefault(r["course_id"], {
             "nb_notes": 0, "nb_ecartes": 0, "nb_ecarts_prix": 0, "confiance": None,
             "numero_top1": None, "cote_top1": None,
-            "numero_favori": None, "cote_favori": None,
+            "numero_favori": None, "cote_favori": None, "statut": r["statut"],
         })
         agg["nb_notes"] += 1
         if (r["proba_top1"] or 0) < 0.03:
@@ -1247,7 +1248,12 @@ async def get_programme_apercu(
             "nb_ecarts_prix": agg["nb_ecarts_prix"],
             # Même définition que la fiche course (`services.confiance_course`).
             "confiance": _confiance_course(agg["confiance"]),
-            "accord_marche": (bool(fav == top1) if (fav is not None and top1 is not None) else None),
+            # Course NON courue : jamais. « Le n°1 du modèle est le favori des cotes »
+            # nomme ce n°1 (le favori des cotes est public) — soit le classement
+            # obtenu sans compte ni quota (cf. services.quota_classement).
+            "accord_marche": (bool(fav == top1)
+                              if (agg["statut"] == "termine" and fav is not None and top1 is not None)
+                              else None),
         }
 
     resultat = {
@@ -1785,30 +1791,25 @@ DAILY_EXPOSURE_CAP_FRAC = 0.30
 
 
 async def _mise_plan_quota_check(user, course_id: str) -> tuple[bool, int, int]:
-    """(autorisé, quota_restant, limite_configurée). Compteur Redis par user/jour
-    (set de course_ids, TTL 36h) — ré-ouvrir une course déjà comptée aujourd'hui
-    ne reconsomme pas le quota. -1/-1 = illimité. Fail-open si Redis indisponible
-    (disponibilité du produit > paywall strict)."""
-    if getattr(user, "is_admin", False):
+    """(autorisé, quota_restant, limite_configurée) ; -1/-1 = illimité.
+
+    Porte unique : services.quota_classement (atomique, jour de Paris, adresse
+    e-mail normalisée, refus si Redis tombe pour un plan gratuit).
+    Compte gratuit : le plan de mise partage le compteur du CLASSEMENT — il ne
+    s'ouvre que sur SA course du jour. Un plan sur une deuxième course nommerait
+    les chevaux retenus par l'algorithme, soit un second classement déguisé."""
+    from services import quota_classement as _quota
+    lim = _quota.limite(user)  # plan inconnu = gratuit, jamais illimité
+    if lim is None:
         return True, -1, -1
-    limit = MISE_PLAN_DAILY_LIMITS.get(user.plan)
-    if limit is None:  # standard+/expert (plans hors table) = illimité
-        return True, -1, -1
-    try:
-        redis = await get_redis()
-        day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        key = f"mise_plan_quota:{user.user_id}:{day}"
-        if await redis.sismember(key, course_id):
-            return True, max(0, limit - await redis.scard(key)), limit
-        used = await redis.scard(key)
-        if used >= limit:
-            return False, 0, limit
-        await redis.sadd(key, course_id)
-        await redis.expire(key, 129600)  # 36h
-        return True, max(0, limit - (used + 1)), limit
-    except Exception:
-        log.warning("mise_plan_quota.redis_unavailable", user_id=getattr(user, "user_id", None))
-        return True, -1, -1
+    if user.plan in _quota.PLANS_GRATUITS:
+        # Jamais de consommation silencieuse : la course du jour se choisit sur
+        # le bouton « Révéler » du classement ; le plan ne fait que la suivre.
+        if not await _quota.deja_ouverte(user, course_id):
+            return False, 0, lim
+        return True, 0, lim
+    autorise, restant = await _quota.consommer(user, course_id, prefixe="mise_plan")
+    return autorise, restant, lim
 
 
 @router.post("/courses/{course_id}/mise-plan")
@@ -1826,9 +1827,22 @@ async def get_mise_plan(
     from services.mise_calculator import generer_plan, plan_to_dict
     from db.models import Prediction as PredModel, ValueBet
 
-    autorise, quota_restant, quota_limite = await _mise_plan_quota_check(user, course_id)
+    # Course courue : ses chevaux sont publics (arrivée + classement révélé), le plan
+    # n'y dévoile rien — pas de quota pour un compte gratuit, comme le classement.
+    _statut = (await db.execute(select(Course.statut).where(Course.course_id == course_id))).scalar_one_or_none()
+    if user.plan in ("free", "decouverte") and _statut == "termine":
+        autorise, quota_restant, quota_limite = True, -1, -1
+    else:
+        autorise, quota_restant, quota_limite = await _mise_plan_quota_check(user, course_id)
     if not autorise:
         from fastapi import HTTPException as _H
+        if user.plan in ("free", "decouverte"):
+            raise _H(
+                status_code=403,
+                detail="Le plan de mise gratuit s'ouvre sur la course dont vous avez révélé "
+                       "le classement aujourd'hui (onglet Synthèse). Pour toutes les courses, "
+                       "passez à Standard ou Expert.",
+            )
         raise _H(
             status_code=403,
             detail=f"Quota quotidien atteint ({quota_limite}/jour pour votre plan) — "
@@ -1867,7 +1881,8 @@ async def get_mise_plan(
             from services.bet_catalog import course_info_bets as _cib
             from api.config import get_settings as _get_settings
             _subj_hash = _subj(getattr(user, "user_id", None), _get_settings().secret_key)
-            _deja_joue = await daily_exposure_total(db, _subj_hash)
+            _deja_joue = await daily_exposure_total(db, _subj_hash, course_id=course_id,
+                                                    profil=profil)
             _cap = bankroll * DAILY_EXPOSURE_CAP_FRAC
             _engage = montant + supplement_quinte(montant, profil, _cib(course))
             if _deja_joue + _engage > _cap:
@@ -1916,7 +1931,13 @@ async def get_mise_plan(
                 # GAINS LIVE après gel : sélection FIGÉE inchangée (= bilan), mais on
                 # ré-évalue l'ORDRE DE GRANDEUR des gains sur les cotes du marché EN DIRECT
                 # jusqu'au départ. Le bilan/palmarès restent réglés aux vrais rapports PMU.
-                return await _reprice_gains_live(db, course, frozen)
+                servi = await _reprice_gains_live(db, course, frozen)
+                # Le plan servi à l'abonné est de l'argent qu'il va jouer : il doit
+                # compter dans son exposition du jour comme tout plan émis. Ce chemin
+                # sortait avant `_record_plan_emission` (audit du 2026-09-28).
+                await _record_frozen_emission(db, course=course, out=servi, profil=profil,
+                                              montant=montant, bankroll=bankroll, user=user)
+                return servi
         except Exception:
             pass  # pas de plan figé (legacy/échec) → on recalcule en live ci-dessous
 
@@ -1940,14 +1961,24 @@ async def get_mise_plan(
             status_code=409,
             detail="Pronostic pas encore disponible pour cette course — réessayez une fois l'analyse IA publiée.")
 
-    # Value bets
-    vb_q = (
-        _s(ValueBet)
-        .join(Participation, Participation.participation_id == ValueBet.participation_id)
-        .where(Participation.course_id == course_id)
-        .where(ValueBet.actif.is_(True))
-    )
-    vbs = {v.participation_id: v for v in (await db.execute(vb_q)).scalars()}
+    # Value bets — même règle de visibilité que la fiche et /value-bets
+    # (`services.valuebets_visibilite`) : Free n'en voit aucun, Standard avec 15 min
+    # de retard, Expert en direct. Sans ce filtre, le plan de mise servait à un
+    # Standard, sans délai, les ★ que la page dédiée lui retarde. Les paris de
+    # valeur ne font qu'annoter le plan (aucun effet sur la sélection).
+    from services.valuebets_visibilite import (
+        PLANS_AVEC_VALUE_BETS, visible as _vb_visible, course_etrangere as _course_etrangere)
+    vbs: dict = {}
+    if user.plan in PLANS_AVEC_VALUE_BETS:
+        _etranger = await _course_etrangere(db, course.hippodrome_nom)
+        vb_q = (
+            _s(ValueBet)
+            .join(Participation, Participation.participation_id == ValueBet.participation_id)
+            .where(Participation.course_id == course_id)
+            .where(ValueBet.actif.is_(True))
+        )
+        vbs = {v.participation_id: v for v in (await db.execute(vb_q)).scalars()
+               if _vb_visible(v, user.plan, etranger=_etranger)}
 
     # COTES : AVANT le gel (T-10), l'estimatif suit le marché LIVE (même cote que le
     # tableau et le widget « Marché EN DIRECT »). APRÈS le gel, on utilise la cote FIGÉE
@@ -1990,33 +2021,54 @@ async def get_mise_plan(
 
     # Auto-amélioration : pondération ROI réel par type + thermostat adaptatif
     # (calibration du modèle + ROI récent → durcit/assouplit la sélection).
+    #
+    # Chaque apprentissage a son propre repli, et chaque repli LAISSE UNE TRACE : un
+    # seul `except` muet couvrait les trois, si bien qu'une erreur sur le thermostat
+    # effaçait aussi les poids par type (gates, suspensions) sans signal (audit du
+    # 2026-09-28). Les valeurs de repli sont inchangées.
     try:
         # Exposants d'arrivée (Harville) lus en cache mémoire par le moteur de plan :
         # relus en base au plus toutes les 5 min (cf. ml.reglages_appris).
         from ml.reglages_appris import rafraichir as _rafraichir_reglages
         await _rafraichir_reglages()
-        from ml.bet_performance import get_learned_type_weights, get_model_heat
+    except Exception as e:  # noqa: BLE001
+        log.warning("mise_plan.reglages_appris_indisponibles", course_id=course_id,
+                    err=str(e)[:160])
+    try:
+        from ml.bet_performance import get_learned_type_weights
         roi_weights = await get_learned_type_weights(
             db, profil=profil,
             discipline=getattr(course, "discipline", None),
             nb_partants=getattr(course, "nb_partants", None))
+    except Exception as e:  # noqa: BLE001
+        log.warning("mise_plan.poids_types_indisponibles", course_id=course_id,
+                    err=str(e)[:160])
+        roi_weights = {}
+    try:
+        from ml.bet_performance import get_model_heat
         heat = await get_model_heat(db)
-    except Exception:
-        roi_weights, heat = {}, 0.0
+    except Exception as e:  # noqa: BLE001
+        log.warning("mise_plan.thermostat_indisponible", course_id=course_id,
+                    err=str(e)[:160])
+        heat = 0.0
 
     # Calibration estimé→réel du rapport (par profil × type) : recale les rapports sur les
     # paiements PMU RÉELS appris → fait respecter les tranches de cote dans le bilan réel.
     try:
         from ml.signal_performance import load_rapport_calibration
         rapport_calib = await load_rapport_calibration(db)
-    except Exception:
+    except Exception as e:  # noqa: BLE001
+        log.warning("mise_plan.calibration_rapport_indisponible", course_id=course_id,
+                    err=str(e)[:160])
         rapport_calib = None
     # ROI réel appris PAR BANDE D'EV → la mise se déplace vers les bandes rentables et
     # s'allège sur les zones toxiques (levier ROI direct du moteur de mise).
     try:
         from ml.signal_performance import load_ev_band_performance
         ev_band_perf = await load_ev_band_performance(db)
-    except Exception:
+    except Exception as e:  # noqa: BLE001
+        log.warning("mise_plan.bandes_ev_indisponibles", course_id=course_id,
+                    err=str(e)[:160])
         ev_band_perf = None
 
     # Multiplicateurs appris PAR SIGNAL × PROFIL → le pronostic/plan s'adapte au profil
@@ -2106,6 +2158,48 @@ async def get_mise_plan(
         ev_band_perf=ev_band_perf, user=user, origin="mise_plan",
     )
     return out
+
+
+async def _record_frozen_emission(db, *, course, out: dict, profil: str, montant: float,
+                                  bankroll, user=None) -> None:
+    """Journalise le plan FIGÉ servi à un abonné après le gel (T-10, 10 €).
+
+    Ce plan vient du système (profil_run_log) : ses entrées apprises ne sont pas
+    disponibles ici, et le mêler aux plans recalculés fausserait leur mesure. Origine
+    distincte (`mise_plan_fige`) et configuration explicite, donc version
+    d'algorithme distincte ; il compte en revanche dans l'exposition du jour
+    (`daily_exposure_total` lit toutes les origines de l'abonné).
+    """
+    try:
+        from api.config import get_settings
+        from services.bet_plan_snapshots import (
+            latest_prediction_run_id, record_plan_snapshot, subject_hash,
+        )
+        cotes = {}
+        for niv in out.get("niveaux") or []:
+            for pari in niv.get("paris") or []:
+                for h in pari.get("chevaux") or []:
+                    if h.get("numero") is not None and h.get("cote"):
+                        cotes[int(h["numero"])] = float(h["cote"])
+        await record_plan_snapshot(
+            db,
+            course_id=course.course_id,
+            plan=out,
+            profil=profil,
+            montant_demande=float(montant),
+            bankroll=float(bankroll) if bankroll is not None else None,
+            cotes_utilisees=cotes,
+            algo_config={"profil": profil, "plan_fige_servi": True,
+                         "source": "profil_run_log"},
+            emitted_at=datetime.now(timezone.utc),
+            course_start_at=course.date_heure,
+            subject=subject_hash(getattr(user, "user_id", None), get_settings().secret_key),
+            prediction_run_id=await latest_prediction_run_id(db, course.course_id),
+            origin="mise_plan_fige",
+        )
+    except Exception as e:  # noqa: BLE001 — l'audit ne casse jamais la réponse
+        log.warning("mise_plan.snapshot_fige_skip",
+                    course_id=getattr(course, "course_id", None), err=str(e)[:140])
 
 
 async def _record_plan_emission(

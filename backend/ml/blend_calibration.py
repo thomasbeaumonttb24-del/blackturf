@@ -48,6 +48,7 @@ import numpy as np
 import structlog
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
+from ml.prediction_evaluation import sans_modeles_retires
 
 log = structlog.get_logger(module="blend_calibration")
 
@@ -195,14 +196,14 @@ async def _charger_courses(session: AsyncSession) -> list[tuple]:
     celle FIGÉE au moment du conseil quand elle existe : celle qui a réellement
     servi à mélanger, pas celle d'aujourd'hui.
     """
-    rows = (await session.execute(text("""
+    rows = (await session.execute(text(f"""
         SELECT pe.course_id, pa.numero, pe.proba_top1_raw,
                COALESCE(pe.cote_figee, pa.cote_pmu) AS cote, r.classement
         FROM prediction_evaluation pe
         JOIN participations pa ON pa.participation_id = pe.participation_id
         JOIN courses c         ON c.course_id         = pe.course_id
         JOIN resultats r       ON r.course_id         = pe.course_id
-        WHERE pe.is_replayable = true
+        WHERE pe.is_replayable = true{sans_modeles_retires('pe')}
           AND pe.proba_top1_raw IS NOT NULL
           AND COALESCE(pe.cote_figee, pa.cote_pmu) > 1
           AND r.classement IS NOT NULL

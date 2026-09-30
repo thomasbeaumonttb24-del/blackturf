@@ -13,6 +13,11 @@ name: Maintenance ELO
 #   retrain          réentraînement complet (même fonction et même verrou que celui
 #                    de 02:00 UTC ; promotion seulement si le gate le valide).
 #                    Arrière-plan, suivi avec `statut`.
+#   conf_calcul      patch des features conf_* (clé « même course », 30/09/2026) :
+#                    calcul LECTURE SEULE depuis le 2025-09-01, en arrière-plan,
+#                    fichiers dans /app/models/patch_conf/. Suivi avec `statut`.
+#   conf_appliquer   écrit les clés conf_* du fichier dans features_ml.
+#   conf_retour      réécrit les anciennes valeurs du fichier (annulation).
 #   statut           dernières lignes des journaux de maintenance.
 #
 # Chaque action tourne dans un conteneur JETABLE du service worker
@@ -26,7 +31,8 @@ on:
         description: "Action"
         required: true
         type: choice
-        options: [elo_a_blanc, elo_grille, elo_appliquer, retrain, statut]
+        options: [elo_a_blanc, elo_grille, elo_appliquer, retrain,
+                  conf_calcul, conf_appliquer, conf_retour, statut]
 
 concurrency:
   group: maintenance-elo
@@ -75,10 +81,38 @@ jobs:
                 sleep 30
                 docker ps --format '{{.Names}} {{.Status}}' | grep bt_retrain_manuel || echo "ATTENTION : conteneur absent après 30 s"
                 ;;
+              conf_calcul)
+                if docker ps --format '{{.Names}}' | grep -q '^bt_patch_conf$'; then
+                  echo "Calcul du patch conf_* déjà en cours."; exit 0
+                fi
+                $DC run -d --rm --no-deps --name bt_patch_conf worker \
+                  sh -c "mkdir -p /app/models/patch_conf && python scripts/patch_features_confrontations.py calcul --depuis 2025-09-01 --sortie /app/models/patch_conf/patch_conf_0.jsonl > /app/models/patch_conf/calcul.log 2>&1"
+                sleep 30
+                docker ps --format '{{.Names}} {{.Status}}' | grep bt_patch_conf || echo "ATTENTION : conteneur absent après 30 s"
+                ;;
+              conf_appliquer|conf_retour)
+                if docker ps --format '{{.Names}}' | grep -q '^bt_patch_conf$'; then
+                  echo "::error::Calcul du patch conf_* encore en cours."; exit 1
+                fi
+                OPT=""
+                if [ "$ACTION" = conf_retour ]; then OPT="--retour-arriere"; fi
+                echo "=== $(date -u) $ACTION ($(git rev-parse --short HEAD))" >> "$LOGS/maintenance-elo.log"
+                RC=0
+                # Le fichier .resume.json n'existe qu'à la fin d'un calcul complet.
+                $DC run --rm --no-deps -T worker sh -c \
+                  "test -s /app/models/patch_conf/patch_conf_0.jsonl.resume.json && python scripts/patch_features_confrontations.py appliquer --fichiers '/app/models/patch_conf/patch_conf_*.jsonl' $OPT" \
+                  > /tmp/maintenance-conf.out 2>&1 || RC=$?
+                tee -a "$LOGS/maintenance-elo.log" < /tmp/maintenance-conf.out
+                echo "code retour : $RC"
+                exit $RC
+                ;;
               statut)
                 echo "── ELO ──"; tail -n 30 "$LOGS/maintenance-elo.log" 2>/dev/null || true
                 echo "── retrain manuel ──"
                 docker ps --format '{{.Names}} {{.Status}}' | grep bt_retrain_manuel || echo "(aucun retrain manuel en cours)"
                 $DC exec -T worker sh -c "grep -E 'retrain|promu|rejete|issue|Traceback|Error' /app/models/retrain-manuel.log | tail -n 8" 2>/dev/null || true
+                echo "── patch conf_* ──"
+                docker ps --format '{{.Names}} {{.Status}}' | grep bt_patch_conf || echo "(aucun calcul conf_* en cours)"
+                $DC exec -T worker sh -c "tail -n 5 /app/models/patch_conf/calcul.log; cat /app/models/patch_conf/patch_conf_0.jsonl.resume.json" 2>/dev/null || true
                 ;;
             esac

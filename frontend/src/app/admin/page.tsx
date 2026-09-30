@@ -67,7 +67,7 @@ export default function PilotagePage() {
           label="Encaissé ce mois"
           nombre={revenus ? revenus.totaux.mois_courant_cents / 100 : null}
           format={(v) => eur(v)}
-          sub={abos ? `Récurrent ${eur(abos.resume.mrr)}/mois · ${eur(abos.resume.arr)}/an` : undefined}
+          sub={abos ? `Récurrent ${eur(abos.resume.mrr)}/mois · ${eur(abos.resume.arr)}/an${abos.resume.mrr_resiliations ? ` (hors ${eur(abos.resume.mrr_resiliations)} résiliés)` : ""}` : undefined}
           icone={<Wallet className="h-4 w-4" />}
           accent="bleu"
           tendance={revenus?.totaux.variation_pct}

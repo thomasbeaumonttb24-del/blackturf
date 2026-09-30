@@ -72,3 +72,6 @@ pytest==8.2.2
 pytest-asyncio==0.23.7
 pytest-cov==5.0.0
 aiosqlite==0.20.0
+# Redis en mémoire avec Lua : exécute pour de bon le script atomique du quota
+# de classement (tests/test_quota_classement.py).
+fakeredis[lua]==2.38.0

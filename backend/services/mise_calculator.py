@@ -8,6 +8,10 @@ from typing import Optional
 import math
 import os
 
+import structlog
+
+log = structlog.get_logger()
+
 
 # Mise PLANCHER par pari joué (€) — règle produit : jamais moins de 2€ sur un
 # pari (un pari à 1€ ne vaut pas le coup, surtout sur le profil risqué). C'est le
@@ -26,6 +30,19 @@ CI_WIDTH_PENALTY = 3.0
 # à construire le pari. Mesuré le 2026-09-01 : la dérive médiane du prix entre le
 # gel et le départ est de 30 %, donc ce seuil n'est pas théorique.
 _DERIVE_RAPPORT_SIGNALEE = 0.15
+
+# EV DES COMBINAISONS NEUTRALISÉES (drapeau combo_ev_none, cf. ml.combo_bets) : la
+# calibration estimé→réel ci-dessous recalculait `ev = p × rapport − 1` dès qu'un
+# facteur ≠ 1 existait, ce qui réactivait l'EV « mécaniquement positive » que le
+# drapeau devait supprimer, pour les seuls types calibrés (audit 2026-09-28, M1).
+# False = comportement en service (recalcul) ; True = l'EV neutralisée reste à 0.
+# À ne basculer qu'après mesure au banc de rejeu : cela change la sélection.
+EV_NEUTRALISEE_RESPECTEE = False
+
+
+def _ev_recalculee(c: dict) -> bool:
+    """La calibration doit-elle recalculer l'EV de ce candidat ?"""
+    return not (EV_NEUTRALISEE_RESPECTEE and c.get("_ev_neutralise"))
 
 # Le filet « chaque course est jouée » respecte-t-il le plafond de rang du profil ?
 # False = comportement d'avant le 2026-09-01 (le plafond était ignoré par le repli),
@@ -189,6 +206,14 @@ class PariRec:
     # alors sur `probabilite` / `gain_potentiel`.
     probabilite_brute: Optional[float] = None
     rapport_estime_brut: Optional[float] = None
+    # Facteurs de calibration RÉELLEMENT appliqués à ce pari (1.0 = aucun). Le
+    # re-pricing après le gel (reprice_plan_live) les réapplique au prix du marché :
+    # sans eux il comparait un rapport BRUT à un rapport figé CALIBRÉ, et le seul
+    # facteur (Couplé Gagnant 0,84, Couplé Ordre 0,79) suffisait à afficher « le
+    # marché a bougé » et un gain gonflé de 19 à 27 %, marché immobile. None = plan
+    # émis avant le 2026-09-28 : comportement d'avant.
+    facteur_rapport: Optional[float] = None
+    facteur_proba: Optional[float] = None
     # Traçabilité horse_context : contributions/objections par cheval du ticket +
     # chevaux écartés à profil supérieur. None si horse_contexts n'a pas été fourni
     # à generer_plan (comportement inchangé pour tout appelant qui ne le passe pas).
@@ -566,6 +591,26 @@ PROFIL_CONFIG = {
         "types": {"Couplé Gagnant", "Couplé Ordre", "2sur4", "Simple Gagnant",
                   "Trio", "Tiercé Désordre", "Quarté+ Désordre", "Quinté+ Désordre"},
         "loterie": {"Trio"},
+        # Ticket « gros lot » coupé à 15 partants et plus (2026-09-29). Le trio y gagne
+        # 2,3 % du temps pour un rapport moyen de 15,6 € (retour 0,37 € par euro), contre
+        # 4,3 % × 16,4 € à 12-14 partants (0,70 €) : au-delà, la chance baisse et le
+        # rapport ne monte plus. Rejeu bench_plans 5 560 courses, profil risqué, ROI BRUT
+        # (gros gains inclus — c'est eux que ce ticket achète) :
+        #     trio partout           +7,3 %   (≤10/08 +19,3 · >10/08 −9,3)
+        #     trio sauf 15+          +8,8 %   (≤10/08 +21,1 · >10/08 −8,1)  ← retenu
+        #     trio 12-14 seulement   +6,9 % · trio ≤11 +4,0 % · ≤8 +1,6 % · sans trio +2,0 %
+        # Gains ≥ 150 € : 117 → 116 (le potentiel de gros gain est conservé).
+        "loterie_champ_max": 14,
+        # HANDICAP : types retirés EN PLUS de HANDICAP_TYPES_EXCLUS. Rejeu bench_plans,
+        # 1 099 handicaps (11/06 → 29/09), 10 €, profil risqué, ROI brut ≤10/08 · >10/08,
+        # gains ≥ 150 € / ≥ 300 € / plus gros gain :
+        #     avant le 29/09             −13,3 · −20,4    26 / 4 / 773 €
+        #     sans Trio/2sur4/Multi       −0,4 ·  −8,8    30 / 6 / 773 €   ← retenu
+        #     + sans couplés (29/09)      +4,2 ·  +2,2    13 / 0 / 299 €
+        # Le gagnant sec seul rapportait plus mais supprimait tout gain > 300 € en
+        # handicap : ce sont les couplés d'outsiders qui les produisent. Arbitrage de
+        # l'exploitant du 29/09 : les gros gains font partie du contrat du profil.
+        "handicap_exclus": set(),
         "objectif": "gain",
         # Ancrage STRICT : posé le 2026-09-01, RETIRÉ le 2026-09-02 après mesure.
         #
@@ -746,6 +791,78 @@ PROFIL_CONFIG = {
 }
 
 
+# CONTEXTE DE COURSE — HANDICAP (2026-09-29). Mesure sur 5 601 courses (31/05 → 29/09),
+# paris canoniques construits sur le classement IA figé avant le départ, réglés aux
+# vrais rapports PMU, deux périodes disjointes (avant / après le 10/08) :
+#
+#                         hors handicap   handicap
+#     Couplé Placé r1-r2      −11,1 %      −25,0 %
+#     Couplé Gagnant r1-r2    −13,0 %      −31,7 %
+#     2sur4 r1-r2             −18,2 %      −29,4 %
+#     Trio r1-r2-r3           −38,2 %      −44,2 %   (−60 % winsorisé)
+#     Multi en 5 top 5        −58,2 %      −91,2 %
+#     Simple Gagnant rang 1   −17,4 %       −3,3 %
+#
+# Répliqué sur les deux périodes. En handicap les poids sont faits pour resserrer
+# l'arrivée : l'ordre des premiers est une loterie, mais le cheval que l'IA met en
+# tête garde sa chance. On retire donc des profils les combinaisons à 3 chevaux et
+# plus ; le budget se reporte sur les paris à un cheval et les couplés.
+# (Déclencheur : 29092026R1C7, handicap de 16 partants, Trio 2-4-3 proposé.)
+HANDICAP_TYPES_EXCLUS = frozenset({
+    "Trio", "Trio Ordre", "2sur4", "Tiercé Désordre", "Quarté+ Désordre",
+    "Quinté+ Désordre", "Multi en 4", "Multi en 5", "Multi en 6", "Multi en 7",
+})
+
+
+# Carte apprise type de pari × contexte (ml.contexte_paris), appliquée aux poids appris.
+# ÉTEINTE : mesurée hors échantillon le 2026-09-29 — carte apprise sur 3 234 courses
+# (< 11/08), plans rejoués sur 2 333 courses (11/08 → 29/09), 10 €, heat 0,2, ROI
+# winsorisé ×30, écart apparié (IC 95 % bootstrap) :
+#     prudent  −11,9 → −11,7  [−0,2 ; +0,5]
+#     modéré    −1,9 →  −3,7  [−4,2 ; +0,5]
+#     risqué   −14,3 → −13,9  [−2,0 ; +3,1]
+# Rien de mieux que le moteur actuel : à ce volume, le contexte fin (hippodrome
+# exclu, terrain, champ, handicap) n'ajoute pas d'information utile au-delà des
+# règles déjà posées (handicap). La carte reste calculée chaque nuit ; à remesurer
+# avec `bench_plans.py --carte-fin` quand l'historique aura doublé.
+CONTEXTE_PARIS_ACTIF = False
+
+
+def est_handicap(course_info: Optional[dict]) -> bool:
+    """Course à handicap (HANDICAP, HANDICAP_DIVISE, HANDICAP_DE_CATEGORIE…), lu dans
+    `categorie_particularite` du PMU. Inconnu → False (comportement d'avant)."""
+    cat = (course_info or {}).get("categorie_particularite") or ""
+    return "HANDICAP" in str(cat).upper()
+
+
+def _adapter_contexte(cfg: dict, course_info: Optional[dict]) -> dict:
+    """Retire du profil les types de pari que le contexte de course rend perdants
+    (mesuré, cf. HANDICAP_TYPES_EXCLUS). Ne touche ni aux tranches ni aux mises."""
+    # Ticket « gros lot » réservé aux petits champs (cf. `loterie_champ_max`).
+    _cmax = cfg.get("loterie_champ_max")
+    _cmin = cfg.get("loterie_champ_min")
+    if (_cmax or _cmin) and cfg.get("loterie"):
+        try:
+            _n = int((course_info or {}).get("nb_partants_courants")
+                     or (course_info or {}).get("nb_partants") or 0)
+        except (TypeError, ValueError):
+            _n = 0
+        if (_cmax and _n > _cmax) or (_cmin and _n and _n < _cmin):
+            cfg = dict(cfg)
+            if cfg.get("types") is not None:
+                cfg["types"] = frozenset(cfg["types"]) - cfg["loterie"]
+            cfg["loterie"] = frozenset()
+    if not HANDICAP_TYPES_EXCLUS or not est_handicap(course_info):
+        return cfg
+    cfg = dict(cfg)
+    exclus = HANDICAP_TYPES_EXCLUS | frozenset(cfg.get("handicap_exclus") or ())
+    if cfg.get("types") is not None:
+        cfg["types"] = frozenset(cfg["types"]) - exclus
+    cfg["loterie"] = frozenset(cfg.get("loterie") or ()) - exclus
+    cfg["contexte"] = "handicap"
+    return cfg
+
+
 def _effective_config(profil: str, heat: float) -> dict:
     """Profil EFFECTIF = config de base MODULÉE par `heat` ∈ [-1,+1], le thermostat
     adaptatif (calibration du modèle + ROI récent réel).
@@ -812,6 +929,11 @@ def _effective_config(profil: str, heat: float) -> dict:
         # Types « gros lot » (cf. LOTERIE_MAX_TICKETS) : exemptés du gate dur de
         # l'apprentissage, plafonnés en nombre. Contrat produit → non modulé.
         "loterie": frozenset(base.get("loterie") or ()),
+        # Taille de champ max pour jouer le ticket « gros lot » (None = partout).
+        "loterie_champ_max": base.get("loterie_champ_max"),
+        "loterie_champ_min": base.get("loterie_champ_min"),
+        # Types retirés EN PLUS en course à handicap (cf. _adapter_contexte).
+        "handicap_exclus": frozenset(base.get("handicap_exclus") or ()),
     }
     # Tilt de risque modulé : froid → renforce la sécurité, écrase surprise/coup.
     rp = {}
@@ -1410,8 +1532,19 @@ def generer_plan(
             pass
     palier = _palier(montant)
     roi_weights = roi_weights or {}
+    if CONTEXTE_PARIS_ACTIF:
+        # Carte type de pari × contexte (ml.contexte_paris) : module le poids appris
+        # de chaque type selon ce qu'il rend DANS CE contexte de course. Cache vide
+        # (pas encore appris, ou lecture impossible) → poids inchangés.
+        try:
+            from ml.contexte_paris import appliquer_facteurs, carte_en_cache, facteurs_contexte
+            _fct = facteurs_contexte(carte_en_cache(), course_info)
+            if _fct:
+                roi_weights = appliquer_facteurs(roi_weights, _fct)
+        except Exception as e:  # noqa: BLE001 — sans carte, plan d'avant
+            log.warning("mise_plan.contexte_paris_ignore", err=str(e)[:140])
     heat = max(-1.0, min(1.0, float(heat or 0.0)))
-    cfg = _effective_config(profil, heat)
+    cfg = _adapter_contexte(_effective_config(profil, heat), course_info)
 
     preds = []
     # Largeur de l'intervalle de confiance de proba_top1, PAR CHEVAL — sert à réduire la
@@ -1556,10 +1689,12 @@ def generer_plan(
                                                zone=zone)
                 if f and f != 1.0:
                     c["rapport_estime"] = round(float(c["rapport_estime"]) * f, 1)
-                    c["ev"] = round(float(c["proba_gain"]) * c["rapport_estime"] - 1.0, 4)
+                    if _ev_recalculee(c):
+                        c["ev"] = round(float(c["proba_gain"]) * c["rapport_estime"] - 1.0, 4)
                     c["_rapport_cal_f"] = round(float(f), 3)
-        except Exception:
-            pass
+                    c["_rapport_cal_f_exact"] = float(f)
+        except Exception as e:  # noqa: BLE001 — repli inchangé, mais visible
+            log.warning("mise_plan.calibration_rapport_echec", err=str(e)[:160])
 
     # CALIBRATION de la PROBABILITÉ, mesurée le 2026-08-19 sur 19 968 paris réglés :
     # le modèle annonce systématiquement plus souvent qu'il ne réalise (Simple
@@ -1578,10 +1713,12 @@ def generer_plan(
                 fp = proba_realization_factor(c.get("type_pari"), rapport_calib)
                 if fp and fp != 1.0:
                     c["proba_gain"] = round(float(c["proba_gain"]) * fp, 4)
-                    c["ev"] = round(float(c["proba_gain"]) * float(c["rapport_estime"]) - 1.0, 4)
+                    if _ev_recalculee(c):
+                        c["ev"] = round(float(c["proba_gain"]) * float(c["rapport_estime"]) - 1.0, 4)
                     c["_proba_cal_f"] = round(float(fp), 3)
-        except Exception:
-            pass
+                    c["_proba_cal_f_exact"] = float(fp)
+        except Exception as e:  # noqa: BLE001 — repli inchangé, mais visible
+            log.warning("mise_plan.calibration_proba_echec", err=str(e)[:160])
 
     # TILT PAR TRANCHE DE RAPPORT — le signal le plus solide de nos données (19 972
     # paris réglés) : le ROI réel décroît continûment avec le rapport visé. Simple
@@ -1598,8 +1735,8 @@ def generer_plan(
             for c in cands:
                 c["_pb_mult"] = float(payout_bucket_multiplier(
                     c.get("type_pari"), c.get("rapport_estime"), rapport_calib))
-        except Exception:
-            pass
+        except Exception as e:  # noqa: BLE001 — repli inchangé, mais visible
+            log.warning("mise_plan.tilt_tranche_echec", err=str(e)[:160])
 
     # pool_couverture : candidats validés par les gates du profil mais écartés de la
     # sélection (conviction plus faible). Vivier des tickets de COUVERTURE.
@@ -3658,6 +3795,11 @@ def _motif_rejet(c: dict, cfg: dict, roi_weights: Optional[dict] = None,
                  montant: Optional[float] = None) -> str:
     """Motif honnête pour lequel un candidat n'a PAS été retenu par ce profil."""
     allowed = cfg.get("types")
+    if cfg.get("contexte") == "handicap" and _fam(c["type_pari"]) in (
+            HANDICAP_TYPES_EXCLUS | frozenset(cfg.get("handicap_exclus") or ())):
+        return ("Course à handicap : les poids resserrent l'arrivée, l'ordre des premiers "
+                "devient une loterie. Mesuré sur l'historique réel, ce type de pari y perd "
+                "bien plus qu'ailleurs — on joue plutôt les chevaux un par un.")
     if allowed is not None and c["type_pari"] not in allowed:
         return "Type de pari hors méthode de ce profil."
     # Type SUPPRIMÉ par l'apprentissage (ROI réel prouvé perdant sur ce contexte) :
@@ -3917,6 +4059,8 @@ def _assemble_plan(selected: list[dict], montant: int, palier: dict, kelly_warn:
             hors_tranche=bool(c.get("_hors_bande")),
             probabilite_brute=c.get("_proba_brute"),
             rapport_estime_brut=c.get("_rapport_brut"),
+            facteur_rapport=float(c.get("_rapport_cal_f_exact") or 1.0),
+            facteur_proba=float(c.get("_proba_cal_f_exact") or 1.0),
             contexte_traceabilite=c.get("contexte_traceabilite"),
         )
         niveaux_map.setdefault(c["niveau"], []).append(pari)
@@ -4040,6 +4184,39 @@ def _plan_vide(montant: float, profil: str,
     )
 
 
+def _prix_live_calibre(c: dict, p: dict) -> tuple[float, float, float]:
+    """(rapport, proba, EV) d'un candidat LIVE, calibrés comme le pari figé `p`.
+
+    Réapplique les facteurs que `generer_plan` a RÉELLEMENT appliqués à ce pari
+    (`facteur_rapport`, `facteur_proba`), dans le même ordre et avec les mêmes
+    arrondis : rapport puis EV, proba puis EV. À marché inchangé, le pari re-tarifé
+    est donc identique au pari figé. Plan émis avant le 2026-09-28 (pas de facteurs) :
+    valeurs brutes du candidat, comme avant."""
+    rap, proba, ev = float(c["rapport_estime"]), c["proba_gain"], c["ev"]
+    fr, fp = p.get("facteur_rapport"), p.get("facteur_proba")
+    if fr is None and fp is None:
+        return rap, proba, ev
+    fr, fp = float(fr or 1.0), float(fp or 1.0)
+    if fr != 1.0:
+        rap = round(rap * fr, 1)
+        if _ev_recalculee(c):
+            ev = round(float(proba) * rap - 1.0, 4)
+    if fp != 1.0:
+        proba = round(float(proba) * fp, 4)
+        if _ev_recalculee(c):
+            ev = round(float(proba) * float(rap) - 1.0, 4)
+    return rap, proba, ev
+
+
+def _gain_affiche(mise: float, rap: float, rapport_min: float) -> float:
+    """Gain affiché, avec le MÊME relèvement d'arrondi que `_assemble_plan` : un ticket
+    dont le rapport atteint la tranche ne s'affiche jamais sous son plancher."""
+    gain = round(mise * rap)
+    if mise > 0 and rapport_min > 0 and rap >= rapport_min and gain < math.ceil(mise * rapport_min):
+        gain = math.ceil(mise * rapport_min)
+    return gain
+
+
 def reprice_plan_live(plan: dict, predictions: list[dict], course_info: dict) -> dict:
     """Recalcule les GAINS potentiels d'un plan déjà figé en utilisant les cotes LIVE,
     SANS toucher à la sélection (mêmes paris, mêmes chevaux, mêmes mises). Le rapport de
@@ -4113,11 +4290,11 @@ def reprice_plan_live(plan: dict, predictions: list[dict], course_info: dict) ->
             key = (p.get("type"), frozenset(pari_horses))
             c = look.get(key)
             if c:
-                rap = float(c["rapport_estime"])
+                rap, proba_live, ev_live = _prix_live_calibre(c, p)
                 rap_fige = float(p.get("rapport_estime") or 0.0)
-                p["gain_potentiel"] = round(mise * rap)
-                p["ev_estime"] = c["ev"]
-                p["probabilite"] = c["proba_gain"]
+                p["gain_potentiel"] = _gain_affiche(mise, rap, rapport_min)
+                p["ev_estime"] = ev_live
+                p["probabilite"] = proba_live
                 p["rapport_live"] = round(rap, 2)
                 # Le prix a pu s'effondrer entre le gel et le départ : un ticket vendu
                 # « ×10 minimum » qui ne paie plus que ×4 doit le DIRE. Sans ce
@@ -4134,14 +4311,18 @@ def reprice_plan_live(plan: dict, predictions: list[dict], course_info: dict) ->
                     cl = _cotes_live.get(int(h["numero"])) if h.get("numero") is not None else None
                     if cl:
                         h["cote_live"] = round(float(cl), 2)
-                ev_pondere += mise * float(c["ev"])
+                ev_pondere += mise * float(ev_live)
             elif p.get("type") == "Simple Gagnant" and len(pari_horses) == 1 \
                     and next(iter(pari_horses)) in cotes_live:
                 # Gagnant sec : le rapport EST la cote du cheval, aucun catalogue requis.
                 num = next(iter(pari_horses))
-                rap = cotes_live[num]
+                cote_marche = cotes_live[num]
+                rap = cote_marche
+                # Même facteur de rapport que le pari figé (cote → rapport payé).
+                if p.get("facteur_rapport") not in (None, 1.0):
+                    rap = cote_marche * float(p["facteur_rapport"])
                 rap_fige = float(p.get("rapport_estime") or 0.0)
-                p["gain_potentiel"] = round(mise * rap)
+                p["gain_potentiel"] = _gain_affiche(mise, rap, rapport_min)
                 p["rapport_live"] = round(rap, 2)
                 if rap_fige > 0 and abs(rap / rap_fige - 1.0) >= _DERIVE_RAPPORT_SIGNALEE:
                     p["rapport_a_bouge"] = True
@@ -4149,7 +4330,7 @@ def reprice_plan_live(plan: dict, predictions: list[dict], course_info: dict) ->
                     p["hors_tranche_live"] = True
                 for h in p.get("chevaux", []):
                     if h.get("numero") is not None and int(h["numero"]) == num:
-                        h["cote_live"] = round(rap, 2)
+                        h["cote_live"] = round(cote_marche, 2)   # la COTE, pas le rapport calibré
                 # L'EV suit la même définition : proba figée × rapport live − 1.
                 _pr = float(p.get("probabilite") or 0.0)
                 if _pr > 0:
@@ -4211,6 +4392,8 @@ def plan_to_dict(plan: MisePlan) -> dict:
                         "hors_tranche": p.hors_tranche,
                         "probabilite_brute": p.probabilite_brute,
                         "rapport_estime_brut": p.rapport_estime_brut,
+                        "facteur_rapport": p.facteur_rapport,
+                        "facteur_proba": p.facteur_proba,
                         "contexte_traceabilite": p.contexte_traceabilite,
                     }
                     for p in n.paris

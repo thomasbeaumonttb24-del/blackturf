@@ -404,14 +404,21 @@ async def ml_status(
 @router.get("/stats/dashboard-summary")
 async def dashboard_summary(
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_user),
+    user: User = Depends(get_current_user),
     redis: aioredis.Redis = Depends(get_redis),
 ):
     """
     Données agrégées pour le tableau de bord utilisateur.
     Nombre de courses du jour, value bets actifs, top 3 VBs. Cache 2 min.
     """
-    CACHE_KEY = "stats:dashboard-summary"
+    from services.valuebets_visibilite import PLANS_AVEC_VALUE_BETS, PLANS_DIFFERES
+    # Le top 3 nomme des paris de valeur : réservé aux abonnés, avec le délai de
+    # 15 min du Standard. La réponse était partagée par TOUS les comptes connectés
+    # (gratuits compris) sous une clé de cache unique — le paywall ne tenait
+    # qu'à l'affichage du navigateur.
+    classe = ("aucun" if user.plan not in PLANS_AVEC_VALUE_BETS
+              else "differe" if user.plan in PLANS_DIFFERES else "direct")
+    CACHE_KEY = f"stats:dashboard-summary:{classe}"
     cached = await _cache_get(redis, CACHE_KEY)
     if cached:
         return cached
@@ -461,11 +468,11 @@ async def dashboard_summary(
         # 6 h) : la réponse est partagée entre utilisateurs, donc sans le délai
         # Standard, qui dépend du plan. Avant, seul `actif` filtrait : un pari
         # d'une course sans résultat pouvait rester en tête du tableau de bord.
-        .where(ValueBet.niveau >= 2, *_vb_filtres_sql(None))
+        .where(ValueBet.niveau >= 2, *_vb_filtres_sql(user.plan))
         .order_by(ValueBet.ev_max.desc())
         .limit(3)
     )
-    top_vbs_rows = (await db.execute(q_vbs)).all()
+    top_vbs_rows = (await db.execute(q_vbs)).all() if classe != "aucun" else []
     top_vbs = [
         {
             "nom_cheval": cheval.nom,

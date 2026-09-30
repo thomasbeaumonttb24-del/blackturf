@@ -87,7 +87,7 @@ const FEATURES = [
 
 const PLANS = [
   { name: "Découverte", price: "0€", period: "/mois", desc: "Découvrez la plateforme",
-    features: ["Programme du jour", "Marché des cotes en direct", "1 pronostic/jour", "Défi du mois : un abonnement à gagner", "Statistiques publiques vérifiées"],
+    features: ["Programme du jour", "Marché des cotes en direct", "1 pronostic complet/jour", "Défi du mois : un abonnement à gagner", "Statistiques publiques vérifiées"],
     cta: "Commencer gratuitement", href: "/inscription", popular: false },
   { name: "Standard", price: "12€", period: "/mois", desc: "L'essentiel pour parier mieux",
     features: ["5 pronostics/jour", "Top 3 paris de valeur (délai 15 min)", "Calculateur de mise", "Alertes push & e-mail", "Historique des résultats"],
@@ -841,7 +841,7 @@ export default async function HomePage() {
                 points: [
                   "Le palmarès complet est public, course par course",
                   "Programme du jour et cotes accessibles sans payer",
-                  "1 pronostic par jour pour juger sur pièces",
+                  "1 pronostic complet par jour pour juger sur pièces",
                 ],
                 plan: "Découverte · 0€",
                 href: "/inscription",

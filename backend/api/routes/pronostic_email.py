@@ -285,6 +285,18 @@ async def envoyer_pronostic(
     if not course:
         raise HTTPException(status_code=404, detail="Course introuvable")
 
+    # FERMÉ pour toute course non courue (règle du 2026-09-30) : le classement
+    # complet d'une course à venir exige un COMPTE (1 par jour en gratuit, cf.
+    # services.quota_classement). Cet envoi anonyme le donnait à n'importe quelle
+    # adresse, et le verrou « 1 par adresse et par jour » se contournait avec des
+    # alias (`nom+1@…`) — un classement illimité, sans compte, valeurs Expert
+    # comprises. Rien n'est enregistré, rien ne part.
+    if course.statut != "termine":
+        return DemandeOut(
+            ok=False,
+            message="Créez votre compte gratuit pour révéler le classement complet d'une course par jour.",
+        )
+
     chevaux = await _classement_complet(db, course)
     if not chevaux:
         # Rien à envoyer : on ne promet pas un pronostic qui n'existe pas encore.

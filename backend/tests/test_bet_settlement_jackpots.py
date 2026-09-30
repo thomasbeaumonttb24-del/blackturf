@@ -152,3 +152,37 @@ def test_quinte_trois_sur_cinq():
 def test_quinte_zero_sur_cinq():
     res = _quinte([2, 5, 6, 7, 9], DETAIL_COMPLET)
     assert res["gagne"] is False and res["rapport_reel"] is None
+
+
+# ── Tiercé / Quarté+ unitaires arrivés dans l'ordre joué (audit 2026-09-28) ───
+def test_tierce_quarte_dans_l_ordre_paient_l_ordre():
+    for bet_type, numbers, expected in (
+        ("Tiercé Désordre", [1, 4, 3], 1479.9),
+        ("Quarté+ Désordre", [1, 4, 3, 10], 2115.4),
+    ):
+        res = settle_pari(bet_type, numbers, ARRIVEE, AGGREGATE, 16, DETAIL)
+        assert res["gagne"] is True and res["rapport_reel"] == expected, bet_type
+
+
+def test_tierce_quarte_autre_ordre_paient_le_desordre():
+    for bet_type, numbers, expected in (
+        ("Tiercé Désordre", [4, 1, 3], 175.8),
+        ("Quarté+ Désordre", [1, 4, 10, 3], 168.5),
+    ):
+        res = settle_pari(bet_type, numbers, ARRIVEE, AGGREGATE, 16, DETAIL)
+        assert res["rapport_reel"] == expected, bet_type
+
+
+def test_tierce_quarte_ordre_d_un_champ_regle_au_desordre():
+    for bet_type, numbers, expected in (
+        ("Tiercé Désordre", [1, 4, 3], 175.8),
+        ("Quarté+ Désordre", [1, 4, 3, 10], 168.5),
+    ):
+        res = settle_pari(bet_type, numbers, ARRIVEE, AGGREGATE, 16, DETAIL, ordre_joue=False)
+        assert res["rapport_reel"] == expected, bet_type
+
+
+def test_tierce_ordre_sans_rapport_ordre_publie_reste_en_attente():
+    sans_ordre = {"e_tierce": [e for e in DETAIL["e_tierce"] if "Désordre" in e["libelle"]]}
+    res = settle_pari("Tiercé Désordre", [1, 4, 3], ARRIVEE, AGGREGATE, 16, sans_ordre)
+    assert res["gagne"] is True and res["rapport_reel"] is None

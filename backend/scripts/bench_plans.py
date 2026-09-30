@@ -428,7 +428,70 @@ def _v_csv_p3():
     _G["transform"] = _garder("proba_top3")
 
 
+def _v_sans_handicap():
+    """Moteur d'avant le 2026-09-29 : aucune adaptation au handicap."""
+    from services import mise_calculator as mc
+    mc.HANDICAP_TYPES_EXCLUS = frozenset()
+    for cfg in mc.PROFIL_CONFIG.values():
+        cfg["handicap_exclus"] = set()
+
+
+def _v_handicap_large():
+    """Handicap : Trio/2sur4/Multi retirés, couplés du risqué conservés."""
+    from services import mise_calculator as mc
+    mc.PROFIL_CONFIG["agressif"]["handicap_exclus"] = set()
+
+
+def _v_handicap_simples():
+    """Handicap : paris à UN cheval seulement (couplés retirés aussi)."""
+    from services import mise_calculator as mc
+    mc.HANDICAP_TYPES_EXCLUS = mc.HANDICAP_TYPES_EXCLUS | {
+        "Couplé Placé", "Couplé Gagnant", "Couplé Ordre"}
+
+
+def _v_x9():
+    """Risqué : plancher de rapport ×9 au lieu de ×10 (tolérance 10 %)."""
+    from services import mise_calculator as mc
+    mc.PROFIL_CONFIG["agressif"]["rapport_min"] = 9.0
+    mc.PROFIL_CONFIG["agressif"]["gain_cible_mult"] = 9.0
+
+
+def _v_x9_sans_handicap():
+    _v_sans_handicap()
+    _v_x9()
+
+
+def _v_trio_c8():
+    from services import mise_calculator as mc
+    mc.PROFIL_CONFIG["agressif"]["loterie_champ_max"] = 8
+
+
+def _v_trio_c11():
+    from services import mise_calculator as mc
+    mc.PROFIL_CONFIG["agressif"]["loterie_champ_max"] = 11
+
+
+def _v_trio_12_14():
+    from services import mise_calculator as mc
+    mc.PROFIL_CONFIG["agressif"]["loterie_champ_min"] = 12
+    mc.PROFIL_CONFIG["agressif"]["loterie_champ_max"] = 14
+
+
+def _v_trio_sauf15():
+    from services import mise_calculator as mc
+    mc.PROFIL_CONFIG["agressif"]["loterie_champ_max"] = 14
+
+
 VARIANTS = {
+    "trio_12_14": _v_trio_12_14,
+    "trio_sauf15": _v_trio_sauf15,
+    "trio_c8": _v_trio_c8,
+    "trio_c11": _v_trio_c11,
+    "sans_handicap": _v_sans_handicap,
+    "handicap_simples": _v_handicap_simples,
+    "handicap_large": _v_handicap_large,
+    "x9": _v_x9,
+    "x9_sans_handicap": _v_x9_sans_handicap,
     "melange": _v_melange,
     "csv": _v_csv,
     "csv_p1": _v_csv_p1,
@@ -507,7 +570,8 @@ async def _charger(debut, fin, limit):
                 continue
             ci_r = (await s.execute(text("""
                 SELECT est_quinte, est_quarte, est_tierce, est_2sur4, nb_partants,
-                       paris_disponibles, discipline, date_heure, hippodrome_nom
+                       paris_disponibles, discipline, date_heure, hippodrome_nom,
+                       categorie_particularite, terrain_officiel
                 FROM courses WHERE course_id = :c"""), {"c": cid})).fetchone()
             res = (await s.execute(text("""
                 SELECT classement, rapports, rapports_detail FROM resultats
@@ -520,11 +584,14 @@ async def _charger(debut, fin, limit):
             ci = dict(ci)
             ci["nb_partants"] = ci_r[4] or len(vivants)
             ci["discipline"] = ci_r[6]
+            ci["categorie_particularite"] = ci_r[9]
+            ci["terrain_officiel"] = ci_r[10]
             rang1 = max(vivants, key=lambda p: float(p["proba_top1"] or 0))["numero"]
             favori = min(vivants, key=lambda p: float(p["cote_pmu"]))["numero"]
             data.append({
                 "course_id": cid, "date": ci_r[7].date().isoformat(),
                 "discipline": ci_r[6], "nb": int(ci["nb_partants"]),
+                "handicap": int("HANDICAP" in str(ci_r[9] or "").upper()),
                 "desaccord": int(rang1) != int(favori),
                 "preds": preds, "ci": ci,
                 "classement": res[0], "rapports": res[1], "rapports_detail": res[2],
@@ -558,6 +625,7 @@ async def _poids(session, cles):
 # Worker
 # ──────────────────────────────────────────────────────────────────────────────
 _G = {}
+_CARTE: dict = {}
 
 
 def _init(variant, heat, rc, ev, poids):
@@ -576,6 +644,9 @@ def _run_course(d):
         preds, desaccord = _G["transform"](d)
     for profil in PROFILS:
         rw = _G["poids"].get(f"{profil}|{d['discipline']}|{d['nb']}") or {}
+        if _CARTE:
+            from ml.contexte_paris import appliquer_facteurs, facteurs_contexte
+            rw = appliquer_facteurs(rw, facteurs_contexte(_CARTE, d["ci"]))
         try:
             plan = plan_to_dict(generer_plan(
                 MONTANT, profil, preds, d["ci"], None, rw, _G["heat"], None,
@@ -611,6 +682,7 @@ def _run_course(d):
         rows.append({
             "course_id": d["course_id"], "date": d["date"], "discipline": d["discipline"],
             "nb": d["nb"], "desaccord": int(desaccord), "profil": profil,
+            "handicap": d.get("handicap", 0),
             "nb_paris": len(paris), "mise": round(mise, 2), "gain": round(gain, 2),
             "gain_w": round(sum(min(g, WINSOR * m) for m, g in gains), 2),
             "n_gagne": n_gagne, "n_attente": n_att,
@@ -626,7 +698,7 @@ def _run_course(d):
     return rows
 
 
-CHAMPS = ["course_id", "date", "discipline", "nb", "desaccord", "profil", "nb_paris", "mise",
+CHAMPS = ["course_id", "date", "discipline", "nb", "desaccord", "handicap", "profil", "nb_paris", "mise",
           "gain", "gain_w", "n_gagne", "n_attente", "max_mise", "hors_bande", "sous_tranche",
           "types", "mises", "gains", "rangs_max", "erreur"]
 
@@ -725,6 +797,9 @@ def main():
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--resume", nargs="*", default=None, help="résumer des CSV existants")
     ap.add_argument("--segments", action="store_true")
+    ap.add_argument("--carte-fin", default=None,
+                    help="applique la carte contexte (ml.contexte_paris) apprise sur les "
+                         "courses AVANT cette date — hors échantillon si ≤ --debut")
     a = ap.parse_args()
 
     if a.resume:
@@ -749,6 +824,16 @@ def main():
         await s.close()
         return heat, rc, ev, poids
     heat, rc, ev, poids = loop.run_until_complete(_prep())
+    if a.carte_fin:
+        async def _carte():
+            from db.database import AsyncSessionLocal
+            from ml.contexte_paris import apprendre_carte, charger_courses
+            f = _dt.datetime.fromisoformat(a.carte_fin).replace(tzinfo=_dt.timezone.utc)
+            async with AsyncSessionLocal() as s:
+                return apprendre_carte(await charger_courses(s, fin=f))
+        _CARTE.update(loop.run_until_complete(_carte()))   # hérité par fork
+        print(f"carte contexte apprise < {a.carte_fin} : {_CARTE['n_courses']} courses, "
+              f"{len(_CARTE['cases'])} cases", flush=True)
     print(f"heat={heat:.3f}  poids appris={len(poids)} contextes  variant={a.variant}", flush=True)
 
     import multiprocessing as mp

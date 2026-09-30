@@ -24,8 +24,8 @@ import {
   Sparkles, Users, Calculator, ArrowLeftRight,
 } from "lucide-react";
 import Link from "next/link";
+import { Button } from "@/components/ui/button";
 import { TrendingUp as IconeMarcheDirect } from "lucide-react";
-import { CheckoutButton } from "@/components/billing/CheckoutButton";
 import { CompteGratuitCta } from "@/components/billing/CompteGratuitCta";
 import { peutDemarrerEssai } from "@/lib/auth";
 import useSWR from "swr";
@@ -1497,7 +1497,7 @@ export default function ProgrammeClient({
           <CompteGratuitCta
             icone={IconeMarcheDirect}
             titre="Suivez le marché des cotes en direct sur ces courses"
-            texte="Créez votre compte gratuit en 30 secondes : l'évolution des cotes minute par minute, le classement de l'algorithme sur une course par jour et votre plan de mise."
+            texte="Créez votre compte gratuit en 30 secondes : l'évolution des cotes minute par minute, le classement complet de l'algorithme sur une course par jour, avec son plan de mise."
             suite="/programme"
           />
         )}
@@ -1507,9 +1507,9 @@ export default function ProgrammeClient({
           <div className="flex flex-wrap items-center justify-between gap-3.5 rounded-[20px] px-5 py-4" style={{ border: "1px solid rgba(16,185,129,.28)", background: "linear-gradient(135deg,#ECFDF5,#FFFBF0)" }}>
             <div className="min-w-[200px] flex-1">
               <p className="text-sm font-bold text-emerald-900">Paris de valeur de ce soir : 7 jours offerts</p>
-              <p className="mt-1 text-xs text-emerald-800">Essai Standard gratuit — carte demandée, 0 € prélevé avant la fin de l&apos;essai.</p>
+              <p className="mt-1 text-xs text-emerald-800">Essai Standard ou Expert gratuit — carte demandée, 0 € prélevé avant la fin de l&apos;essai.</p>
             </div>
-            <CheckoutButton plan="standard" periodicite="monthly" label="Démarrer mon essai" size="default" className="flex-shrink-0" />
+            <Button variant="brand" size="default" className="flex-shrink-0" asChild><Link href="/tarifs#formules">Choisir mon essai</Link></Button>
           </div>
         )}
 

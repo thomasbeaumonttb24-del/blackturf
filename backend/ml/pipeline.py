@@ -1861,6 +1861,13 @@ async def _run_nightly_retraining_unlocked() -> None:
                 else "pipeline.profil_weights_done",
                 n_runs=_plw.get("n_observed_runs", _plw.get("n_total_runs")),
             )
+    # Carte type de pari × contexte (ml.contexte_paris) : paris CANONIQUES réglés aux
+    # vrais rapports sur toutes les courses, joués ou non par les plans. Lue par le
+    # moteur de plans via le cache de ml.reglages_appris.
+    async with etape(AsyncSessionLocal, "contexte_paris"):
+        from ml.contexte_paris import calculer_et_sauver as _carte_contexte
+        async with AsyncSessionLocal() as cp_session:
+            await _carte_contexte(cp_session)
     # Ré-apprend la calibration estimé→réel du RAPPORT par (profil × type) depuis les
     # pronos figés réglés → le gate de bande s'applique au rapport RÉELLEMENT attendu :
     # un type qui paie sous la tranche de son profil (ex. Placé favori ×1.3 en prudent)
@@ -2910,7 +2917,9 @@ async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Option
         try:
             from ml.cote_calibration import load_cote_calibration
             _cote_calib = await load_cote_calibration(session)
-        except Exception:
+        except Exception as e:  # noqa: BLE001 — repli inchangé, mais visible
+            log.warning("predict.cote_calibration_indisponible", course_id=course_id,
+                        err=str(e)[:160])
             _cote_calib = None
         # Apprentissage par signal (ROI réel par signal, recalc nightly) — module
         # le niveau des value bets vers les signaux historiquement gagnants.
@@ -2919,7 +2928,9 @@ async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Option
             from ml.signal_performance import load_signal_performance, signal_multiplier as _sig_mult_fn
             _signal_perf = await load_signal_performance(session)
             _sig_mult = _sig_mult_fn
-        except Exception:
+        except Exception as e:  # noqa: BLE001 — repli inchangé, mais visible
+            log.warning("predict.signal_performance_indisponible", course_id=course_id,
+                        err=str(e)[:160])
             _signal_perf = None
         # ROI réel par BANDE D'EV (recalc nightly) — gate d'ÉMISSION des value bets
         # (bande au ROI shrinké négatif → pas de VB, cf. flag ev_band_gate). Était
@@ -2928,7 +2939,9 @@ async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Option
         try:
             from ml.signal_performance import load_ev_band_performance
             _ev_band_perf = await load_ev_band_performance(session)
-        except Exception:
+        except Exception as e:  # noqa: BLE001 — repli inchangé, mais visible
+            log.warning("predict.bandes_ev_indisponibles", course_id=course_id,
+                        err=str(e)[:160])
             _ev_band_perf = None
 
         # FLAG devig_gates : overround du champ. Calculé une fois par course.
@@ -3861,67 +3874,6 @@ async def _notify_result_subscribers(course_id: str) -> None:
 
 def _get_cheval_id_from_resultat(entry: dict, resultat: Resultat) -> str:
     return entry.get("cheval_id", "")
-
-
-async def _broadcast_value_bet_alert(
-    course_id: str,
-    nom_cheval: str,
-    hippodrome: str,
-    heure: str,
-    vb: dict,
-    cote: Optional[float],
-) -> None:
-    """
-    Diffuse un value bet via :
-    - Redis pub/sub → tous les WS connectés
-    - Push notifications → utilisateurs abonnés avec push_subscription
-    """
-    try:
-        from api.routes.ws import broadcast_alert
-        from services.alerts import send_web_push, send_inapp
-        from db.database import AsyncSessionLocal
-
-        etoiles = "⭐" * vb["niveau"]
-        payload = {
-            "type": "value_bet",
-            "vb_id": None,
-            "course_id": course_id,
-            "nom_cheval": nom_cheval,
-            "hippodrome": hippodrome,
-            "heure": heure,
-            "cote": cote,
-            "ev": round(vb["ev_max"], 4),
-            "niveau": vb["niveau"],
-            "spi_detected": vb.get("spi_detected", False),
-            "ts": datetime.now(timezone.utc).isoformat(),
-        }
-
-        # Broadcast WebSocket (tous les users connectés)
-        await broadcast_alert(payload)
-
-        # Push notifications aux users abonnés standard+
-        if vb["niveau"] >= 2:
-            async with AsyncSessionLocal() as session:
-                from db.models import User
-                from sqlalchemy import select
-                users_res = await session.execute(
-                    select(User).where(
-                        User.push_subscription.isnot(None),
-                        User.is_active == True,
-                        User.plan.in_(["starter", "standard", "expert"]),
-                    )
-                )
-                users = users_res.scalars().all()
-                for user in users:
-                    await send_web_push(
-                        subscription=user.push_subscription,
-                        title=f"Value Bet {etoiles} — {nom_cheval}",
-                        body=f"{hippodrome} {heure} · EV +{round(vb['ev_max']*100, 1)}%",
-                        data=payload,
-                    )
-
-    except Exception as e:
-        log.error("pipeline.broadcast_vb.failed", error=str(e))
 
 
 # ─────────────────────────────────────────────

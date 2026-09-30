@@ -431,7 +431,7 @@ export function Navbar() {
                             className="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-brand-gold-dark font-medium hover:bg-brand-gold-tint/60 transition-colors"
                             onClick={() => setUserMenuOpen(false)}
                           >
-                            <Zap className="h-4 w-4" /> {peutDemarrerEssai(user) ? "Essai gratuit 7 jours" : "Passer Standard"}
+                            <Zap className="h-4 w-4" /> {peutDemarrerEssai(user) ? "Essai gratuit 7 jours" : "Voir les formules"}
                           </Link>
                         )}
                         {/* Une seule porte vers l'administration.

@@ -75,6 +75,14 @@ class Encaissement:
     facture_id: Optional[str]
     recu_url: Optional[str]
     description: Optional[str]
+    # Ce qui a été FACTURÉ (prix Stripe de la ligne d'abonnement), pas la formule
+    # actuelle du client : un abonné passé d'Expert à Standard après avoir réglé
+    # une facture Expert a bien payé de l'Expert (cas réel du 2026-09-29).
+    price_id: Optional[str] = None
+    plan_prix: Optional[str] = None
+    # `subscription_update` = facture née d'un changement de formule (ou de la
+    # fin d'un essai refusé) ; `subscription_cycle` = échéance ordinaire.
+    motif_facture: Optional[str] = None
 
 
 @dataclass
@@ -96,10 +104,29 @@ class Virement:
 
 
 @dataclass
+class FraisDivers:
+    """Frais Stripe débités hors paiement (Billing, Radar…), en centimes positifs."""
+    cree_le: datetime
+    montant_cents: int
+    description: Optional[str]
+
+
+@dataclass
+class Litige:
+    """Mouvement de solde d'un litige bancaire (perdu : repris > 0 ; gagné : < 0)."""
+    cree_le: datetime
+    repris_cents: int
+    frais_cents: int
+    net_cents: int
+
+
+@dataclass
 class Grand_livre:
     encaissements: list[Encaissement] = field(default_factory=list)
     remboursements: list[Remboursement] = field(default_factory=list)
     virements: list[Virement] = field(default_factory=list)
+    frais_divers: list[FraisDivers] = field(default_factory=list)
+    litiges: list[Litige] = field(default_factory=list)
     lu_le: float = 0.0
 
 
@@ -112,6 +139,26 @@ def _pages(ressource: Any, **params: Any) -> Iterable[Any]:
     return ressource.list(limit=100, **params).auto_paging_iter()
 
 
+def ligne_facturee(facture: Any) -> tuple[Optional[str], Optional[str]]:
+    """(price_id, plan des métadonnées du prix) de la ligne principale d'une facture.
+
+    Ligne principale = le plus gros montant positif ; les lignes de prorata
+    négatives (crédit d'un changement de formule) sont ignorées. Lit les deux
+    formes de l'API : `line.price` (historique) et `line.pricing.price_details`.
+    """
+    if not isinstance(facture, dict) and not hasattr(facture, "get"):
+        return None, None
+    meilleur, prix, meta = -1, None, None
+    for ligne in _g(facture, "lines", "data", defaut=[]) or []:
+        montant = int(_g(ligne, "amount", defaut=0) or 0)
+        p = _g(ligne, "price")
+        pid = _id(p) or _g(ligne, "pricing", "price_details", "price")
+        if pid and montant > meilleur:
+            meilleur, prix = montant, pid
+            meta = _g(p, "metadata", "plan") if not isinstance(p, str) else None
+    return prix, meta
+
+
 def _encaissement(ch: Any) -> Optional[Encaissement]:
     # Seul un débit RÉUSSI et CAPTURÉ est de l'argent encaissé : un échec, une
     # autorisation non capturée ou un litige en cours ne le sont pas.
@@ -122,6 +169,8 @@ def _encaissement(ch: Any) -> Optional[Encaissement]:
     frais = int(_g(bt, "fee", defaut=0)) if isinstance(bt, dict) else 0
     net = int(_g(bt, "net", defaut=montant - frais)) if isinstance(bt, dict) else montant - frais
     client = _g(ch, "customer")
+    facture = _g(ch, "invoice")
+    price_id, plan_prix = ligne_facturee(facture) if not isinstance(facture, str) else (None, None)
     email = (
         _g(ch, "billing_details", "email")
         or _g(ch, "receipt_email")
@@ -140,6 +189,9 @@ def _encaissement(ch: Any) -> Optional[Encaissement]:
         facture_id=_id(_g(ch, "invoice")),
         recu_url=_g(ch, "receipt_url"),
         description=_g(ch, "description"),
+        price_id=price_id,
+        plan_prix=plan_prix,
+        motif_facture=_g(facture, "billing_reason") if isinstance(facture, dict) else None,
     )
 
 
@@ -155,7 +207,7 @@ def collecter(cle: str, depuis_ts: Optional[int] = None) -> Grand_livre:
     stripe.api_key = cle
     livre = Grand_livre(lu_le=time.time())
 
-    for ch in _pages(stripe.Charge, expand=["data.balance_transaction", "data.customer"]):
+    for ch in _pages(stripe.Charge, expand=["data.balance_transaction", "data.customer", "data.invoice"]):
         e = _encaissement(ch)
         if e is not None:
             livre.encaissements.append(e)
@@ -187,6 +239,23 @@ def collecter(cle: str, depuis_ts: Optional[int] = None) -> Grand_livre:
             statut=str(_g(po, "status", defaut="")),
         ))
 
+    for bt in _pages(stripe.BalanceTransaction, type="stripe_fee", **params):
+        livre.frais_divers.append(FraisDivers(
+            cree_le=_date(_g(bt, "created")),
+            montant_cents=-int(_g(bt, "net", defaut=0)),
+            description=_g(bt, "description"),
+        ))
+
+    for bt in _pages(stripe.BalanceTransaction, type="adjustment", **params):
+        if _g(bt, "reporting_category") not in ("dispute", "dispute_reversal"):
+            continue
+        livre.litiges.append(Litige(
+            cree_le=_date(_g(bt, "created")),
+            repris_cents=-int(_g(bt, "amount", defaut=0)),
+            frais_cents=int(_g(bt, "fee", defaut=0)),
+            net_cents=int(_g(bt, "net", defaut=0)),
+        ))
+
     livre.encaissements.sort(key=lambda e: e.cree_le)
     return livre
 
@@ -212,3 +281,36 @@ def lire(cle: str, depuis_ts: Optional[int], forcer: bool = False) -> Grand_livr
 def vider_cache() -> None:
     with _verrou:
         _cache.clear()
+        _cache_prochains.clear()
+
+
+# ───────────────────── montant du prochain prélèvement ─────────────────────
+_cache_prochains: dict[Any, tuple[float, dict[str, int]]] = {}
+
+
+def prochains_montants(cle: str, sub_ids: Iterable[str], forcer: bool = False) -> dict[str, int]:
+    """Montant de la PROCHAINE facture de chaque abonnement, calculé par Stripe.
+
+    C'est le seul chiffre juste : il intègre changement de formule, prorata
+    reporté, remise de parrainage, crédit client. Le « dernier montant payé »
+    se trompe dès qu'un abonné change de formule (Expert réglé, Standard à venir).
+    Un abonnement que Stripe refuse de prévisualiser est simplement absent :
+    l'appelant retombe alors sur le prix catalogue.
+    """
+    ids = tuple(sorted({s for s in sub_ids if s}))
+    k = (cle[-6:], ids)
+    with _verrou:
+        en_cache = _cache_prochains.get(k)
+        if en_cache and not forcer and time.time() - en_cache[0] < TTL_CACHE_S:
+            return en_cache[1]
+    stripe.api_key = cle
+    montants: dict[str, int] = {}
+    for sid in ids:
+        try:
+            inv = stripe.Invoice.upcoming(subscription=sid)
+        except Exception:  # noqa: BLE001 — abonnement clos, rien à venir…
+            continue
+        montants[sid] = int(_g(inv, "amount_due", defaut=0) or 0)
+    with _verrou:
+        _cache_prochains[k] = (time.time(), montants)
+    return montants

@@ -7,13 +7,15 @@ contre les AUTRES partants du jour : a-t-il déjà battu ses rivaux, combien de
 fois, contre combien d'adversaires distincts.
 
 Deux chevaux se sont affrontés s'ils ont une ligne d'historique partageant la
-même date + le même hippodrome. On compare alors leurs positions d'arrivée.
+même date, le même hippodrome, la même discipline, la même distance et le même
+nombre de partants (cf. `_race_key`). On compare alors leurs positions d'arrivée.
 
 RÈGLE D'INTÉGRITÉ : aucune valeur inventée. Pas de rencontre connue → features
 neutres + conf_nb_data=0 (le modèle sait que le signal est absent).
 
 Format des lignes d'historique attendu (tuple, cf. SELECT batch de features.py) :
-  idx 0 = position_arrivee, idx 3 = hippodrome, idx 4 = date_course
+  idx 0 = position_arrivee, 1 = distance, 3 = hippodrome, 4 = date_course,
+  5 = nb_partants, 7 = discipline
 """
 from __future__ import annotations
 
@@ -45,17 +47,35 @@ def _valid_pos(p) -> bool:
     return isinstance(p, int) and 1 <= p < POSITION_INCIDENT
 
 
+def _col(row, i):
+    return row[i] if len(row) > i else None
+
+
+def _race_key_reunion(row):
+    """Ancienne clé (date, hippodrome) — conservée pour le patch des vecteurs
+    stockés, qui doit reproduire l'ancien calcul avant de le remplacer."""
+    return (_col(row, 4), _norm_hippo(_col(row, 3)))
+
+
 def _race_key(row):
-    # (date, hippodrome normalisé)
-    date = row[4] if len(row) > 4 else None
-    hippo = row[3] if len(row) > 3 else None
-    return (date, _norm_hippo(hippo))
+    """Clé d'une course passée.
+
+    Date + hippodrome ne suffisent PAS : une réunion compte 6 à 9 courses le même
+    jour sur la même piste. Deux chevaux de deux courses différentes de la réunion
+    devenaient des « adversaires » et le premier de l'une « battait » le troisième
+    de l'autre. Discipline, distance et nombre de partants séparent les courses
+    d'une même réunion (même clé que services/confrontations.py).
+    """
+    disc = _col(row, 7)
+    return (_col(row, 4), _norm_hippo(_col(row, 3)), str(disc).lower() if disc else "",
+            _col(row, 1), _col(row, 5))
 
 
-def compute_confrontation_features(hist_by_cheval: dict, field_ids) -> dict:
+def compute_confrontation_features(hist_by_cheval: dict, field_ids, *, race_key=_race_key) -> dict:
     """
     hist_by_cheval : {cheval_id: [ligne_historique, ...]} pour les partants.
     field_ids      : itérable des cheval_id présents dans la course.
+    race_key       : clé « même course » ; `_race_key_reunion` = ancien calcul.
 
     Retourne {cheval_id: {features de confrontation}}. Toujours toutes les clés
     (CONFRONTATION_FEATURE_KEYS) ; neutre si aucune rencontre connue.
@@ -67,14 +87,14 @@ def compute_confrontation_features(hist_by_cheval: dict, field_ids) -> dict:
 
     field_set = set(field)
 
-    # Indexe chaque course passée par (date, hippodrome) → {cheval_id: position}
+    # Indexe chaque course passée (cf. _race_key) → {cheval_id: position}
     races: dict[tuple, dict] = defaultdict(dict)
     for cid in field:
         for row in hist_by_cheval.get(cid, []) or []:
             pos = row[0] if len(row) > 0 else None
             if not _valid_pos(pos):
                 continue
-            key = _race_key(row)
+            key = race_key(row)
             if key[0] is None:
                 continue
             # garde la meilleure (plus récente non gérée ici : 1 ligne/cheval/course)

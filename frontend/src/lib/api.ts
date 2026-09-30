@@ -184,8 +184,11 @@ export const predictionsApi = {
   // Aperçu PUBLIC de l'analyse (funnel) : agrégats anonymes avant la course,
   // contenu complet une fois la course courue. Aucun compte requis.
   apercu: (courseId: string) => api.get(`/courses/${courseId}/apercu`, { tolere401: true }),
-  get: (courseId: string, bankroll?: number) =>
-    api.get(`/courses/${courseId}/predictions`, { params: { bankroll } }),
+  // `reveler` : compte gratuit, dépense EXPLICITE de sa course du jour (bouton
+  // « Révéler »). Sans lui, une course non encore ouverte revient verrouillée.
+  get: (courseId: string, bankroll?: number, reveler?: boolean) =>
+    api.get(`/courses/${courseId}/predictions`, { params: reveler ? { bankroll, reveler: true } : { bankroll } }),
+  quotaClassement: () => api.get("/quota/classement"),
   trigger: (courseId: string, bankroll?: number) =>
     api.post(`/courses/${courseId}/predict`, null, { params: { bankroll } }),
   valueBets: (niveauMin?: number, limit = 100) =>
@@ -464,6 +467,11 @@ export const adminApi = {
     api.get("/users", { baseURL: `${API_URL}/admin/api`, params }),
   userDetail: (id: string) =>
     api.get(`/users/${id}`, { baseURL: `${API_URL}/admin/api` }),
+  // Accès offert (jeu concours…) : journalisé, respecté par Stripe, expire seul.
+  offrirAcces: (id: string, data: { plan: "standard" | "expert"; jours: number | null; motif?: string }) =>
+    api.post(`/users/${id}/acces-offert`, data, { baseURL: `${API_URL}/admin/api` }),
+  retirerAcces: (id: string) =>
+    api.delete(`/users/${id}/acces-offert`, { baseURL: `${API_URL}/admin/api` }),
   updateUser: (id: string, data: Record<string, unknown>) =>
     api.patch(`/users/${id}`, data, { baseURL: `${API_URL}/admin/api` }),
   // Suppression définitive : le compte et ce qui n'appartient qu'à lui. L'API

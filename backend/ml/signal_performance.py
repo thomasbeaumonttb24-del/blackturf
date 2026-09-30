@@ -30,6 +30,7 @@ from ml.prediction_evaluation import (
     MIN_RAPPORT_CALIB_RUNS,
     MIN_SIGNAL_PERF_OBS,
 )
+from ml.prediction_evaluation import sans_modeles_retires
 
 log = structlog.get_logger()
 
@@ -409,7 +410,7 @@ def _ev_band_key(ev: float) -> str:
 async def compute_ev_band_performance(session: AsyncSession) -> dict:
     """ROI réel par bande d'EV, depuis les pronostics FIGÉS avant départ ⋈ résultats.
     ev = cote_figee × proba_top1 − 1. Flat 1€ Simple Gagnant à la cote figée."""
-    rows = (await session.execute(text("""
+    rows = (await session.execute(text(f"""
         SELECT p.cote_figee, p.proba_top1,
                CASE WHEN (r.classement->0->>'numero')::int = pa.numero THEN 1 ELSE 0 END AS win
         FROM prediction_evaluation p
@@ -420,7 +421,7 @@ async def compute_ev_band_performance(session: AsyncSession) -> dict:
           AND p.proba_top1 IS NOT NULL AND jsonb_typeof(r.classement) = 'array'
           -- ANTI-LEAKAGE : prono FIGÉ avant le départ uniquement (cf. signal learner).
           AND c.date_heure IS NOT NULL AND p.created_at < c.date_heure
-          AND p.is_replayable = true
+          AND p.is_replayable = true{sans_modeles_retires('p')}
     """))).fetchall()
 
     agg = {f"{lo:.2f}_{hi:.2f}": {"n": 0, "wins": 0, "stake": 0.0, "payout": 0.0}

@@ -258,6 +258,16 @@ async def _sur_paiement(filleul: User, invoice: dict, db: AsyncSession) -> None:
 
     if not filleul.parraine_par_id or (invoice.get("amount_paid") or 0) <= 0:
         return
+    lignes = ((invoice.get("lines") or {}).get("data") or [])
+    if any(l.get("proration") or ((l.get("parent") or {}).get("subscription_item_details") or {})
+           .get("proration") for l in lignes):
+        # Différence au prorata d'un changement de formule : pas un premier mois
+        # payé, ne valide rien (sinon 4,61 € payés créditaient 5 € au parrain).
+        return
+    if int(invoice.get("amount_paid") or 0) < REMISE_CENTS:
+        # Facture réglée surtout par un crédit : le filleul n'a pas encore payé
+        # de quoi financer la récompense ; la facture suivante validera.
+        return
     lien = await _lien_du_filleul(filleul.user_id, db)
     if lien is None or lien.statut != "en_attente":
         return

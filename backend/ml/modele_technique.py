@@ -70,6 +70,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ml import melange_arrivees as ma
 from ml.learning_steps import _vers_datetime
+from ml.prediction_evaluation import sans_modeles_retires
 
 log = structlog.get_logger(module="modele_technique")
 
@@ -374,7 +375,7 @@ async def _courses_de_validation(session: AsyncSession, modele: ModeleTechnique,
                                  depuis: datetime) -> list[dict]:
     """Courses COMPLÈTES depuis `depuis`, scorées par `modele` sur leurs features
     exactes de T-10. Lecture en flux : une partition de features à la fois."""
-    res = await session.stream(text("""
+    res = await session.stream(text(f"""
         SELECT pe.course_id, pa.numero, pe.features, pe.proba_top1, pe.proba_top3,
                pe.cote_figee, pe.created_at, c.date_heure, r.classement, np.n
         FROM prediction_evaluation pe
@@ -384,7 +385,7 @@ async def _courses_de_validation(session: AsyncSession, modele: ModeleTechnique,
         JOIN (SELECT course_id, count(*) AS n FROM participations
                WHERE COALESCE(non_partant, false) = false
                GROUP BY course_id) np ON np.course_id = pe.course_id
-        WHERE pe.is_replayable = true AND pe.features IS NOT NULL
+        WHERE pe.is_replayable = true{sans_modeles_retires('pe')} AND pe.features IS NOT NULL
           AND pe.proba_top1 IS NOT NULL AND pe.proba_top3 IS NOT NULL
           AND COALESCE(pa.non_partant, false) = false
           AND r.classement IS NOT NULL AND c.date_heure IS NOT NULL

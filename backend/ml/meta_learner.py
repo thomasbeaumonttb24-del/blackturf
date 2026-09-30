@@ -39,6 +39,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ml.models import _N_JOBS
+from ml.prediction_evaluation import sans_modeles_retires
 
 log = structlog.get_logger(module="meta_learner")
 
@@ -310,7 +311,7 @@ class MetaLearner:
         log.info("meta_learner.train_start", cutoff=cutoff.isoformat())
 
         try:
-            result = await session.execute(text("""
+            result = await session.execute(text(f"""
                 SELECT pe.course_id,
                        pa.numero,
                        pe.proba_top3_raw,
@@ -327,7 +328,7 @@ class MetaLearner:
                 JOIN participations pa ON pa.participation_id = pe.participation_id
                 JOIN courses c         ON c.course_id         = pe.course_id
                 JOIN resultats r       ON r.course_id         = pe.course_id
-                WHERE pe.is_replayable = true
+                WHERE pe.is_replayable = true{sans_modeles_retires('pe')}
                   AND pe.proba_top3_raw IS NOT NULL
                   AND pe.features IS NOT NULL
                   AND r.classement IS NOT NULL

@@ -356,6 +356,33 @@ async def job_relances_paiement() -> None:
         log.error("jobs.relances_paiement.error", error=str(e))
 
 
+async def job_expirer_acces_offerts() -> None:
+    """Toutes les heures — un accès offert arrivé à échéance rend au compte le
+    plan que ses abonnements justifient."""
+    try:
+        from db.database import AsyncSessionLocal
+        from services.acces_offert import expirer_acces_offerts
+        async with AsyncSessionLocal() as session:
+            n = await expirer_acces_offerts(session)
+        if n:
+            log.info("jobs.acces_offerts_expires", n=n)
+    except Exception as e:
+        log.error("jobs.expirer_acces_offerts.error", error=str(e))
+
+
+async def job_rappel_reconduction() -> None:
+    """1x/jour — rappel légal avant reconduction d'un abonnement annuel (L215-1)."""
+    try:
+        from db.database import AsyncSessionLocal
+        from services.reconduction_annuelle import envoyer_rappels
+        async with AsyncSessionLocal() as session:
+            n = await envoyer_rappels(session)
+        if n:
+            log.info("jobs.rappel_reconduction.done", envoyes=n)
+    except Exception as e:
+        log.error("jobs.rappel_reconduction.error", error=str(e))
+
+
 async def job_resolve_courses_sans_resultat() -> None:
     """1x/jour — clôture les courses passées restées sans résultat.
 
@@ -418,18 +445,20 @@ async def job_vb_notify() -> None:
                 .limit(20)
             )
             rows = (await session.execute(q)).all()
-            if not rows:
-                return
 
-            # Get all paid users
+            # Expert : tout de suite. Standard : le délai de 15 min de sa formule
+            # vaut AUSSI pour les notifications (le push nomme les chevaux) —
+            # avant, il les recevait en même temps que l'Expert.
             users_res = await session.execute(
-                select(User.user_id).where(
-                    User.plan.in_(["starter", "standard", "expert"]),
-                    User.is_active == True,
-                )
+                select(User.user_id).where(User.plan == "expert", User.is_active == True)
             )
             user_ids = [r[0] for r in users_res.fetchall()]
-            if not user_ids:
+            await _vb_notify_differe(session)
+            if not rows or not user_ids:
+                if rows:
+                    for vb, *_ in rows:
+                        vb.notifie = True
+                    await session.commit()
                 return
 
             vb_batch = []
@@ -455,6 +484,50 @@ async def job_vb_notify() -> None:
             log.info("jobs.vb_notify.done", nb_vbs=len(rows))
     except Exception as e:
         log.error("jobs.vb_notify.error", error=str(e))
+
+
+async def _vb_notify_differe(session) -> None:
+    """Standard : notifie les paris devenus visibles pour lui (détectés il y a
+    15 à 45 min), une seule fois chacun (marque Redis 2 jours)."""
+    from db.models import ValueBet, Participation, Cheval, Course, User
+    from services.alerts import notify_value_bets
+    from services.valuebets_visibilite import filtres_sql as _vb_filtres_sql, DELAI_STANDARD
+    from sqlalchemy import select, and_
+    from datetime import datetime, timedelta, timezone
+    try:
+        from db.redis_client import get_redis
+        redis = await get_redis()
+    except Exception as e:  # noqa: BLE001 — sans Redis, pas de dédoublonnage : on s'abstient
+        log.warning("jobs.vb_notify_differe.sans_redis", error=str(e)[:120])
+        return
+    maintenant = datetime.now(timezone.utc)
+    rows = (await session.execute(
+        select(ValueBet, Participation, Cheval, Course)
+        .join(Participation, Participation.participation_id == ValueBet.participation_id)
+        .join(Cheval, Cheval.cheval_id == Participation.cheval_id)
+        .join(Course, Course.course_id == ValueBet.course_id)
+        .where(and_(*_vb_filtres_sql("standard", maintenant),
+                    ValueBet.detecte_a >= maintenant - DELAI_STANDARD - timedelta(minutes=30)))
+        .limit(40)
+    )).all()
+    lot = []
+    for vb, part, cheval, course in rows:
+        if await redis.set(f"vbnotif:standard:{vb.vb_id}", "1", nx=True, ex=2 * 86400):
+            lot.append({
+                "vb_id": vb.vb_id, "participation_id": vb.participation_id,
+                "nom_cheval": cheval.nom, "hippodrome": course.hippodrome_nom,
+                "cote": part.cote_pmu, "ev": vb.ev_max, "niveau": vb.niveau,
+                "course_id": vb.course_id,
+                "heure_depart": course.date_heure.isoformat() if course.date_heure else None,
+            })
+    if not lot:
+        return
+    ids = [r[0] for r in (await session.execute(
+        select(User.user_id).where(User.plan.in_(["standard", "starter"]), User.is_active == True)
+    )).fetchall()]
+    if ids:
+        await notify_value_bets(session, ids, lot)
+        log.info("jobs.vb_notify_differe.done", nb_vbs=len(lot), nb_users=len(ids))
 
 
 # ─────────────────────────────────────────────
@@ -698,6 +771,23 @@ def start_scheduler() -> None:
         id="relances_paiement",
         replace_existing=True,
         misfire_grace_time=1800,
+    )
+
+    scheduler.add_job(
+        job_expirer_acces_offerts,
+        CronTrigger(minute=12),
+        id="expirer_acces_offerts",
+        replace_existing=True,
+        misfire_grace_time=1800,
+    )
+
+    # Rappel légal avant reconduction des abonnements annuels, en journée.
+    scheduler.add_job(
+        job_rappel_reconduction,
+        CronTrigger(hour=11, minute=10, timezone="Europe/Paris"),
+        id="rappel_reconduction",
+        replace_existing=True,
+        misfire_grace_time=6 * 3600,
     )
 
     # Palmarès à jour dans la minute qui suit chaque course intégrée.

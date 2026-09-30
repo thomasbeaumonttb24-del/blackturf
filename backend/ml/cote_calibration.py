@@ -19,6 +19,7 @@ import structlog
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 from ml.prediction_evaluation import MIN_COTE_BUCKET_OBS, MIN_COTE_REPLAYABLE_OBS
+from ml.prediction_evaluation import sans_modeles_retires
 
 log = structlog.get_logger()
 
@@ -71,7 +72,7 @@ async def compute_cote_calibration(session: AsyncSession) -> dict:
           AND pr.created_at IS NOT NULL
           AND c.date_heure IS NOT NULL
           AND pr.created_at < c.date_heure
-          AND pr.is_replayable = true
+          AND pr.is_replayable = true{sans_modeles_retires('pr')}
     """))).fetchall()
 
     nb = len(COTE_EDGES) - 1

@@ -144,6 +144,7 @@ function CourbeRevenus({
                       { label: "Net perçu", valeur: euros(p.m.net_cents, 2), secondaire: true }] : []),
                     { label: "Nouveaux clients", valeur: euros(p.m.nouveaux_cents, 2), secondaire: true },
                     { label: "Renouvellements", valeur: euros(p.m.renouvellements_cents, 2), secondaire: true },
+                    ...(p.m.changements_cents ? [{ label: "Changements de formule", valeur: euros(p.m.changements_cents, 2), secondaire: true }] : []),
                     ...(p.prevu != null ? [{ label: "Atterrissage prévu", valeur: eur(p.prevu, 2), couleur: PALETTE.ardoiseMoyen, pointille: true }] : []),
                     ...(vue === "cumul" ? [{ label: "Cumul", valeur: eur(p.cumul ?? 0, 2) }] : []),
                   ]}
@@ -307,7 +308,9 @@ const COLONNES_PAIEMENTS: Colonne<PaiementRecu>[] = [
     titre: "Nature",
     rendu: (p) => p.nature === "nouveau"
       ? <Etat ton="or">Premier paiement</Etat>
-      : <Etat ton="ok">Renouvellement</Etat>,
+      : p.nature === "changement"
+        ? <Etat ton="attention" titre="Différence au prorata réglée lors d'un changement de formule">Changement de formule</Etat>
+        : <Etat ton="ok">Renouvellement</Etat>,
   },
   {
     titre: "Date",
@@ -340,6 +343,18 @@ function Ecart({ a, b }: { a: number; b: number | null | undefined }) {
   return <span className={cn("font-medium", v >= 0 ? "text-emerald-700" : "text-red-700")}>{signedPct(v, 0)}</span>;
 }
 
+/** « 3 réglés depuis · 5 impayés · 39 tentatives » : un échec n'est pas un client perdu. */
+function echecsDetail(m: MoisRevenu) {
+  const regles = m.nb_echecs_regles ?? 0;
+  const restants = m.nb_echecs - regles;
+  const parts = [
+    regles ? `${regles} réglé${regles > 1 ? "s" : ""} depuis` : null,
+    restants ? `${restants} toujours impayé${restants > 1 ? "s" : ""}` : null,
+    m.nb_tentatives_echouees && m.nb_tentatives_echouees > m.nb_echecs ? `${m.nb_tentatives_echouees} tentatives` : null,
+  ].filter(Boolean);
+  return parts.join(" · ");
+}
+
 function DetailMois({ m, precedent }: { m: MoisRevenu; precedent?: MoisRevenu }) {
   const cases = [
     { label: "Encaissé (CA)", v: euros(m.ca_cents, 2), a: m.ca_cents, b: precedent?.ca_cents },
@@ -349,7 +364,7 @@ function DetailMois({ m, precedent }: { m: MoisRevenu; precedent?: MoisRevenu })
     { label: "Panier moyen", v: euros(m.panier_moyen_cents, 2), a: m.panier_moyen_cents ?? 0, b: precedent?.panier_moyen_cents },
     {
       label: "Prélèvements échoués",
-      v: m.nb_echecs ? `${m.nb_echecs} · ${euros(m.echecs_cents)}` : "Aucun",
+      v: m.nb_echecs ? `${m.nb_echecs} abonné${m.nb_echecs > 1 ? "s" : ""} · ${euros(m.echecs_cents)}` : "Aucun",
       a: null as number | null, b: null,
     },
   ];
@@ -394,7 +409,7 @@ function DetailMois({ m, precedent }: { m: MoisRevenu; precedent?: MoisRevenu })
               <dt className="text-xs text-muted-foreground">{c.label}</dt>
               <dd className="mt-1 text-lg font-semibold tabular-nums text-foreground">{c.v}</dd>
               <dd className="mt-0.5 text-xs text-muted-foreground">
-                {c.a != null ? <><Ecart a={c.a} b={c.b} /> vs mois précédent</> : m.nb_echecs ? "accès coupé, relances en cours" : "sur le mois"}
+                {c.a != null ? <><Ecart a={c.a} b={c.b} /> vs mois précédent</> : m.nb_echecs ? echecsDetail(m) : "sur le mois"}
               </dd>
             </div>
           ))}
@@ -741,7 +756,7 @@ export default function RevenusPage() {
           format={(v) => eur(v)}
           icone={<Repeat />}
           accent="ok"
-          sub={abos ? `${eur(abos.resume.arr)} par an · ${abos.resume.abonnes_payants} abonnés payants` : undefined}
+          sub={abos ? `${eur(abos.resume.arr)} par an · ${abos.resume.abonnes_payants} abonnés payants${abos.resume.mrr_resiliations ? ` · hors ${eur(abos.resume.mrr_resiliations)} résiliés` : ""}` : undefined}
         />
         <Kpi
           label={`Total sur ${fenetre} mois`}
@@ -806,6 +821,9 @@ export default function RevenusPage() {
               empile
               series={[
                 { cle: "renouvellements", label: "Renouvellements", couleur: PALETTE.ardoise, valeur: (m) => m.renouvellements_cents },
+                // Différences réglées lors d'un passage en Expert : sans elles, le
+                // haut de la pile n'était plus le total encaissé.
+                { cle: "changements", label: "Changements de formule", couleur: PALETTE.ardoiseMoyen, valeur: (m) => m.changements_cents ?? 0 },
                 { cle: "nouveaux", label: "Nouveaux clients", couleur: PALETTE.or, valeur: (m) => m.nouveaux_cents },
               ]}
             />

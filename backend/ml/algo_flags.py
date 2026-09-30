@@ -281,6 +281,23 @@ class AlgoFlags:
     #
     # DÉFAUT OFF : l'activation est une décision de Thomas (P0_B_retrain_2026-09-24.md).
     refit_full: bool = field(default_factory=lambda: _env_bool("BT_REFIT_FULL", False))
+    # HISTORIQUE SANS DOUBLONS (audit 2026-09-28). Une course courue en France est
+    # écrite deux fois dans `historique_courses` : la ligne interne (course_id, datée
+    # du jour) et sa copie PMU « performances » (course_id NULL), datée de la VEILLE
+    # (date PMU à minuit Paris lue en UTC). 38 % des six dernières lignes des partants
+    # d'une semaine étaient des copies. Actif : les features ne lisent qu'une ligne
+    # par course (la copie enrichit la ligne interne de ce qu'elle seule porte).
+    # Le même lot corrige deux features d'historique (ml/features.py) :
+    #   • une place passée est notée sur la taille du champ DE CETTE COURSE-LÀ, plus
+    #     sur celle du jour (un 5ᵉ sur 16 valait 0,73 ou 0,43 selon le champ du jour) ;
+    #   • `corde_preference` compare la STALLE du jour aux cordes passées, plus le
+    #     dossard (en plat, le dossard n'est pas la stalle).
+    #
+    # DÉFAUT OFF, et il DOIT le rester tant que le modèle servi a été entraîné sur des
+    # vecteurs AVEC doublons : l'activer seul servirait au modèle des features dont il
+    # n'a jamais vu la distribution. Bascule = vecteurs historiques patchés
+    # (scripts/patch_features_historique.py) + modèle réentraîné dessus, ensemble.
+    hist_v2: bool = field(default_factory=lambda: _env_bool("BT_HIST_V2", False))
 
     def as_dict(self) -> dict:
         return {
@@ -311,6 +328,7 @@ class AlgoFlags:
             "modele_technique": self.modele_technique,
             "vb_confirmation_technique": self.vb_confirmation_technique,
             "refit_full": self.refit_full,
+            "hist_v2": self.hist_v2,
         }
 
 

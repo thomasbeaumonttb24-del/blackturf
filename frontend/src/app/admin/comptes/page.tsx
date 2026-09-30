@@ -132,10 +132,13 @@ export default function ComptesPage() {
   }, [comptes, filtre]);
 
   const resume = useMemo(() => {
-    const tous = comptes ?? [];
+    // Le compte d'administration n'est pas un client : exclu comme sur Pilotage.
+    const tous = (comptes ?? []).filter((u) => !u.is_admin);
     return {
       total: tous.length,
-      abonnes: tous.filter((u) => ["active", "trialing"].includes(u.abonnement_statut ?? "")).length,
+      // Payants + essais, comme le Pilotage : un abonné qui a résilié reste
+      // abonné (et a payé) jusqu'à la fin de sa période.
+      abonnes: tous.filter((u) => ["active", "trialing", "cancel_at_period_end"].includes(u.abonnement_statut ?? "")).length,
       parieurs: tous.filter((u) => u.nb_paris > 0).length,
       suspendus: tous.filter((u) => !u.is_active).length,
       classes: tous.filter((u) => u.defi_rang != null).length,

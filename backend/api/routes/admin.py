@@ -200,6 +200,15 @@ async def list_users(
     return result
 
 
+async def _acces_offert_public(db: AsyncSession, user_id: str) -> Optional[dict]:
+    from services.acces_offert import dernier_acces_offert
+    don = await dernier_acces_offert(db, user_id)
+    return None if don is None else {
+        "plan": don["plan"], "jusqu_au": don["jusqu_au"], "motif": don["motif"],
+        "depuis": don["depuis"], "actif": don["actif"],
+    }
+
+
 @router.get("/users/{user_id}")
 async def get_user_detail(
     user_id: str,
@@ -291,6 +300,7 @@ async def get_user_detail(
             "last_login": user.last_login_at,
         },
         "defi": {"mois": mois, "rang": rang, **resume},
+        "acces_offert": await _acces_offert_public(db, user.user_id),
         "par_type": par_type,
         "subscriptions": [
             {
@@ -353,21 +363,57 @@ async def change_user_plan(
     db: AsyncSession = Depends(get_db),
     _=Depends(require_admin),
 ):
-    """Change le plan d'un utilisateur manuellement (gift / test)."""
+    """Ancienne route « changer le plan » : passe désormais par l'accès offert
+    (journalisé, respecté par les webhooks). `free` retire l'accès offert."""
+    from services import acces_offert as AO
     new_plan = body.get("plan")
-    if not new_plan or new_plan not in {"free", "standard", "expert", "starter"}:
+    if not new_plan or new_plan not in {"free", "standard", "expert"}:
         raise HTTPException(status_code=400, detail="Plan invalide. Valeurs: free/standard/expert")
-
-    result = await db.execute(select(User).where(User.user_id == user_id))
-    user = result.scalar_one_or_none()
+    user = (await db.execute(select(User).where(User.user_id == user_id))).scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=404, detail="Utilisateur introuvable")
-
     old_plan = user.plan
-    user.plan = new_plan
-    await db.commit()
-    log.info("admin.change_plan", user_id=user_id, old=old_plan, new=new_plan)
-    return {"ok": True, "user_id": user_id, "old_plan": old_plan, "new_plan": new_plan}
+    if new_plan == "free":
+        await AO.retirer(db, user, par="admin")
+    else:
+        await AO.offrir(db, user, new_plan, body.get("jours"), body.get("motif") or "", par="admin")
+    return {"ok": True, "user_id": user_id, "old_plan": old_plan, "new_plan": user.plan}
+
+
+@router.post("/users/{user_id}/acces-offert")
+async def offrir_acces(
+    user_id: str,
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """Offre Standard ou Expert, pour `jours` jours (absent = sans fin).
+    Respecté par tous les recalculs de plan ; journalisé comme preuve."""
+    from services import acces_offert as AO
+    user = (await db.execute(select(User).where(User.user_id == user_id))).scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="Utilisateur introuvable")
+    jours = body.get("jours")
+    if jours is not None and (not isinstance(jours, int) or not 1 <= jours <= 3650):
+        raise HTTPException(status_code=400, detail="Durée invalide (1 à 3650 jours, ou vide = sans fin)")
+    try:
+        res = await AO.offrir(db, user, body.get("plan"), jours, body.get("motif") or "", par=admin.email)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"ok": True, **res}
+
+
+@router.delete("/users/{user_id}/acces-offert")
+async def retirer_acces(
+    user_id: str,
+    db: AsyncSession = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    from services import acces_offert as AO
+    user = (await db.execute(select(User).where(User.user_id == user_id))).scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="Utilisateur introuvable")
+    return {"ok": True, "plan": await AO.retirer(db, user, par=admin.email)}
 
 
 @router.patch("/users/{user_id}")
@@ -384,7 +430,9 @@ async def update_user(
 
     # is_admin VOLONTAIREMENT EXCLU : pas d'escalade de privilège via l'API (un admin
     # ne peut pas se/ promouvoir admin). La promotion admin se fait en SQL contrôlé.
-    allowed = {"plan", "is_active", "profil_risque"}
+    # `plan` retiré : l'écrire à la main était effacé au premier événement Stripe.
+    # Offrir un accès passe par POST /users/{id}/acces-offert.
+    allowed = {"is_active", "profil_risque"}
     # Garde anti auto-verrouillage : un admin ne peut pas se désactiver lui-même.
     if user_id == admin.user_id and body.get("is_active") is False:
         raise HTTPException(status_code=400, detail="Auto-désactivation interdite")
@@ -392,6 +440,16 @@ async def update_user(
         if k in allowed:
             setattr(user, k, v)
     await db.commit()
+    if "plan" in body:
+        # Compatibilité : un plan posé ici devient un accès offert sans fin
+        # (« free » le retire) — respecté par les webhooks, journalisé.
+        from services import acces_offert as AO
+        if body["plan"] == "free":
+            await AO.retirer(db, user, par=admin.email)
+        elif body["plan"] in AO.PLANS_OFFRABLES:
+            await AO.offrir(db, user, body["plan"], None, "", par=admin.email)
+        else:
+            raise HTTPException(status_code=400, detail="Plan invalide. Valeurs: free/standard/expert")
     log.info("admin.update_user", admin_id=admin.user_id, user_id=user_id,
              changes={k: body[k] for k in body if k in allowed})
     return {"ok": True}
@@ -1379,6 +1437,8 @@ async def revenue_stats(
 # table de `/admin/revenue` annonçait 9,90 € et 19,90 € alors que les prix en
 # production sont 12,00 € et 19,00 € — le MRR était faux de ~20 %.
 PRIX_MENSUEL_CENTS = {"standard": 1200, "expert": 1900, "starter": 1200, "pro": 1900}
+# Prix annuels réels chez Stripe (115,20 € et 182,40 €, vérifiés le 2026-09-29).
+PRIX_ANNUEL_CENTS = {"standard": 11520, "expert": 18240, "starter": 11520, "pro": 18240}
 
 # Doit rester aligné sur `stripe_routes.STATUTS_ACCES` / `STATUT_SANS_CARTE`.
 # `past_due` en est sorti le 2026-08-27 : un paiement en échec ne donne plus accès
@@ -1409,7 +1469,7 @@ async def abonnements(
     lignes = (await db.execute(
         select(Subscription, User)
         .join(User, User.user_id == Subscription.user_id)
-        .where(Subscription.statut.in_(vivants))
+        .where(Subscription.statut.in_(vivants), User.is_admin.is_not(True))
         .order_by(desc(Subscription.created_at))
     )).all()
 
@@ -1427,6 +1487,7 @@ async def abonnements(
 
     abonnes = []
     mrr_cents = 0
+    mrr_fin_cents = 0  # abonnés payants qui ont résilié : payés, mais ne renouvelleront pas
     en_essai = essai_sans_carte = payants = fin_essai_3j = 0
     # Répartition par COMPTE (un compte peut porter deux lignes d'abonnement).
     ids_payants: dict[str, str] = {}
@@ -1438,7 +1499,11 @@ async def abonnements(
         en_cours_dessai = essai_fin is not None and essai_fin > now
         jours_restants = round((essai_fin - now).total_seconds() / 86400, 1) if en_cours_dessai else None
         sans_carte = sub.statut == STATUT_SANS_CARTE_ADMIN
-        montant = montants.get(sub.stripe_subscription_id) or PRIX_MENSUEL_CENTS.get(sub.plan, 0)
+        # Prix de la formule ACTUELLE. Le « plus gros montant du journal » gardait
+        # 19 € pour un abonné repassé d'Expert à Standard (MRR 62 € au lieu de 55 €,
+        # 2026-09-29). Seul l'annuel lit le montant réellement facturé.
+        montant = ((montants.get(sub.stripe_subscription_id) or PRIX_ANNUEL_CENTS.get(sub.plan, 0))
+                   if sub.periodicite == "annual" else PRIX_MENSUEL_CENTS.get(sub.plan, 0))
 
         if sans_carte:
             essai_sans_carte += 1
@@ -1450,7 +1515,14 @@ async def abonnements(
             payants += 1
             ids_payants.setdefault(user.user_id, sub.plan)
             # Un abonnement annuel ne rapporte pas douze fois son prix chaque mois.
-            mrr_cents += montant / 12 if sub.periodicite == "annual" else montant
+            mensuel = montant / 12 if sub.periodicite == "annual" else montant
+            # Revenu RÉCURRENT = ce qui se renouvellera. Une résiliation programmée
+            # ne se renouvelle pas : l'échéancier de Revenus la compte déjà à 0 €,
+            # le MRR la comptait plein — deux vérités sur deux pages.
+            if sub.statut == "cancel_at_period_end":
+                mrr_fin_cents += mensuel
+            else:
+                mrr_cents += mensuel
         if en_cours_dessai and jours_restants is not None and jours_restants <= 3:
             fin_essai_3j += 1
 
@@ -1508,6 +1580,14 @@ async def abonnements(
         return {"starter": "standard", "pro": "expert"}.get(plan or "", plan or "standard")
 
     ids_abonnes = {user.user_id for _, user in lignes}
+    from services.acces_offert import dernier_acces_offert
+    dons_actifs = {}
+    for (uid,) in (await db.execute(
+        select(SubscriptionEvent.user_id).where(SubscriptionEvent.type == "acces_offert").distinct()
+    )).all():
+        don = await dernier_acces_offert(db, uid) if uid else None
+        if don and don["actif"]:
+            dons_actifs[uid] = don
     par_formule = {f: {"payants": 0, "essais": 0, "offerts": 0} for f in ("standard", "expert")}
     repartition = {"comptes": 0, "payants": 0, "essais": 0, "offerts": 0, "gratuits": 0}
     offerts = []
@@ -1519,11 +1599,15 @@ async def abonnements(
             case_, formule = "payants", _formule(ids_payants[u.user_id])
         elif u.user_id in ids_essai:
             case_, formule = "essais", _formule(ids_essai[u.user_id])
-        elif u.plan in PRIX_MENSUEL_CENTS and u.user_id not in ids_abonnes:
-            case_, formule = "offerts", _formule(u.plan)
+        elif (u.user_id in dons_actifs
+              or (u.plan in PRIX_MENSUEL_CENTS and u.user_id not in ids_abonnes)):
+            don = dons_actifs.get(u.user_id)
+            case_, formule = "offerts", _formule(don["plan"] if don else u.plan)
             offerts.append({
                 "user_id": u.user_id, "email": u.email, "plan": formule,
                 "created_at": u.created_at, "last_login": u.last_login_at,
+                "jusqu_au": don["jusqu_au"] if don else None,
+                "motif": don["motif"] if don else None,
             })
         else:
             case_, formule = "gratuits", None
@@ -1543,6 +1627,7 @@ async def abonnements(
             "fin_essai_sous_3j": fin_essai_3j,
             "mrr": round(mrr_cents / 100, 2),
             "arr": round(mrr_cents * 12 / 100, 2),
+            "mrr_resiliations": round(mrr_fin_cents / 100, 2),
             "essais_ouverts_30j": essais_ouverts_30j,
             "essais_perdus_30j": essais_perdus_30j,
             "resiliations_30j": resiliations_30j,
@@ -1671,6 +1756,20 @@ async def revenus(
         (em or "").lower(): _formule(plan_abo.get(uid) or p) for uid, em, _c, p in comptes
     }
     PLAN_PAR_MONTANT = {v: _formule(k) for k, v in PRIX_MENSUEL_CENTS.items()}
+    from api.routes.stripe_routes import PLAN_FROM_PRICE
+
+    def _formule_payee(price_id, plan_prix, montant, email) -> str:
+        """Formule de CE paiement — ce que Stripe a facturé, jamais la formule
+        actuelle du client. Cas réel (2026-09-29) : facture Expert 19 € réglée
+        par un abonné repassé en Standard entre-temps ; l'écran l'affichait
+        « Standard ». L'e-mail n'est plus qu'un dernier recours."""
+        if price_id and PLAN_FROM_PRICE.get(price_id):
+            return _formule(PLAN_FROM_PRICE[price_id])
+        if plan_prix:  # métadonnée du prix : « expert_monthly »
+            base = str(plan_prix).split("_")[0]
+            if _formule(base) in ("standard", "expert"):
+                return _formule(base)
+        return PLAN_PAR_MONTANT.get(montant) or plan_par_email.get((email or "").lower()) or "standard"
 
     # ── Journal interne (sert au rapprochement, et de repli) ──
     journal = (await db.execute(
@@ -1712,10 +1811,15 @@ async def revenus(
             if qui:
                 premiers.add(qui)
             uid_email = par_client.get(e.client_id or "")
-            email = e.email or (uid_email[1] if uid_email else None)
-            plan = plan_par_email.get((email or "").lower()) or PLAN_PAR_MONTANT.get(e.montant_cents) or "standard"
+            email = (uid_email[1] if uid_email else None) or e.email
+            plan = _formule_payee(e.price_id, e.plan_prix, e.montant_cents, email)
+            # Différence réglée lors d'un passage Standard → Expert : ni un nouveau
+            # client, ni une échéance ordinaire.
+            nature = ("nouveau" if premier
+                      else "changement" if e.motif_facture == "subscription_update"
+                      else "renouvellement")
             lignes_paiement.append(_ligne_paiement(
-                e.cree_le, email, plan, e.montant_cents, "nouveau" if premier else "renouvellement",
+                e.cree_le, email, plan, e.montant_cents, nature,
                 frais=e.frais_cents, net=e.net_cents, rembourse=e.rembourse_cents,
                 charge_id=e.charge_id, recu_url=e.recu_url, facture_id=e.facture_id,
                 motif=e.description,
@@ -1766,8 +1870,13 @@ async def revenus(
             if sid:
                 vus.add(sid)
             d = ev.created_at if ev.created_at.tzinfo else ev.created_at.replace(tzinfo=timezone.utc)
+            plan_ev = _formule(detail.get("plan_facture") or ev.plan)
+            if not detail.get("plan_facture"):
+                # Journal antérieur au 2026-09-29 : `plan` est la formule du
+                # compte au moment du paiement, pas celle facturée.
+                plan_ev = PLAN_PAR_MONTANT.get(int(ev.montant_cents or 0)) or plan_ev
             lignes_paiement.append(_ligne_paiement(
-                d, ev.email, _formule(ev.plan), int(ev.montant_cents or 0),
+                d, ev.email, plan_ev, int(ev.montant_cents or 0),
                 "nouveau" if premier else "renouvellement",
                 motif=detail.get("motif"), facture_id=detail.get("facture"), source="journal",
             ))
@@ -1777,9 +1886,10 @@ async def revenus(
         k: {
             "mois": k, "encaisse_cents": 0, "rembourse_cents": 0, "frais_cents": 0,
             "net_cents": 0, "verse_cents": 0, "nb_paiements": 0, "nb_remboursements": 0,
-            "nouveaux_cents": 0, "renouvellements_cents": 0,
+            "nouveaux_cents": 0, "renouvellements_cents": 0, "changements_cents": 0,
             "par_formule": {"standard": 0, "expert": 0},
-            "echecs_cents": 0, "nb_echecs": 0, "frais_connus": livre is not None,
+            "echecs_cents": 0, "nb_echecs": 0, "nb_echecs_regles": 0, "nb_tentatives_echouees": 0,
+            "frais_connus": livre is not None,
             "clients": set(), "paiements": [],
         }
         for k in cles_mois
@@ -1795,7 +1905,8 @@ async def revenus(
         b["net_cents"] += lp["net_cents"] if lp["net_cents"] is not None else m
         f = lp["plan"] if lp["plan"] in b["par_formule"] else "standard"
         b["par_formule"][f] += m
-        b["nouveaux_cents" if lp["nature"] == "nouveau" else "renouvellements_cents"] += m
+        b[{"nouveau": "nouveaux_cents", "changement": "changements_cents"}.get(
+            lp["nature"], "renouvellements_cents")] += m
         if lp["email"]:
             b["clients"].add(lp["email"].lower())
         b["paiements"].append(lp)
@@ -1809,12 +1920,69 @@ async def revenus(
         b = buckets.get(_mois_de(v["date"], tz))
         if b is not None:
             b["verse_cents"] += v["montant_cents"]
+    # Frais Stripe prélevés À PART des paiements (Stripe Billing : 0,7 % facturé
+    # chaque semaine). Absents, le « net » dépassait le solde réel de 0,29 € en
+    # septembre 2026.
+    for lt in (livre.litiges if livre is not None else []):
+        # Litige : l'argent repris diminue le chiffre d'affaires comme un
+        # remboursement (un litige gagné le rend : montant négatif), et les frais
+        # de litige s'ajoutent aux frais.
+        b = buckets.get(_mois_de(lt.cree_le, tz))
+        if b is not None:
+            b["rembourse_cents"] += lt.repris_cents
+            b["frais_cents"] += lt.frais_cents
+            b["net_cents"] += lt.net_cents
+    for fd in (livre.frais_divers if livre is not None else []):
+        b = buckets.get(_mois_de(fd.cree_le, tz))
+        if b is not None:
+            b["frais_cents"] += fd.montant_cents
+            b["net_cents"] -= fd.montant_cents
+    # Prélèvements échoués : UN par abonnement et par mois, pas un par tentative.
+    # Stripe réessaie la même facture (J+2, J+4…) et chaque essai écrit un
+    # `paiement_echoue` : sommer les tentatives affichait « 39 · 629 € » pour
+    # 8 abonnés en septembre 2026. Un échec est « réglé » si un paiement du même
+    # abonnement (ou du même client) est arrivé ensuite.
+    def _utc(d):
+        return d if d.tzinfo else d.replace(tzinfo=timezone.utc)
+
+    regles_par_cle: dict[str, list[datetime]] = {}
     for ev in journal:
-        if ev.type == "paiement_echoue":
-            b = buckets.get(_mois_de(ev.created_at, tz))
-            if b is not None:
-                b["nb_echecs"] += 1
-                b["echecs_cents"] += int(ev.montant_cents or 0)
+        if ev.type == "paiement_recu":
+            for k_ in (ev.stripe_subscription_id, (ev.email or "").lower()):
+                if k_:
+                    regles_par_cle.setdefault(k_, []).append(_utc(ev.created_at))
+    for lp in lignes_paiement:
+        if lp["email"]:
+            regles_par_cle.setdefault(lp["email"].lower(), []).append(lp["date"])
+    # Une FACTURE refusée = un échec, rangé dans le mois de son premier refus.
+    # Clé par abonnement, un refus du 29/09 relancé le 02/10 comptait deux fois
+    # (septembre ET octobre) et doublait le total de la période.
+    par_facture: dict[str, dict] = {}
+    for ev in journal:
+        if ev.type != "paiement_echoue":
+            continue
+        b = buckets.get(_mois_de(ev.created_at, tz))
+        if b is not None:
+            b["nb_tentatives_echouees"] += 1
+        detail_ = ev.detail if isinstance(ev.detail, dict) else {}
+        cle_ = (detail_.get("facture") or ev.stripe_subscription_id
+                or (ev.email or "").lower() or ev.event_id)
+        d_ = _utc(ev.created_at)
+        e_ = par_facture.setdefault(cle_, {"montant": 0, "premier": d_, "dernier": d_,
+                                           "sid": ev.stripe_subscription_id,
+                                           "email": (ev.email or "").lower()})
+        e_["montant"] = max(e_["montant"], int(ev.montant_cents or 0))
+        e_["premier"] = min(e_["premier"], d_)
+        e_["dernier"] = max(e_["dernier"], d_)
+    for e_ in par_facture.values():
+        b = buckets.get(_mois_de(e_["premier"], tz))
+        if b is None:
+            continue
+        b["nb_echecs"] += 1
+        b["echecs_cents"] += e_["montant"]
+        apres = regles_par_cle.get(e_["sid"] or "", []) + regles_par_cle.get(e_["email"], [])
+        if any(d > e_["dernier"] for d in apres):
+            b["nb_echecs_regles"] += 1
 
     serie = []
     cumul = 0
@@ -1844,10 +2012,26 @@ async def revenus(
         .where(Subscription.statut.in_(("active", "trialing", "cancel_at_period_end", "past_due")))
     )).all()
 
+    # Montant de la prochaine facture : calculé PAR STRIPE quand on le joint
+    # (formule actuelle, prorata d'un changement de formule, remise, crédit).
+    # L'ancien « plus gros montant déjà payé » annonçait 19 € pour un abonné
+    # repassé en Standard (12 €). Sans Stripe : prix catalogue de la formule
+    # ACTUELLE ; le dernier montant payé ne sert plus que pour l'annuel.
+    prochains: dict[str, int] = {}
+    if livre is not None:
+        a_venir = [sub.stripe_subscription_id for sub, _u in lignes
+                   if sub.statut in ("active", "trialing") and sub.stripe_subscription_id]
+        try:
+            prochains = await asyncio.to_thread(revenus_stripe.prochains_montants, cle, a_venir, actualiser)
+        except Exception as e:  # noqa: BLE001
+            log.error("admin.revenus.prochaines_factures_indisponibles", error=str(e)[:300])
+
     echeances = []
     prevu_par_mois: dict[str, int] = {}
     for sub, user in lignes:
-        montant = montants.get(sub.stripe_subscription_id) or PRIX_MENSUEL_CENTS.get(sub.plan, 0)
+        catalogue = ((montants.get(sub.stripe_subscription_id) or PRIX_ANNUEL_CENTS.get(sub.plan, 0))
+                     if sub.periodicite == "annual" else PRIX_MENSUEL_CENTS.get(sub.plan, 0))
+        montant = prochains.get(sub.stripe_subscription_id, catalogue)
         essai_fin = sub.essai_fin
         if essai_fin is not None and essai_fin.tzinfo is None:
             essai_fin = essai_fin.replace(tzinfo=timezone.utc)
@@ -1885,8 +2069,10 @@ async def revenus(
         d, i = prochaine, 0
         while d < horizon and i < 40:
             if d >= now:
-                cle = _mois_de(d, tz)
-                prevu_par_mois[cle] = prevu_par_mois.get(cle, 0) + montant
+                cle_mois = _mois_de(d, tz)
+                # Seule la PROCHAINE facture porte un éventuel prorata ; les
+                # suivantes reviennent au prix de la formule.
+                prevu_par_mois[cle_mois] = prevu_par_mois.get(cle_mois, 0) + (montant if i == 0 else catalogue)
             i += 1
             d = _ajoute_mois(prochaine, pas * i)
 
@@ -1899,6 +2085,8 @@ async def revenus(
         for k, v in sorted(prevu_par_mois.items())
     ]
     reste_mois = prevu_par_mois.get(mois_courant, 0)
+    premier_ = next((i for i, s_ in enumerate(serie) if s_["encaisse_cents"] > 0), None)
+    actifs_ = serie[premier_:] if premier_ is not None else []
     total = sum(s_["ca_cents"] for s_ in serie)
     somme = lambda cle_: sum(s_[cle_] for s_ in serie)  # noqa: E731
 
@@ -1924,7 +2112,10 @@ async def revenus(
             ),
             "reste_a_encaisser_mois_cents": reste_mois,
             "atterrissage_mois_cents": courant["ca_cents"] + reste_mois,
-            "moyenne_mensuelle_cents": round(total / len(serie)) if serie else 0,
+            # Moyenne sur les mois écoulés DEPUIS le premier encaissement : les mois
+            # d'avant l'ouverture ne sont pas des mois à 0 € (81 € / 12 = 6,75 €
+            # affichés en sept. 2026 pour un seul mois d'activité).
+            "moyenne_mensuelle_cents": round(total / len(actifs_)) if actifs_ else 0,
             "nb_paiements": somme("nb_paiements"),
             "echecs_cents": somme("echecs_cents"),
         },
@@ -2061,11 +2252,19 @@ async def _suivi_essais(db: AsyncSession, now: datetime) -> dict:
         else:
             fin_acces = None
 
+        relances = [e for e in _types("relance_paiement")
+                    if dernier_paiement is None or _aware(e.created_at) > dernier_paiement]
         prochaine_relance = None
         if statut == "past_due" and serie:
-            ts = (serie[-1].detail or {}).get("prochaine_relance")
-            if isinstance(ts, (int, float)):
-                prochaine_relance = datetime.fromtimestamp(ts, tz=timezone.utc)
+            # Recalculée sur le calendrier des relances (J+3, J+7) et les relances
+            # déjà faites. Celle écrite au journal par le webhook reposait sur
+            # `attempt_count`, que nos relances n'incrémentent pas : l'écran
+            # annonçait une relance au 25/09 alors qu'on était le 29 et qu'elle
+            # avait eu lieu.
+            from services.relances_paiement import prochaine_relance as _calendrier
+            prochaine_relance = _calendrier(
+                _aware(serie[0].created_at), 1 + len(relances),
+                _aware(relances[-1].created_at) if relances else None)
 
         if resiliation is None:
             resiliation_pendant_essai = False
@@ -2092,14 +2291,14 @@ async def _suivi_essais(db: AsyncSession, now: datetime) -> dict:
             "resiliation_pendant_essai": resiliation_pendant_essai,
             "a_paye": a_paye,
             "impaye_regularise": bool(echecs) and not serie and a_paye,
-            "montant_cents": (max((e.montant_cents for e in evts if e.montant_cents), default=None)
+            # Impayé : la somme due. Sinon : le prix de la formule actuelle (le plus
+            # gros montant du journal gardait 19 € après un passage en Standard).
+            "montant_cents": ((serie[-1].montant_cents if serie else None)
                               or PRIX_MENSUEL_CENTS.get(sub.plan)),
             "echecs_paiement": len(serie),
             "derniere_tentative": _aware(serie[-1].created_at) if serie else None,
             "prochaine_relance": prochaine_relance,
-            "relances_faites": sum(1 for e in _types("relance_paiement")
-                                   if dernier_paiement is None
-                                   or _aware(e.created_at) > dernier_paiement),
+            "relances_faites": len(relances),
             "relances_terminees": issue == "impaye_perdu" or statut == "unpaid",
             "inscrit_le": _aware(u.created_at),
             "derniere_connexion": _aware(u.last_login_at),
@@ -2112,7 +2311,9 @@ async def _suivi_essais(db: AsyncSession, now: datetime) -> dict:
     # une période gratuite comptent — un essai refusé (carte déjà vue) n'en est pas un.
     termines = [l for l in lignes if l["a_eu_essai"]
                 and l["issue"] not in ("en_essai", "resiliation_programmee")]
-    convertis = [l for l in termines if l["a_paye"] or l["issue"] == "converti"]
+    # Converti = a PAYÉ. Un abonnement « active » sans paiement (heure qui suit la
+    # fin d'essai, code promo à 100 %) n'est pas une conversion.
+    convertis = [l for l in termines if l["a_paye"]]
 
     # Paiement ouvert (le client Stripe naît au checkout) mais aucun abonnement :
     # la personne s'est arrêtée à l'écran de carte bancaire.

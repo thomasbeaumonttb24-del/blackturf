@@ -19,7 +19,9 @@ pytestmark = pytest.mark.asyncio
 _CHEVAUX = [{"numero": 1, "nom": "TEST", "rang": 1}]
 
 
-async def _course(db, course_id: str) -> None:
+async def _course(db, course_id: str, statut: str = "termine") -> None:
+    # « termine » : depuis le 2026-09-30, une course à venir ne part plus par
+    # e-mail sans compte (cf. test_quota_classement).
     hippo = Hippodrome(hippodrome_id=str(uuid.uuid4()), nom=f"Hippodrome {course_id}",
                        code=uuid.uuid4().hex[:4])
     db.add(hippo)
@@ -29,7 +31,7 @@ async def _course(db, course_id: str) -> None:
     db.add(Course(course_id=course_id, reunion_id=f"R-{course_id}", numero=1,
                   nom="Prix Test", date_heure=datetime.now(timezone.utc) + timedelta(hours=2),
                   hippodrome_nom="Vincennes Test", discipline="Attelé", distance=2700,
-                  nb_partants=8, statut="a_venir"))
+                  nb_partants=8, statut=statut))
     await db.commit()
 
 

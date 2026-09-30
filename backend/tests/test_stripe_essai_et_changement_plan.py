@@ -178,7 +178,7 @@ async def test_standard_vers_expert_modifie_labonnement_sans_en_creer_un_second(
     abo = await _abo(db, user, plan="standard", statut="active", stripe_id="sub_courant")
 
     res = await sr.create_checkout(
-        sr.CheckoutRequest(plan="expert", periodicite="monthly"), db, user)
+        sr.CheckoutRequest(plan="expert", periodicite="monthly", confirmer=True), db, user)
 
     # Aucune session Checkout : pas de second abonnement, donc pas de double prélèvement.
     assert captured == {}
@@ -220,7 +220,7 @@ async def test_changement_de_plan_ferme_les_doublons_herites(db, monkeypatch):
     await db.commit()
 
     await sr.create_checkout(
-        sr.CheckoutRequest(plan="expert", periodicite="monthly"), db, user)
+        sr.CheckoutRequest(plan="expert", periodicite="monthly", confirmer=True), db, user)
 
     assert supprimes == ["sub_vieux"]
     await db.refresh(vieux)
@@ -457,3 +457,125 @@ async def test_auth_me_signale_lessai_bloque(client, db, auth_headers):
     apres = (await client.get("/api/v1/auth/me", headers=auth_headers)).json()
     assert apres["essai_bloque_sans_carte"] is True
     assert apres["essai_fin"] is not None
+
+
+# ─────────────────────────────────────────────
+# 4. Changement de formule (2026-09-29) : jamais en un clic, hausse payée tout
+#    de suite, impayé d'abord réglé.
+# ─────────────────────────────────────────────
+def _stripe_changement(monkeypatch, status="active", prorata_lines=(), modify_ret=None):
+    appels: list[tuple] = []
+    monkeypatch.setattr(sr.stripe.Subscription, "retrieve",
+                        lambda sid: _sub_stripe(status, sub_id=sid))
+    monkeypatch.setattr(sr.stripe.Subscription, "modify",
+                        lambda sid, **kw: appels.append((sid, kw)) or (modify_ret or {"status": status}))
+    monkeypatch.setattr(sr.stripe.Price, "retrieve", lambda pid: {"unit_amount": 1900 if "expert" in pid else 1200})
+    monkeypatch.setattr(sr.stripe.Invoice, "upcoming", lambda **kw: {"lines": {"data": [
+        {"amount": a, "proration": True} for a in prorata_lines] + [{"amount": 1900, "proration": False}]}})
+    return appels
+
+
+@pytest.mark.asyncio
+async def test_sans_confirmation_rien_ne_change_et_un_apercu_chiffre_est_rendu(db, monkeypatch):
+    _capture_checkout(monkeypatch)
+    appels = _stripe_changement(monkeypatch, prorata_lines=(-600, 950))
+    user = await _user(db, plan="standard")
+    abo = await _abo(db, user, plan="standard", statut="active", stripe_id="sub_c")
+
+    res = await sr.create_checkout(sr.CheckoutRequest(plan="expert", periodicite="monthly"), db, user)
+
+    assert res["confirmation_requise"] is True
+    ap = res["apercu"]
+    assert ap["sens"] == "hausse" and ap["montant_immediat_cents"] == 350
+    assert "3,50 €" in ap["message"] and "aujourd'hui" in ap["message"]
+    assert appels == []  # aucune modification chez Stripe
+    await db.refresh(abo)
+    await db.refresh(user)
+    assert abo.plan == "standard" and user.plan == "standard"
+
+
+@pytest.mark.asyncio
+async def test_hausse_en_periode_payee_encaisse_la_difference_tout_de_suite(db, monkeypatch):
+    _capture_checkout(monkeypatch)
+    appels = _stripe_changement(monkeypatch)
+    user = await _user(db, plan="standard")
+    await _abo(db, user, plan="standard", statut="active", stripe_id="sub_c")
+
+    res = await sr.create_checkout(
+        sr.CheckoutRequest(plan="expert", periodicite="monthly", confirmer=True), db, user)
+
+    kw = appels[0][1]
+    assert kw["proration_behavior"] == "always_invoice"
+    assert kw["payment_behavior"] == "pending_if_incomplete"
+    assert "metadata" not in kw  # refusé par Stripe avec pending_if_incomplete
+    assert res["change_de_plan"] is True
+    await db.refresh(user)
+    assert user.plan == "expert"
+
+
+@pytest.mark.asyncio
+async def test_hausse_paiement_non_abouti_ne_donne_pas_expert(db, monkeypatch):
+    _capture_checkout(monkeypatch)
+    _stripe_changement(monkeypatch, modify_ret={
+        "status": "active", "pending_update": {"subscription_items": []},
+        "latest_invoice": {"hosted_invoice_url": "https://invoice.stripe.test/x"}})
+    user = await _user(db, plan="standard")
+    abo = await _abo(db, user, plan="standard", statut="active", stripe_id="sub_c")
+
+    res = await sr.create_checkout(
+        sr.CheckoutRequest(plan="expert", periodicite="monthly", confirmer=True), db, user)
+
+    assert res["paiement_requis"] is True and res["url"] == "https://invoice.stripe.test/x"
+    await db.refresh(abo)
+    await db.refresh(user)
+    assert abo.plan == "standard" and user.plan == "standard"
+
+
+@pytest.mark.asyncio
+async def test_baisse_credit_reporte_sur_la_prochaine_facture(db, monkeypatch):
+    _capture_checkout(monkeypatch)
+    appels = _stripe_changement(monkeypatch, prorata_lines=(-1900, 1200))
+    user = await _user(db, plan="expert")
+    await _abo(db, user, plan="expert", statut="active", stripe_id="sub_c")
+
+    ap = (await sr.create_checkout(sr.CheckoutRequest(plan="standard", periodicite="monthly"),
+                                   db, user))["apercu"]
+    assert ap["sens"] == "baisse" and ap["ajustement_prochaine_facture_cents"] == -700
+    assert "7 €" in ap["message"]
+
+    await sr.create_checkout(
+        sr.CheckoutRequest(plan="standard", periodicite="monthly", confirmer=True), db, user)
+    assert appels[0][1]["proration_behavior"] == "create_prorations"
+    await db.refresh(user)
+    assert user.plan == "standard"
+
+
+@pytest.mark.asyncio
+async def test_changement_refuse_tant_qu_un_prelevement_est_impaye(db, monkeypatch):
+    _capture_checkout(monkeypatch)
+    appels = _stripe_changement(monkeypatch, status="past_due")
+    user = await _user(db, plan="free")
+    await _abo(db, user, plan="expert", statut="past_due", stripe_id="sub_c")
+
+    with pytest.raises(HTTPException) as exc:
+        await sr.create_checkout(
+            sr.CheckoutRequest(plan="standard", periodicite="monthly", confirmer=True), db, user)
+    assert exc.value.status_code == 409 and "attente" in exc.value.detail
+    assert appels == []
+
+
+@pytest.mark.asyncio
+async def test_changement_pendant_l_essai_ne_preleve_rien(db, monkeypatch):
+    _capture_checkout(monkeypatch)
+    appels = _stripe_changement(monkeypatch, status="trialing")
+    user = await _user(db, plan="standard")
+    await _abo(db, user, plan="standard", statut="active", stripe_id="sub_c",
+               essai_fin=datetime.now(timezone.utc) + timedelta(days=5))
+
+    ap = (await sr.create_checkout(sr.CheckoutRequest(plan="expert", periodicite="monthly"),
+                                   db, user))["apercu"]
+    assert ap["en_essai"] is True and "Aucun prélèvement" in ap["message"]
+    res = await sr.create_checkout(
+        sr.CheckoutRequest(plan="expert", periodicite="monthly", confirmer=True), db, user)
+    assert appels[0][1]["proration_behavior"] == "create_prorations"
+    assert "essai=1" in res["url"]

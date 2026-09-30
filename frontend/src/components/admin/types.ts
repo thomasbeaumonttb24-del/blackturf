@@ -107,6 +107,8 @@ export interface CompteOffert {
   user_id: string;
   email: string;
   plan: Formule;
+  jusqu_au?: string | null;
+  motif?: string | null;
   created_at: string;
   last_login: string | null;
 }
@@ -196,6 +198,8 @@ export interface AbonnementsData {
     fin_essai_sous_3j: number;
     mrr: number;
     arr: number;
+    /** Payants ayant résilié : payés jusqu'à l'échéance, hors MRR. */
+    mrr_resiliations?: number;
     essais_ouverts_30j: number;
     essais_perdus_30j: number;
     resiliations_30j: number;
@@ -215,7 +219,7 @@ export interface PaiementRecu {
   frais_cents: number | null;
   net_cents: number | null;
   /** Premier encaissement du client, ou échéance suivante. */
-  nature: "nouveau" | "renouvellement";
+  nature: "nouveau" | "renouvellement" | "changement";
   motif: string | null;
   charge_id: string | null;
   /** Reçu Stripe officiel du paiement. */
@@ -240,9 +244,16 @@ export interface MoisRevenu {
   nb_paiements: number;
   nouveaux_cents: number;
   renouvellements_cents: number;
+  /** Différences au prorata réglées lors d'un changement de formule. */
+  changements_cents?: number;
   par_formule: Record<Formule, number>;
   echecs_cents: number;
+  /** Abonnements dont le prélèvement a échoué ce mois-ci (un par abonnement, pas par tentative). */
   nb_echecs: number;
+  /** Parmi eux, ceux qui ont payé depuis. */
+  nb_echecs_regles?: number;
+  /** Tentatives Stripe refusées (réessais compris). */
+  nb_tentatives_echouees?: number;
   nb_clients: number;
   panier_moyen_cents: number | null;
   cumul_cents: number;
@@ -336,6 +347,7 @@ export interface UserDetail {
     email_verified: boolean; auth_method: string;
     stripe_client: boolean; created_at: string; updated_at: string; last_login: string | null;
   };
+  acces_offert?: { plan: string; jusqu_au: string | null; motif: string | null; depuis: string; actif: boolean } | null;
   /** Défi du mois en cours. */
   defi: DefiStatsAdmin & {
     mois: string; rang: number | null; solde: number;

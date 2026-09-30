@@ -85,18 +85,19 @@ async def get_learned_type_weights(session: AsyncSession,
     try:
         from ml.bet_plan_performance import apply_type_gates
         weights = await apply_type_gates(session, weights)
-    except Exception:
-        pass
+    except Exception as e:  # noqa: BLE001 — sans gates, les suspensions sautent : le dire
+        log.warning("bet_performance.gates_types_echec", err=str(e)[:160])
     if profil:
         try:
             from ml.bet_plan_performance import apply_profile_gate
             weights = await apply_profile_gate(session, profil, weights)
-        except Exception:
-            pass
+        except Exception as e:  # noqa: BLE001
+            log.warning("bet_performance.gate_profil_echec", profil=profil, err=str(e)[:160])
         try:
             weights = await _garantir_catalogue_profil(session, profil, weights)
-        except Exception:
-            pass
+        except Exception as e:  # noqa: BLE001
+            log.warning("bet_performance.catalogue_profil_echec", profil=profil,
+                        err=str(e)[:160])
     return weights
 
 
@@ -226,8 +227,8 @@ async def _get_learned_type_weights_raw(session: AsyncSession,
                 if (pdata.get("n_runs") or 0) >= MIN_RUNS_FOR_WEIGHTS and pdata.get("type_weights"):
                     # raffinage contextuel (additif : retombe sur le global si bucket vide)
                     return effective_type_weights(pdata, discipline, nb_partants)
-        except Exception:
-            pass
+        except Exception as e:  # noqa: BLE001
+            log.warning("bet_performance.poids_profil_echec", profil=profil, err=str(e)[:160])
 
     learned: dict = {}
     try:
@@ -322,7 +323,8 @@ async def compute_model_heat(session: AsyncSession) -> dict:
         if row and row[0] is not None:
             brier = float(row[0])
             n_races = int(row[1] or 0)
-    except Exception:
+    except Exception as e:  # noqa: BLE001
+        log.warning("bet_performance.brier_indisponible", err=str(e)[:160])
         brier = None
 
     # ── Résultats : AVANTAGE récent des PLANS réellement émis et réglés ─────────
@@ -392,7 +394,8 @@ async def compute_model_heat(session: AsyncSession) -> dict:
             n_bets = int(row[2] or 0)
             roi = (float(row[1]) - float(row[0])) / float(row[0])
             roi_recent = roi + PRELEVEMENT_MOYEN_SYSTEME_PCT / 100.0
-    except Exception:
+    except Exception as e:  # noqa: BLE001
+        log.warning("bet_performance.roi_recent_indisponible", err=str(e)[:160])
         roi_recent = None
 
     # ── Termes ──
@@ -417,8 +420,8 @@ async def compute_model_heat(session: AsyncSession) -> dict:
         if row and row[0] == "critical" and heat > 0:
             heat = 0.0
             drift_freeze = True
-    except Exception:
-        pass
+    except Exception as e:  # noqa: BLE001 — le gel sur dérive ne doit pas sauter en silence
+        log.warning("bet_performance.etat_derive_indisponible", err=str(e)[:160])
 
     return {
         "heat": heat,

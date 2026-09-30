@@ -368,7 +368,8 @@ async def settle_catchup_plans(session, days: int = 14) -> dict:
     return totals
 
 
-async def daily_exposure_total(session, subject: str) -> float:
+async def daily_exposure_total(session, subject: str, *, course_id: Optional[str] = None,
+                               profil: Optional[str] = None) -> float:
     """Somme des montants JOUÉS (``montant_joue``) des plans PRÉ-COURSE émis
     aujourd'hui (UTC) par ce destinataire — utilisée pour l'exposition maximale
     par jour (Point 12). Un même plan idempotent (même course/profil/montant)
@@ -381,19 +382,38 @@ async def daily_exposure_total(session, subject: str) -> float:
     (``plan.montant_quinte``, hors ``montant_joue`` qui reste le plan principal
     seul) s'ajoute au cumul. ``->>`` + CAST : même SQL sous PostgreSQL (jsonb) et
     SQLite ≥ 3.38 (tests) ; un plan sans Quinté+ (ou antérieur) compte 0.
+
+    UN PLAN PAR (course, profil) : le plus récent. L'empreinte d'unicité inclut les
+    gains et les cotes du moment, donc chaque consultation d'un même conseil, marché
+    en mouvement, écrit une nouvelle ligne. Les additionner comptait la même course
+    autant de fois que la page était ouverte : ×8,4 sur les abonnés en 30 jours
+    (27 807 € comptés pour 3 327 € réellement engagés, jusqu'à ×35 sur une journée,
+    audit du 2026-09-28). Deux profils différents sur une course restent deux plans.
+
+    `course_id` + `profil` : couple en cours de demande, EXCLU du cumul — le plan qui
+    va être émis le remplace, il est compté à part par l'appelant (`_engage`).
     """
     if not subject or subject == SYSTEM_SUBJECT:
         return 0.0
+    exclure = course_id is not None and profil is not None
     try:
-        total = (await session.execute(text("""
+        total = (await session.execute(text(f"""
             SELECT COALESCE(SUM(montant_joue), 0)
                    + COALESCE(SUM(CAST(plan->>'montant_quinte' AS FLOAT)), 0)
-            FROM bet_plan_snapshots
-            WHERE subject_hash = :sub AND is_pre_course = true
-              AND emitted_at >= :day_start
+            FROM (
+                SELECT montant_joue, plan, course_id, profil,
+                       ROW_NUMBER() OVER (PARTITION BY course_id, profil
+                                          ORDER BY emitted_at DESC) AS rang
+                FROM bet_plan_snapshots
+                WHERE subject_hash = :sub AND is_pre_course = true
+                  AND emitted_at >= :day_start
+            ) dernier
+            WHERE rang = 1
+              {"AND NOT (course_id = :exc_course AND profil = :exc_profil)" if exclure else ""}
         """), {"sub": subject,
                "day_start": datetime.now(timezone.utc).replace(
-                   hour=0, minute=0, second=0, microsecond=0)})).scalar()
+                   hour=0, minute=0, second=0, microsecond=0),
+               **({"exc_course": course_id, "exc_profil": profil} if exclure else {})})).scalar()
         return float(total or 0.0)
     except Exception as exc:
         if not is_missing_bet_plan_table(exc):

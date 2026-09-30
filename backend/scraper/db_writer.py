@@ -154,17 +154,50 @@ def gen_uuid() -> str:
     return str(uuid.uuid4())
 
 
+CODE_HIPPODROME_MAX = 20     # longueur de la colonne hippodromes.code
+
+
+def code_hippodrome(nom: str) -> str:
+    """Code UNIQUE d'un hippodrome, tenu dans la colonne (20 caractères).
+
+    L'ancien code tronquait le nom à 20 caractères : « HIPPODROME DE SAINT BRIEUC »,
+    « … SAINT MALO » et « … SAINT GALMIER » donnaient tous `HIPPODROME_DE_SAINT_`.
+    Un nom trop long garde son début et reçoit une empreinte de son nom COMPLET.
+    Un nom court garde exactement le code d'avant.
+    """
+    brut = nom.upper().replace(" ", "_")
+    if len(brut) <= CODE_HIPPODROME_MAX:
+        return brut
+    import hashlib
+    empreinte = hashlib.sha1(nom.encode("utf-8")).hexdigest()[:8]
+    return f"{brut[:CODE_HIPPODROME_MAX - 9]}_{empreinte}"
+
+
 async def upsert_hippodrome(session: AsyncSession, nom: str, pays: str | None = None) -> str:
-    """Upsert hippodrome, retourne hippodrome_id."""
-    code = nom.upper().replace(" ", "_")[:20]
+    """Upsert hippodrome PAR NOM, retourne hippodrome_id.
+
+    L'identité est le NOM (index unique `ix_hippodromes_nom`, et c'est sur le nom que
+    toutes les requêtes joignent). Le conflit se réglait sur le code tronqué : chaque
+    nouvel hippodrome d'un même préfixe RENOMMAIT la ligne existante, qui basculait
+    d'un nom à l'autre au fil des imports. Les noms perdus n'avaient plus de ligne, donc
+    plus de pays pour toute jointure faite après coup (zone France / étranger, devises,
+    contrôles) — 211 courses d'un an à Saint-Galmier, Saint-Brieuc, Munich-Riem et
+    Hambourg-Horn (audit du 2026-09-28). Leur historique a été écrit, la ligne portant
+    en général le bon nom au moment du traitement d'après course ; une course traitée
+    pendant la bascule l'aurait perdu (`pipeline._save_historical_course` exige le pays).
+
+    Pays : un pays inconnu (None / « UNK ») n'écrase jamais un pays connu.
+    """
+    pays_val = pays or "UNK"
     stmt = pg_insert(Hippodrome).values(
         hippodrome_id=gen_uuid(),
         nom=nom,
-        code=code,
-        pays=pays or "UNK",
-    ).on_conflict_do_update(
-        index_elements=["code"],
-        set_={"nom": nom, "pays": pays or "UNK"},
+        code=code_hippodrome(nom),
+        pays=pays_val,
+    )
+    stmt = stmt.on_conflict_do_update(
+        index_elements=["nom"],
+        set_={"pays": func.coalesce(func.nullif(stmt.excluded.pays, "UNK"), Hippodrome.pays)},
     ).returning(Hippodrome.hippodrome_id)
     result = await session.execute(stmt)
     return result.scalar_one()

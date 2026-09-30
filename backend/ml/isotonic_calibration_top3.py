@@ -22,6 +22,7 @@ import numpy as np
 import structlog
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
+from ml.prediction_evaluation import sans_modeles_retires
 
 log = structlog.get_logger(module="isotonic_calibration_top3")
 
@@ -47,7 +48,7 @@ async def _fetch_proba_top3_outcomes(session: AsyncSession) -> list[tuple[float,
           AND c.date_heure IS NOT NULL
           AND pr.created_at IS NOT NULL
           AND pr.created_at < c.date_heure
-          AND pr.is_replayable = true
+          AND pr.is_replayable = true{sans_modeles_retires('pr')}
     """))
     out: list[tuple[float, int]] = []
     for proba, numero, course_id, classement in rows.fetchall():

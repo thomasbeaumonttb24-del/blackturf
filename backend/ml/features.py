@@ -194,6 +194,84 @@ POSITION_HISTORIQUE_SQL = f"""
          THEN {POSITION_INCIDENT} ELSE h.position_arrivee END AS position_arrivee"""
 
 
+# ── Historique sans doublons (drapeau BT_HIST_V2, audit 2026-09-28) ─────────
+# Une course interne (course_id renseigné, datée du jour) a souvent une COPIE PMU
+# « performances » (course_id NULL) datée de la VEILLE : la date PMU est minuit à
+# Paris, lue en UTC. Mesuré sur toute la table : décalage d'un jour toujours (jamais
+# zéro), même distance, et place identique (77 965) ou vide côté copie (20 147). Les
+# 137 paires aux places différentes ne sont PAS appariées (prudence).
+#
+# La copie porte ce que la ligne interne n'écrit pas (écart, vitesse du vainqueur,
+# corde, poids porté…) : on ne la jette pas, on en complète la ligne interne.
+#
+# Ce filtre écarte aussi la copie de la course CALCULÉE elle-même : datée de la
+# veille, elle passe `date_course < jour` alors que la ligne interne (datée du jour)
+# ne passe pas. Au direct elle n'existe pas encore ; dans tout recalcul a posteriori
+# c'était le résultat de la course dans ses propres features.
+HIST_JUMEAU_LATERAL = """
+        LEFT JOIN LATERAL (
+            SELECT e.ecart_longueurs, e.indice_vitesse, e.corde, e.poids_porte_course,
+                   e.reduction_km, e.terrain, e.commentaire_course, e.jockey_course,
+                   e.equipement_course
+            FROM historique_courses e
+            WHERE h.course_id IS NOT NULL AND e.cheval_id = h.cheval_id
+              AND e.course_id IS NULL
+              AND e.date_course = h.date_course - 1 AND e.distance = h.distance
+              AND (e.position_arrivee IS NULL OR e.position_arrivee = h.position_arrivee)
+            ORDER BY e.historique_id
+            LIMIT 1
+        ) tw ON TRUE"""
+
+HIST_SANS_COPIE_SQL = """
+          AND NOT (h.course_id IS NULL AND EXISTS (
+              SELECT 1 FROM historique_courses i
+              WHERE i.cheval_id = h.cheval_id AND i.course_id IS NOT NULL
+                AND i.date_course = h.date_course + 1 AND i.distance = h.distance
+                AND (h.position_arrivee IS NULL OR h.position_arrivee = i.position_arrivee)))"""
+
+# Copie PMU de la course CALCULÉE (paramètre :cid), sans condition de place : pour
+# un recalcul a posteriori seulement (cf. _load_course_batch_data).
+HIST_SANS_COPIE_COURSE_SQL = """
+          AND NOT (h.course_id IS NULL AND EXISTS (
+              SELECT 1 FROM historique_courses i
+              WHERE i.cheval_id = h.cheval_id AND i.course_id = :cid
+                AND i.date_course = h.date_course + 1 AND i.distance = h.distance))"""
+
+# Colonnes que la copie PMU complète sur la ligne interne.
+HIST_COLONNES_COMPLETEES = ("ecart_longueurs", "indice_vitesse", "corde", "poids_porte_course",
+                            "reduction_km", "terrain", "commentaire_course", "jockey_course",
+                            "equipement_course")
+
+
+def hist_dedup_actif(force: Optional[bool] = None) -> bool:
+    """Drapeau effectif : `force` (patch des vecteurs historiques) sinon BT_HIST_V2."""
+    if force is not None:
+        return bool(force)
+    try:
+        from ml.algo_flags import FLAGS
+        return bool(FLAGS.hist_v2)
+    except Exception:  # noqa: BLE001
+        return False
+
+
+# Réduction kilométrique des copies PMU : 17 696 lignes externes (et aucune interne)
+# valent moins de 10 s/km, soit le vrai chrono divisé par 10 (7,83 pour 78,3 sur la
+# même course, audit du 2026-09-28). Rien entre 10 et 50 : la frontière est nette.
+# `min()` retenait ce 7,8 comme « meilleure réduction » du cheval.
+REDUCTION_KM_DIXIEMES_MAX = 10.0
+
+
+def hist_col(col: str, dedup: bool) -> str:
+    """Expression SQL d'une colonne d'historique : complétée par la copie si dédoublonné."""
+    if dedup and col in HIST_COLONNES_COMPLETEES:
+        expr = f"COALESCE(h.{col}, tw.{col})"
+        if col == "reduction_km":
+            return (f"(CASE WHEN {expr} > 0 AND {expr} < {REDUCTION_KM_DIXIEMES_MAX} "
+                    f"THEN {expr} * 10 ELSE {expr} END)")
+        return expr
+    return f"h.{col}"
+
+
 def score_position(pos: int, nb_partants: int = 10) -> float:
     """Normalise position → score 0-1 (1=victoire)."""
     if pos >= 20:
@@ -1905,6 +1983,15 @@ def _nom_cle(nom) -> str:
     return "".join(ch for ch in t.upper() if ch.isalpha())
 
 
+def champ_sortie(h, defaut: int) -> int:
+    """Taille du champ d'une sortie passée (h[5]), `defaut` si inconnue ou aberrante."""
+    try:
+        n = int(h[5]) if len(h) > 5 and h[5] is not None else 0
+    except (TypeError, ValueError):
+        n = 0
+    return n if n >= 2 else defaut
+
+
 def _score_sortie(pos, nb_partants: int) -> Optional[float]:
     """Note d'une sortie passée : place → score, incident (99) → 0, inconnue → None."""
     if not pos:
@@ -1912,7 +1999,8 @@ def _score_sortie(pos, nb_partants: int) -> Optional[float]:
     return score_position(int(pos), nb_partants)
 
 
-def traits_jockey_historique(historique, jockey_nom, nb_partants: int) -> dict:
+def traits_jockey_historique(historique, jockey_nom, nb_partants: int,
+                             champ_par_course: bool = False) -> dict:
     """Le cheval avec le jockey / driver DU JOUR, sur TOUTE sa carrière connue.
 
     `jockey_cheval_synergy_*` ne lit que les courses internes (participations) ;
@@ -1921,8 +2009,12 @@ def traits_jockey_historique(historique, jockey_nom, nb_partants: int) -> dict:
     jockey moins réussite générale (>0 = le couple lui réussit). 0 si inconnu.
     """
     cle = _nom_cle(jockey_nom)
-    tous = [x for x in (_score_sortie(h[0], nb_partants) for h in historique) if x is not None]
-    avec = [x for x in (_score_sortie(h[0], nb_partants) for h in historique
+
+    def _n(h) -> int:          # champ de la sortie (lot BT_HIST_V2) ou du jour
+        return champ_sortie(h, nb_partants) if champ_par_course else nb_partants
+
+    tous = [x for x in (_score_sortie(h[0], _n(h)) for h in historique) if x is not None]
+    avec = [x for x in (_score_sortie(h[0], _n(h)) for h in historique
                         if cle and len(h) > 16 and h[16] and _nom_cle(h[16]) == cle)
             if x is not None]
     deja_monte = any(len(h) > 16 and h[16] for h in historique)
@@ -1949,7 +2041,8 @@ def oeilleres_portees(raw) -> Optional[bool]:
     return not ("SANS" in t or t in ("NON", "AUCUNE", "FALSE", "0"))
 
 
-def traits_oeilleres(historique, oeilleres_jour_raw, nb_partants: int) -> dict:
+def traits_oeilleres(historique, oeilleres_jour_raw, nb_partants: int,
+                     champ_par_course: bool = False) -> dict:
     """Réussite passée du cheval DANS LA MÊME CONFIGURATION d'œillères qu'aujourd'hui.
 
     `historique_courses.equipement_course` ({"oeilleres": bool}) était stocké pour
@@ -1963,7 +2056,8 @@ def traits_oeilleres(historique, oeilleres_jour_raw, nb_partants: int) -> dict:
         return neutre
     tous, meme = [], []
     for h in historique:
-        sc = _score_sortie(h[0], nb_partants)
+        sc = _score_sortie(h[0], champ_sortie(h, nb_partants) if champ_par_course
+                           else nb_partants)
         eq = h[17] if len(h) > 17 else None
         if sc is None:
             continue
@@ -2031,13 +2125,24 @@ def _amorces_elo(partants, elo_notes: set) -> dict:
     return out
 
 
-async def _load_course_batch_data(session: AsyncSession, course_id: str) -> dict:
+async def _load_course_batch_data(session: AsyncSession, course_id: str,
+                                  hist_dedup: Optional[bool] = None,
+                                  exclure_copie_course: bool = False) -> dict:
     """
     Charge en 6 requêtes toutes les données nécessaires pour une course entière.
     Retourne un dict indexé par participation_id / cheval_id / jockey_id pour accès O(1).
 
     Réduit de ~320 requêtes à 6 pour un champ de 16 partants.
+
+    `hist_dedup` : None = drapeau BT_HIST_V2 ; True/False forcé par le patch des
+    vecteurs historiques, qui calcule les deux versions de la même course.
+
+    `exclure_copie_course` (recalcul a posteriori seulement) : écarte la copie PMU de
+    la course calculée elle-même, datée de la veille, donc lue comme passée. Au
+    direct elle n'existe pas encore ; en recalcul, c'était l'arrivée de la course
+    dans ses propres features.
     """
+    _dedup = hist_dedup_actif(hist_dedup)
     # 1. Partants + course + chevaux + jockeys + entraîneurs + équipements + nouvelles colonnes
     partants_r = await session.execute(text("""
         SELECT
@@ -2125,33 +2230,39 @@ async def _load_course_batch_data(session: AsyncSession, course_id: str) -> dict
     date_heure = partants_raw[0][32]  # date_heure de la course (index aligné sur le SELECT)
 
     # 2. Historique des courses (max 20 par cheval) — une seule requête
+    _hc = lambda col: hist_col(col, _dedup)  # noqa: E731
     hist_r = await session.execute(text(f"""
-        SELECT h.cheval_id, {POSITION_HISTORIQUE_SQL}, h.distance, h.terrain,
+        SELECT h.cheval_id, {POSITION_HISTORIQUE_SQL}, h.distance, {_hc('terrain')},
                h.hippodrome, h.date_course, h.nb_partants, h.cote_depart,
                h.discipline, h.allocation,
-               h.acceleration_label, h.reduction_km,
+               h.acceleration_label, {_hc('reduction_km')},
                -- Données dormantes réveillées (backfill API PMU) — en FIN pour ne
                -- pas décaler les index positionnels existants :
-               h.corde, h.poids_porte_course, h.indice_vitesse,
+               {_hc('corde')}, {_hc('poids_porte_course')}, {_hc('indice_vitesse')},
                -- Écart à l'arrivée (longueurs derrière le vainqueur) — scrapé PMU
                -- (distanceAvecPrecedent). EN FIN → index 14. 0 = vainqueur.
-               h.ecart_longueurs,
+               {_hc('ecart_longueurs')},
                -- Déroulé / trip note de la course passée (#9). EN FIN → index 15.
-               h.commentaire_course,
+               {_hc('commentaire_course')},
                -- 16 jockey de CETTE sortie, 17 équipement porté (clé "oeilleres" booléenne),
                -- 18 temps officiel du cheval (courses internes), 19 course_id (NULL =
                -- historique externe PMU). Stockés, jamais lus jusqu'au 24/09.
-               h.jockey_course, h.equipement_course, h.temps_officiel, h.course_id,
+               {_hc('jockey_course')}, {_hc('equipement_course')}, h.temps_officiel, h.course_id,
                -- ALLOCATION NORMALISÉE EN EUROS — DERNIÈRE colonne, lue par h[-1].
                -- Voir le commentaire de la requête mono-cheval : la table mélange
                -- centimes (lignes PMU) et euros (scraper d'historique externe).
                CASE WHEN h.course_id IS NOT NULL THEN h.allocation / 100.0
                     ELSE h.allocation::float END AS allocation_eur
         FROM historique_courses h
+        {HIST_JUMEAU_LATERAL if _dedup else ''}
         WHERE h.cheval_id = ANY(:cids)
           AND h.date_course < :today
+          {HIST_SANS_COPIE_SQL if _dedup else ''}
+          {HIST_SANS_COPIE_COURSE_SQL if exclure_copie_course else ''}
         ORDER BY h.cheval_id, h.date_course DESC
-    """), {"cids": cheval_ids, "today": date_heure.date() if hasattr(date_heure, "date") else str(date_heure)[:10]})
+    """), {"cids": cheval_ids,
+          "today": date_heure.date() if hasattr(date_heure, "date") else str(date_heure)[:10],
+          **({"cid": course_id} if exclure_copie_course else {})})
     hist_rows = hist_r.fetchall()
     hist_by_cheval: dict = {}
     for row in hist_rows:
@@ -2611,6 +2722,9 @@ async def _load_course_batch_data(session: AsyncSession, course_id: str) -> dict
 
     return {
         "partants": partants_raw,
+        # Lot « historique v2 » (BT_HIST_V2) : lu par _compute_features_from_batch
+        # pour noter les places passées et la corde comme l'historique dédoublonné.
+        "hist_v2": _dedup,
         "draw_bias_by_zone": draw_bias_by_zone,
         "draw_bias_pente": draw_bias_pente,
         "corde_by_numero": corde_by_numero,
@@ -2652,13 +2766,19 @@ async def _load_course_batch_data(session: AsyncSession, course_id: str) -> dict
 async def compute_all_features_for_course(
     session: AsyncSession,
     course_id: str,
+    hist_dedup: Optional[bool] = None,
+    exclure_copie_course: bool = False,
 ) -> list[dict]:
     """
     Calcule les features pour tous les partants d'une course.
     Version optimisée : 9 requêtes batch pour toute la course
     au lieu de ~20 requêtes individuelles par partant.
+
+    `hist_dedup` / `exclure_copie_course` : cf. _load_course_batch_data. Les appelants
+    de production ne les passent pas (drapeau BT_HIST_V2, copie jamais exclue).
     """
-    batch = await _load_course_batch_data(session, course_id)
+    batch = await _load_course_batch_data(session, course_id, hist_dedup=hist_dedup,
+                                          exclure_copie_course=exclure_copie_course)
     if not batch:
         return []
 
@@ -2874,6 +2994,14 @@ async def _compute_features_from_batch(session: AsyncSession, row, batch: dict) 
 
     # ── B. Forme + repos + distance + terrain + hippodrome (depuis historique pré-chargé) ──
     historique = batch["hist_by_cheval"].get(cheval_id, [])
+    _hist_v2 = bool(batch.get("hist_v2"))
+
+    def _sph(h) -> float:
+        """Score d'une sortie passée. v2 : sur la taille du champ de CETTE course
+        (h[5]) ; avant : sur le champ du jour, ce qui notait un 5ᵉ sur 16 à 0,73 ou
+        0,43 selon la course à venir. Repli sur le champ du jour si h[5] inconnu."""
+        return score_position(h[0], champ_sortie(h, nb_partants_int) if _hist_v2
+                              else nb_partants_int)
     musique_positions = parse_musique(musique)
 
     # Confrontations directes vs les autres partants (pré-calculé pour le champ)
@@ -2988,7 +3116,7 @@ async def _compute_features_from_batch(session: AsyncSession, row, batch: dict) 
     dist_cat = get_dist_cat(dist_int)
     dist_hist = [h for h in historique if h[1] and abs(int(h[1]) - dist_int) <= 200]
     # Sorties sur incident (99) incluses, notées 0 — cf. POSITION_HISTORIQUE_SQL.
-    dist_scores = [score_position(h[0], nb_partants_int) for h in dist_hist if h[0]]
+    dist_scores = [_sph(h) for h in dist_hist if h[0]]
     pref_dist = float(np.mean(dist_scores)) if dist_scores else 0.5
     dist_moyennes = [h[1] for h in historique if h[1]]
     delta_dist = abs(dist_int - float(np.mean(dist_moyennes))) if dist_moyennes else 0.0
@@ -2999,7 +3127,7 @@ async def _compute_features_from_batch(session: AsyncSession, row, batch: dict) 
     # Terrain
     terrain_cat = get_terrain_cat(terrain)
     terrain_hist = [h for h in historique if get_terrain_cat(h[2]) == terrain_cat and h[0]]
-    terrain_scores = [score_position(h[0], nb_partants_int) for h in terrain_hist]
+    terrain_scores = [_sph(h) for h in terrain_hist]
     pref_terrain = float(np.mean(terrain_scores)) if terrain_scores else 0.5
     meteo_row = batch["meteo_row"]
     humidite_piste = 0.0
@@ -3014,7 +3142,7 @@ async def _compute_features_from_batch(session: AsyncSession, row, batch: dict) 
 
     # Hippodrome
     hippo_hist = [h for h in historique if h[3] and hippodrome and h[3].upper() == hippodrome.upper() and h[0]]
-    hippo_scores = [score_position(h[0], nb_partants_int) for h in hippo_hist]
+    hippo_scores = [_sph(h) for h in hippo_hist]
     pref_hippo = float(np.mean(hippo_scores)) if hippo_scores else 0.5
     hippo_wins = sum(1 for h in hippo_hist if h[0] == 1)
     record_hippodrome = hippo_wins / len(hippo_hist) if hippo_hist else 0.0
@@ -3024,7 +3152,14 @@ async def _compute_features_from_batch(session: AsyncSession, row, batch: dict) 
     # Plat/obstacle uniquement (trot : pas de corde) ; min 3 obs sinon 0.5 neutre.
     corde_pref = 0.5
     if "trot" not in disc_lower and "attelé" not in disc_lower and "monté" not in disc_lower:
-        zone_jour = corde_zone(int(numero) if numero else None)
+        if _hist_v2:
+            # La STALLE du jour, comparée aux cordes passées (h[11]). Le dossard
+            # n'est pas la stalle en plat : la zone du jour était tirée au hasard.
+            # Stalle inconnue → zone inconnue → 0,5 neutre, jamais devinée.
+            _stalle = (batch.get("corde_by_numero") or {}).get(int(numero)) if numero else None
+            zone_jour = corde_zone(int(_stalle) if _stalle else None)
+        else:
+            zone_jour = corde_zone(int(numero) if numero else None)
         if zone_jour != "inconnu":
             same_zone = []
             for h in historique:
@@ -3235,7 +3370,7 @@ async def _compute_features_from_batch(session: AsyncSession, row, batch: dict) 
     try:
         annee = date_heure.year if hasattr(date_heure, "year") else None
         if annee and historique:
-            sc_saison = [score_position(h[0], nb_partants_int) for h in historique
+            sc_saison = [_sph(h) for h in historique
                          if h[0] is not None and getattr(h[4], "year", None) == annee]
             if sc_saison:
                 saison_form = float(np.mean(sc_saison))
@@ -3291,10 +3426,10 @@ async def _compute_features_from_batch(session: AsyncSession, row, batch: dict) 
     decay_score = 0.0
     if historique:
         weights = [0.95 ** i for i in range(len(historique))]
-        positions = [h[0] for h in historique if h[0] is not None]
-        if positions:
-            w = weights[:len(positions)]
-            sc = [score_position(p, nb_partants_int) for p in positions]
+        sorties = [h for h in historique if h[0] is not None]
+        if sorties:
+            w = weights[:len(sorties)]
+            sc = [_sph(h) for h in sorties]
             decay_score = float(np.average(sc, weights=w[:len(sc)]))
     # opposition_quality RECÂBLÉ 2026-06-17 : force du champ affronté aujourd'hui =
     # ELO moyen des AUTRES partants, normalisé comme
@@ -3331,8 +3466,8 @@ async def _compute_features_from_batch(session: AsyncSession, row, batch: dict) 
                 return refs[dists[i]]*(1-t)+refs[dists[i+1]]*t
         return 14.0
     vitesse_theorique = get_vitesse_ref(discipline, dist_int)
-    hist_long = [score_position(h[0],nb_partants_int) for h in historique if h[0] and h[0]<20 and h[1] and int(h[1])>dist_int+200]
-    hist_court = [score_position(h[0],nb_partants_int) for h in historique if h[0] and h[0]<20 and h[1] and int(h[1])<dist_int-200]
+    hist_long = [_sph(h) for h in historique if h[0] and h[0]<20 and h[1] and int(h[1])>dist_int+200]
+    hist_court = [_sph(h) for h in historique if h[0] and h[0]<20 and h[1] and int(h[1])<dist_int-200]
     stamina_index = float(np.mean(hist_long)-np.mean(hist_court)) if hist_long and hist_court else 0.0
     hist_same_disc = [h for h in historique if h[7] and discipline and str(h[7]).lower()==discipline.lower()]
     disc_coherence = len(hist_same_disc)/max(len(historique),1) if historique else 0.5
@@ -3587,8 +3722,10 @@ async def _compute_features_from_batch(session: AsyncSession, row, batch: dict) 
 
     # ── Données stockées mais jamais lues (branchées le 2026-09-24) ─────────────
     feat_donnees_reveillees = {
-        **traits_jockey_historique(historique, jockey_nom, nb_partants_int),
-        **traits_oeilleres(historique, oeilleres_jour_raw, nb_partants_int),
+        **traits_jockey_historique(historique, jockey_nom, nb_partants_int,
+                                   champ_par_course=_hist_v2),
+        **traits_oeilleres(historique, oeilleres_jour_raw, nb_partants_int,
+                           champ_par_course=_hist_v2),
         **traits_depart(type_depart_raw, taux_faute, _is_trot_allure),
         "jument_pleine": 1.0 if jument_pleine_raw else 0.0,
         "mouvement_ouverture": mouvement_ouverture(cote_reference_raw, cote_pmu),

@@ -12,33 +12,24 @@ import pytest
 from api.routes import courses
 
 
-class FakeRedis:
-    def __init__(self):
-        self.values: dict[str, set[str]] = {}
+@pytest.fixture
+def redis(monkeypatch):
+    import fakeredis
+    from services import quota_classement
 
-    async def sismember(self, key, value):
-        return value in self.values.get(key, set())
+    r = fakeredis.FakeAsyncRedis()
 
-    async def scard(self, key):
-        return len(self.values.get(key, set()))
+    async def _get():
+        return r
 
-    async def sadd(self, key, value):
-        self.values.setdefault(key, set()).add(value)
-
-    async def expire(self, key, ttl):
-        return True
+    monkeypatch.setattr(quota_classement, "_redis", _get)
+    return r
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("plan,limit", [("free", 1), ("decouverte", 1), ("standard", 5), ("starter", 5)])
-async def test_mise_plan_daily_limits(monkeypatch, plan, limit):
-    redis = FakeRedis()
-
-    async def fake_get_redis():
-        return redis
-
-    monkeypatch.setattr(courses, "get_redis", fake_get_redis)
-    user = SimpleNamespace(user_id="user-1", plan=plan, is_admin=False)
+@pytest.mark.parametrize("plan,limit", [("standard", 5), ("starter", 5)])
+async def test_mise_plan_daily_limits(redis, plan, limit):
+    user = SimpleNamespace(user_id="user-1", email="u@exemple.fr", plan=plan, is_admin=False)
 
     for index in range(limit):
         allowed, remaining, configured_limit = await courses._mise_plan_quota_check(user, f"course-{index}")
@@ -51,20 +42,29 @@ async def test_mise_plan_daily_limits(monkeypatch, plan, limit):
 
 
 @pytest.mark.asyncio
-async def test_same_course_does_not_consume_quota_twice(monkeypatch):
-    redis = FakeRedis()
+@pytest.mark.parametrize("plan", ["free", "decouverte"])
+async def test_gratuit_seulement_sur_la_course_revelee(redis, plan):
+    """Compte gratuit : le plan de mise suit la course dont le classement a été
+    révélé, et ne consomme JAMAIS la course du jour à lui seul."""
+    from services import quota_classement
 
-    async def fake_get_redis():
-        return redis
+    user = SimpleNamespace(user_id="user-1", email="g@exemple.fr", plan=plan, is_admin=False)
+    assert (await courses._mise_plan_quota_check(user, "course-1"))[0] is False
+    assert (await quota_classement.etat(user))["restant"] == 1  # rien consommé
+    await quota_classement.consommer(user, "course-1")
+    assert (await courses._mise_plan_quota_check(user, "course-1"))[0] is True
+    assert (await courses._mise_plan_quota_check(user, "course-2"))[0] is False
 
-    monkeypatch.setattr(courses, "get_redis", fake_get_redis)
-    user = SimpleNamespace(user_id="user-1", plan="free", is_admin=False)
+
+@pytest.mark.asyncio
+async def test_same_course_does_not_consume_quota_twice(redis):
+    user = SimpleNamespace(user_id="user-1", email="u@exemple.fr", plan="standard", is_admin=False)
 
     first = await courses._mise_plan_quota_check(user, "course-1")
     refreshed = await courses._mise_plan_quota_check(user, "course-1")
 
-    assert first == (True, 0, 1)
-    assert refreshed == (True, 0, 1)
+    assert first == (True, 4, 5)
+    assert refreshed == (True, 4, 5)
 
 
 @pytest.mark.asyncio

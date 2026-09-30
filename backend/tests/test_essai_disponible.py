@@ -80,6 +80,16 @@ def test_linscription_affiche_lecran_dattente():
     assert "Vérifiez votre boîte mail" in source
 
 
+def test_linscription_oriente_un_ancien_inscrit():
+    """Le 2026-09-28 : sept « Email déjà utilisé » en une journée, d'anciens
+    inscrits face à un simple toast. Le 400 doit ouvrir un encart avec la
+    connexion et le mot de passe oublié."""
+    source = exiger(FRONT / "app" / "(auth)" / "inscription" / "page.tsx")
+    assert "status === 400" in source
+    assert "setDejaInscrit(" in source
+    assert 'href="/mot-de-passe-oublie"' in source
+
+
 def test_la_confirmation_dadresse_propose_lessai():
     source = exiger(FRONT / "app" / "(auth)" / "verifier-email" / "page.tsx")
     assert "CheckoutButton" in source and "peutDemarrerEssai" in source
