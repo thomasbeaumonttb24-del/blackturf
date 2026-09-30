@@ -1497,7 +1497,7 @@ export default function ProgrammeClient({
           <CompteGratuitCta
             icone={IconeMarcheDirect}
             titre="Suivez le marché des cotes en direct sur ces courses"
-            texte="Créez votre compte gratuit en 30 secondes : l'évolution des cotes minute par minute, l'aperçu du classement de l'algorithme et un plan de mise par jour."
+            texte="Créez votre compte gratuit en 30 secondes : l'évolution des cotes minute par minute, le classement complet de l'algorithme sur une course par jour, avec son plan de mise."
             suite="/programme"
           />
         )}

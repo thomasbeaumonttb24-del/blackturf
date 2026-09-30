@@ -742,7 +742,7 @@ function MiseCalculatorWidget({
       {isFreeTier && (
         <p style={{ margin: "0 0 10px", fontSize: 11.5, fontWeight: 600, color: CX.gold, background: CX.goldBg, border: `1px solid ${CX.goldBd}`, borderRadius: 9, padding: "7px 10px" }}>
           {quotaRestant === null
-            ? "Essai gratuit — 1 calcul par jour avec votre plan Découverte."
+            ? "Gratuit : sur la course dont vous avez révélé le classement aujourd'hui."
             : quotaRestant > 0
               ? `Essai gratuit — encore ${quotaRestant} aujourd'hui.`
               : "Dernier essai gratuit du jour utilisé."}
@@ -2266,6 +2266,12 @@ export default function CoursePage({
   const { id } = useParams<{ id: string }>();
   const { user, loading: authLoading } = useAuth();
   const [course, setCourse] = useState<CourseData | null>(initialCourse);
+  // Compte gratuit : UN classement complet par jour, sur la course qu'il choisit
+  // (bouton « Révéler »). Le serveur tient le quota ; on ne lit ici que son état.
+  const gratuit = Boolean(user && ["free", "decouverte"].includes(user.plan));
+  const [quotaClassement, setQuotaClassement] = useState<{ limite: number | null; restant: number; courses: string[] } | null>(null);
+  const [revelation, setRevelation] = useState(false);
+  const classementOuvert = gratuit && Boolean(quotaClassement?.courses.includes(id));
   const [predictions, setPredictions] = useState<Prediction[] | null>(null);
   // Métadonnées du calcul renvoyées par /predictions : sans elles, le tableau met
   // face à face une cote juste calculée à un instant T et une cote de marché d'un
@@ -2426,13 +2432,50 @@ export default function CoursePage({
   // un nouveau tableau `predictions` relance l'effet /analyse (quota 500/j).
   const calculeARef = useRef<string | null>(null);
   useEffect(() => {
-    if (!user || ["free", "decouverte"].includes(user.plan)) return;
+    if (!gratuit || !course || course.statut === "termine") return;
+    predictionsApi.quotaClassement()
+      .then((res) => setQuotaClassement(res.data))
+      .catch(() => setQuotaClassement({ limite: 1, restant: 0, courses: [] }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gratuit, id, course?.statut]);
+
+  async function revelerClassement() {
+    if (revelation) return;
+    if (!window.confirm("Révéler le classement complet de cette course ?\n\nC'est votre classement gratuit du jour : il ne pourra pas être utilisé sur une autre course avant demain.")) return;
+    setRevelation(true);
+    try {
+      const res = await predictionsApi.get(id, 100, true);
+      if (res.data?.verrouille) {
+        toast.error("Votre classement gratuit du jour est déjà utilisé.");
+        const q = await predictionsApi.quotaClassement().catch(() => null);
+        if (q) setQuotaClassement(q.data);
+        return;
+      }
+      // L'effet de chargement prend le relais (course désormais ouverte).
+      setQuotaClassement((q) => ({ limite: q?.limite ?? 1, restant: 0, courses: [...(q?.courses ?? []), id] }));
+    } catch {
+      toast.error("Impossible de révéler le classement pour le moment.");
+    } finally {
+      setRevelation(false);
+    }
+  }
+
+  useEffect(() => {
+    if (!user || (gratuit && !classementOuvert)) return;
     let cancelled = false;
     const load = (silencieux: boolean) => {
       if (!silencieux) setLoadingPred(true);
       return predictionsApi.get(id, 100)
         .then((res) => {
           if (cancelled) return;
+          // Compte gratuit : passé minuit (jour de Paris), sa course d'hier se
+          // referme — le serveur répond verrouillé, on revient à l'aperçu.
+          if (gratuit && res.data.verrouille) {
+            setPredictions(null);
+            setQuotaClassement(null);
+            predictionsApi.quotaClassement().then((q) => setQuotaClassement(q.data)).catch(() => {});
+            return;
+          }
           const calculeA = res.data.calcule_a ?? null;
           if (silencieux && calculeA === calculeARef.current) return;
           calculeARef.current = calculeA;
@@ -2450,7 +2493,7 @@ export default function CoursePage({
     load(false);
     const iv = course?.statut === "a_venir" ? setInterval(() => load(true), 60000) : null;
     return () => { cancelled = true; if (iv) clearInterval(iv); };
-  }, [id, user, course?.statut]);
+  }, [id, user, course?.statut, gratuit, classementOuvert]);
 
   // Load narrative analysis (Standard+) — aussi post-course (facteurs par cheval
   // = transparence "le modèle analyse bien plus que la cote").
@@ -2543,6 +2586,8 @@ export default function CoursePage({
   // là où le programme affichait 84 pour la même course. Le repli sur le score
   // du rang 1 ne sert que le temps d'un déploiement front/back décalé.
   const abonne = Boolean(user && !["free", "decouverte"].includes(user.plan));
+  /** Voit le classement complet : abonné, ou compte gratuit sur SA course du jour. */
+  const voitClassement = abonne || classementOuvert;
 
   // Course courue : l'aperçu public nomme TOUT le classement figé avant le
   // départ. On le met alors dans la forme des prédictions abonné, pour que le
@@ -2957,7 +3002,7 @@ export default function CoursePage({
           {/* Visiteur anonyme : c'est le plus gros du trafic (référencement).
               Lui cacher la table, c'est lui demander de payer pour un produit
               qu'il n'a jamais vu — il reçoit donc le même aperçu. */}
-          {!abonne && (predsPubliques?.length ? (
+          {!voitClassement && (predsPubliques?.length ? (
             // Course courue : la table abonné, telle quelle.
             <ClassementAlgo
               predictions={predsPubliques}
@@ -3006,7 +3051,38 @@ export default function CoursePage({
             />
           ) : null)}
 
-          {abonne && (loadingPred ? (
+          {/* Compte gratuit, course à venir : sa course du jour, à dépenser ici ou ailleurs. */}
+          {gratuit && !voitClassement && !predsPubliques?.length && apercu?.disponible && course.statut !== "termine" && quotaClassement && (
+            quotaClassement.restant > 0 ? (
+              <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-emerald-300/60 bg-gradient-to-br from-emerald-50 to-amber-50 px-5 py-4">
+                <div className="min-w-[220px] flex-1">
+                  <p className="m-0 text-sm font-bold text-emerald-900">Votre classement complet gratuit du jour</p>
+                  <p className="m-0 mt-1 text-xs leading-relaxed text-emerald-800">
+                    Un seul par jour : il reste ouvert sur cette course jusqu&apos;à minuit, avec son plan de mise.
+                  </p>
+                </div>
+                <Button variant="brand" size="sm" onClick={revelerClassement} disabled={revelation}>
+                  {revelation ? <Loader2 className="h-4 w-4 animate-spin" /> : "Révéler le classement de cette course"}
+                </Button>
+              </div>
+            ) : (
+              <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-stone-200 bg-white px-5 py-4">
+                <div className="min-w-[220px] flex-1">
+                  <p className="m-0 text-sm font-bold text-stone-900">Classement gratuit du jour déjà utilisé</p>
+                  <p className="m-0 mt-1 text-xs leading-relaxed text-stone-600">
+                    {quotaClassement.courses[0] ? (
+                      <>Il est ouvert sur <Link href={`/courses/${quotaClassement.courses[0]}`} className="font-semibold underline underline-offset-2">une autre course</Link>. Nouveau classement demain, ou tous les jours avec Expert.</>
+                    ) : "Nouveau classement demain, ou tous les jours avec Expert."}
+                  </p>
+                </div>
+                <Button variant="brand" size="sm" asChild>
+                  <Link href="/tarifs#formules">Voir les formules</Link>
+                </Button>
+              </div>
+            )
+          )}
+
+          {voitClassement && (loadingPred ? (
             <div className="flex justify-center rounded-2xl border border-stone-200 bg-white py-10">
               <Loader2 className="h-5 w-5 animate-spin text-stone-600" />
             </div>
@@ -3019,7 +3095,7 @@ export default function CoursePage({
                   : "Le modèle n'a pas encore produit de classement pour cette course."
               }
               action={
-                course.statut === "termine" ? null : (
+                course.statut === "termine" || !abonne ? null : (
                   <Button variant="brand" size="sm" onClick={handleTriggerPred} disabled={triggeringPred}>
                     {triggeringPred ? <Loader2 className="h-4 w-4 animate-spin" /> : "Lancer l'analyse"}
                   </Button>
@@ -3512,7 +3588,7 @@ export default function CoursePage({
           <PartantsSection
             partants={course.partants}
             predictions={predsVue}
-            apercu={!abonne && !predsVue?.length && apercu?.disponible ? apercu : null}
+            apercu={!voitClassement && !predsVue?.length && apercu?.disponible ? apercu : null}
             connecte={Boolean(user)}
             liveCoteMap={liveCoteMap}
             confGlobal={confGlobal}
@@ -3655,6 +3731,8 @@ export default function CoursePage({
         <PronosticEmailPopup
           courseId={id}
           hippodromeNom={course.hippodrome_nom}
+          // Visiteur sans compte, course à venir : orienté vers le compte gratuit
+          // (plus d'envoi du classement par e-mail, cf. pronostic_email.py).
           actif={!user && ["a_venir", "en_cours"].includes(course.statut)}
         />
       )}

@@ -15,7 +15,7 @@ import { cn } from "@/lib/utils";
  */
 export const AVANTAGES_COMPTE_GRATUIT = [
   "Marché des cotes en direct sur chaque course",
-  "Aperçu du classement IA sur chaque course",
+  "Classement IA complet sur 1 course par jour",
   "1 plan de mise calculé sur votre budget par jour",
   "7 jours d'essai offerts (Standard ou Expert)",
 ];

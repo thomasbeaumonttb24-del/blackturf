@@ -1165,7 +1165,7 @@ async def get_programme_apercu(
     """
     import json
     target = jour or jour_courses()
-    cache_key = f"programme:apercu:{target.isoformat()}"
+    cache_key = f"programme:apercu:v2:{target.isoformat()}"  # v2 : sans accord_marche avant la course
 
     try:
         redis = await get_redis()
@@ -1186,7 +1186,8 @@ async def get_programme_apercu(
                pa.cote_pmu       AS cote_pmu,
                pr.rang_predit    AS rang_predit,
                pr.proba_top1     AS proba_top1,
-               pr.confidence_score AS confiance
+               pr.confidence_score AS confiance,
+               c.statut          AS statut
           FROM predictions pr
           JOIN participations pa ON pa.participation_id = pr.participation_id
           JOIN courses c         ON c.course_id = pr.course_id
@@ -1211,7 +1212,7 @@ async def get_programme_apercu(
         agg = par_course.setdefault(r["course_id"], {
             "nb_notes": 0, "nb_ecartes": 0, "nb_ecarts_prix": 0, "confiance": None,
             "numero_top1": None, "cote_top1": None,
-            "numero_favori": None, "cote_favori": None,
+            "numero_favori": None, "cote_favori": None, "statut": r["statut"],
         })
         agg["nb_notes"] += 1
         if (r["proba_top1"] or 0) < 0.03:
@@ -1247,7 +1248,12 @@ async def get_programme_apercu(
             "nb_ecarts_prix": agg["nb_ecarts_prix"],
             # Même définition que la fiche course (`services.confiance_course`).
             "confiance": _confiance_course(agg["confiance"]),
-            "accord_marche": (bool(fav == top1) if (fav is not None and top1 is not None) else None),
+            # Course NON courue : jamais. « Le n°1 du modèle est le favori des cotes »
+            # nomme ce n°1 (le favori des cotes est public) — soit le classement
+            # obtenu sans compte ni quota (cf. services.quota_classement).
+            "accord_marche": (bool(fav == top1)
+                              if (agg["statut"] == "termine" and fav is not None and top1 is not None)
+                              else None),
         }
 
     resultat = {
@@ -1785,30 +1791,25 @@ DAILY_EXPOSURE_CAP_FRAC = 0.30
 
 
 async def _mise_plan_quota_check(user, course_id: str) -> tuple[bool, int, int]:
-    """(autorisé, quota_restant, limite_configurée). Compteur Redis par user/jour
-    (set de course_ids, TTL 36h) — ré-ouvrir une course déjà comptée aujourd'hui
-    ne reconsomme pas le quota. -1/-1 = illimité. Fail-open si Redis indisponible
-    (disponibilité du produit > paywall strict)."""
-    if getattr(user, "is_admin", False):
+    """(autorisé, quota_restant, limite_configurée) ; -1/-1 = illimité.
+
+    Porte unique : services.quota_classement (atomique, jour de Paris, adresse
+    e-mail normalisée, refus si Redis tombe pour un plan gratuit).
+    Compte gratuit : le plan de mise partage le compteur du CLASSEMENT — il ne
+    s'ouvre que sur SA course du jour. Un plan sur une deuxième course nommerait
+    les chevaux retenus par l'algorithme, soit un second classement déguisé."""
+    from services import quota_classement as _quota
+    lim = _quota.limite(user)  # plan inconnu = gratuit, jamais illimité
+    if lim is None:
         return True, -1, -1
-    limit = MISE_PLAN_DAILY_LIMITS.get(user.plan)
-    if limit is None:  # standard+/expert (plans hors table) = illimité
-        return True, -1, -1
-    try:
-        redis = await get_redis()
-        day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        key = f"mise_plan_quota:{user.user_id}:{day}"
-        if await redis.sismember(key, course_id):
-            return True, max(0, limit - await redis.scard(key)), limit
-        used = await redis.scard(key)
-        if used >= limit:
-            return False, 0, limit
-        await redis.sadd(key, course_id)
-        await redis.expire(key, 129600)  # 36h
-        return True, max(0, limit - (used + 1)), limit
-    except Exception:
-        log.warning("mise_plan_quota.redis_unavailable", user_id=getattr(user, "user_id", None))
-        return True, -1, -1
+    if user.plan in _quota.PLANS_GRATUITS:
+        # Jamais de consommation silencieuse : la course du jour se choisit sur
+        # le bouton « Révéler » du classement ; le plan ne fait que la suivre.
+        if not await _quota.deja_ouverte(user, course_id):
+            return False, 0, lim
+        return True, 0, lim
+    autorise, restant = await _quota.consommer(user, course_id, prefixe="mise_plan")
+    return autorise, restant, lim
 
 
 @router.post("/courses/{course_id}/mise-plan")
@@ -1826,9 +1827,22 @@ async def get_mise_plan(
     from services.mise_calculator import generer_plan, plan_to_dict
     from db.models import Prediction as PredModel, ValueBet
 
-    autorise, quota_restant, quota_limite = await _mise_plan_quota_check(user, course_id)
+    # Course courue : ses chevaux sont publics (arrivée + classement révélé), le plan
+    # n'y dévoile rien — pas de quota pour un compte gratuit, comme le classement.
+    _statut = (await db.execute(select(Course.statut).where(Course.course_id == course_id))).scalar_one_or_none()
+    if user.plan in ("free", "decouverte") and _statut == "termine":
+        autorise, quota_restant, quota_limite = True, -1, -1
+    else:
+        autorise, quota_restant, quota_limite = await _mise_plan_quota_check(user, course_id)
     if not autorise:
         from fastapi import HTTPException as _H
+        if user.plan in ("free", "decouverte"):
+            raise _H(
+                status_code=403,
+                detail="Le plan de mise gratuit s'ouvre sur la course dont vous avez révélé "
+                       "le classement aujourd'hui (onglet Synthèse). Pour toutes les courses, "
+                       "passez à Standard ou Expert.",
+            )
         raise _H(
             status_code=403,
             detail=f"Quota quotidien atteint ({quota_limite}/jour pour votre plan) — "

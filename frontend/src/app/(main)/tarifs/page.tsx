@@ -90,9 +90,9 @@ const FAQ = [
 // Chaque ligne correspond à un contrôle d'accès RÉEL du backend : cotes-live et
 // cotes-historique = compte connecté ; /enjeux = require_pro ; SPI, assistant et
 // stratégies = Expert ; comparateur, confrontations et pronos presse = publics.
-// Classement Découverte : la fiche course ne charge JAMAIS /predictions pour ce
-// plan (CourseClient) — seul l'aperçu public s'affiche, noms du haut masqués
-// avant la course, tout nommé après l'arrivée. D'où « Aperçu », pas « 1/jour ».
+// Classement Découverte : 1 course à venir par jour, choisie par le bouton
+// « Révéler » de la fiche (services/quota_classement.py) ; son plan de mise
+// s'ouvre sur cette même course. Sans compte : aucun classement avant l'arrivée.
 // Pas d'« Accès API » ni d'« Historique N mois » : rien ne les implémente.
 type Cellule = boolean | string;
 
@@ -118,9 +118,9 @@ const FEATURES_COMPARISON: { groupe: string; lignes: { label: string; free: Cell
   {
     groupe: "Algorithme BlackTurf",
     lignes: [
-      { label: "Classement de l'algorithme (probabilités, cote juste, signaux)", free: "Aperçu (favoris masqués)", standard: "5 courses/jour", expert: "Illimité" },
+      { label: "Classement de l'algorithme (probabilités, cote juste, signaux)", free: "1 course/jour", standard: "5 courses/jour", expert: "Illimité" },
       { label: "Paris de valeur", free: false, standard: "Délai 15 min", expert: "Temps réel" },
-      { label: "Plan de mise personnalisé", free: "1 essai/jour", standard: "5 courses/jour", expert: "Illimité" },
+      { label: "Plan de mise personnalisé", free: "Même course", standard: "5 courses/jour", expert: "Illimité" },
       { label: "Assistant IA (Claude Opus)", free: false, standard: false, expert: true },
       { label: "Créateur de stratégies + backtest 12 mois", free: false, standard: false, expert: true },
     ],

@@ -20,8 +20,8 @@ const DECOUVERTE = [
   "Programme PMU du jour",
   "Cotes en direct + évolution cheval par cheval",
   "Comparateur de 2 chevaux, duels, pronos presse",
-  "Aperçu du classement de l'algorithme (favoris masqués)",
-  "Plan de mise : 1 essai/jour",
+  "Classement complet de l'algorithme : 1 course/jour",
+  "Plan de mise sur cette même course",
 ];
 
 const STANDARD = [
