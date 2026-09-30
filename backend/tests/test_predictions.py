@@ -114,6 +114,22 @@ async def test_get_predictions_free_preview_quota(client: AsyncClient, db: Async
     assert resp.status_code == 200
 
 
+async def test_get_predictions_free_ne_recoit_aucun_value_bet(client: AsyncClient, db: AsyncSession,
+                                                              inscrire, admin_headers):
+    """Free ne voit jamais de pari de valeur (liste blanche PLANS_AVEC_VALUE_BETS) :
+    `visible()` seul laissait passer tout plan sans délai, Free compris, et la
+    fiche livrait donc au navigateur les ★ que /value-bets refuse à ce plan."""
+    await _seed_course_with_predictions(db)
+    free = await _make_standard_headers(inscrire)
+    resp = await client.get("/api/v1/courses/R99C1/predictions", headers=free)
+    assert resp.status_code == 200
+    assert all(p["value_bet"] is None for p in resp.json()["predictions"])
+    # Témoin : le même pari est bien servi à un plan Expert.
+    resp = await client.get("/api/v1/courses/R99C1/predictions", headers=admin_headers)
+    assert resp.status_code == 200
+    assert any(p["value_bet"] for p in resp.json()["predictions"])
+
+
 async def test_get_predictions_course_not_found(client: AsyncClient, db: AsyncSession, admin_headers):
     resp = await client.get("/api/v1/courses/DOESNOTEXIST/predictions", headers=admin_headers)
     assert resp.status_code == 404

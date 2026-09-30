@@ -269,15 +269,20 @@ async def get_predictions(
     # une seule règle de visibilité (`services.valuebets_visibilite`) : la fiche,
     # /value-bets, le flux WS et le compteur montrent désormais le même pari, au
     # même niveau, à la même espérance.
-    from services.valuebets_visibilite import visible as _vb_visible, course_etrangere as _course_etrangere
-    _etranger = await _course_etrangere(db, course.hippodrome_nom)
-    vb_res = await db.execute(
-        select(ValueBet)
-        .where(and_(ValueBet.course_id == course_id, ValueBet.actif == True))  # noqa: E712
-    )
-    vbs_by_pid = {vb.participation_id: vb
-                  for vb in vb_res.scalars().all()
-                  if _vb_visible(vb, user.plan, etranger=_etranger)}
+    # `visible()` ne connaît que le délai : la liste blanche des plans qui voient des
+    # paris de valeur (Free : jamais) s'applique ici, comme sur /value-bets.
+    from services.valuebets_visibilite import (
+        PLANS_AVEC_VALUE_BETS, visible as _vb_visible, course_etrangere as _course_etrangere)
+    vbs_by_pid: dict = {}
+    if user.plan in PLANS_AVEC_VALUE_BETS:
+        _etranger = await _course_etrangere(db, course.hippodrome_nom)
+        vb_res = await db.execute(
+            select(ValueBet)
+            .where(and_(ValueBet.course_id == course_id, ValueBet.actif == True))  # noqa: E712
+        )
+        vbs_by_pid = {vb.participation_id: vb
+                      for vb in vb_res.scalars().all()
+                      if _vb_visible(vb, user.plan, etranger=_etranger)}
 
     # Cote AFFICHÉE : live avant gel, dernière connue après. Le pari de valeur,
     # lui, reste celui du cycle : son espérance est calculée sur la cote relevée au
