@@ -184,8 +184,11 @@ export const predictionsApi = {
   // Aperçu PUBLIC de l'analyse (funnel) : agrégats anonymes avant la course,
   // contenu complet une fois la course courue. Aucun compte requis.
   apercu: (courseId: string) => api.get(`/courses/${courseId}/apercu`, { tolere401: true }),
-  get: (courseId: string, bankroll?: number) =>
-    api.get(`/courses/${courseId}/predictions`, { params: { bankroll } }),
+  // `reveler` : compte gratuit, dépense EXPLICITE de sa course du jour (bouton
+  // « Révéler »). Sans lui, une course non encore ouverte revient verrouillée.
+  get: (courseId: string, bankroll?: number, reveler?: boolean) =>
+    api.get(`/courses/${courseId}/predictions`, { params: reveler ? { bankroll, reveler: true } : { bankroll } }),
+  quotaClassement: () => api.get("/quota/classement"),
   trigger: (courseId: string, bankroll?: number) =>
     api.post(`/courses/${courseId}/predict`, null, { params: { bankroll } }),
   valueBets: (niveauMin?: number, limit = 100) =>

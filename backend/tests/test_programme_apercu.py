@@ -28,7 +28,7 @@ def _apres_midi() -> datetime:
     return datetime.combine(jour_courses(), dtime(14, 0), tzinfo=PARIS).astimezone(timezone.utc)
 
 
-async def _course_du_jour(db: AsyncSession, course_id: str, *, accord: bool) -> None:
+async def _course_du_jour(db: AsyncSession, course_id: str, *, accord: bool, statut: str = "a_venir") -> None:
     """Course notée du jour. `accord=False` → le n°1 du modèle n'est PAS le favori
     des cotes, le cas que la pastille met en avant."""
     hippo = Hippodrome(hippodrome_id=str(uuid.uuid4()), nom="Test Prog", code="TPG")
@@ -41,7 +41,7 @@ async def _course_du_jour(db: AsyncSession, course_id: str, *, accord: bool) -> 
         course_id=course_id, reunion_id=f"RP-{course_id}", numero=1, nom="Prix Programme",
         date_heure=_apres_midi(),
         hippodrome_nom="Test Prog", discipline="Attelé", distance=2700,
-        nb_partants=3, statut="a_venir",
+        nb_partants=3, statut=statut,
     ))
 
     # (numéro, cote, proba, rang) — en accord, le rang 1 porte AUSSI la plus petite cote.
@@ -74,16 +74,25 @@ async def test_apercu_programme_agrege_sans_identite(client: AsyncClient, db: As
     assert fiche["nb_notes"] == 3
     assert fiche["nb_ecartes"] == 1          # le cheval à 1 % de chances
     assert fiche["confiance"] == 58
-    assert fiche["accord_marche"] is False   # n°1 du modèle ≠ favori des cotes
+    # Course à venir : JAMAIS l'accord avec le marché — vrai, il nommerait le n°1
+    # (le favori des cotes est public), soit le classement sans compte.
+    assert fiche["accord_marche"] is None
 
     # AUCUN nom de cheval ne doit transiter : c'est un aperçu, pas le pronostic.
     assert "CHEVAL SECRET" not in resp.text.upper()
 
 
-async def test_apercu_programme_detecte_l_accord_avec_le_marche(client: AsyncClient, db: AsyncSession):
+async def test_apercu_programme_ne_nomme_pas_le_n1_avant_la_course(client: AsyncClient, db: AsyncSession):
+    """Accord modèle/marché sur une course à venir = n°1 identifié : non livré."""
     await _course_du_jour(db, "PRG2C1", accord=True)
     data = (await client.get("/api/v1/programme/apercu")).json()
-    assert data["courses"]["PRG2C1"]["accord_marche"] is True
+    assert data["courses"]["PRG2C1"]["accord_marche"] is None
+
+
+async def test_apercu_programme_detecte_l_accord_apres_la_course(client: AsyncClient, db: AsyncSession):
+    await _course_du_jour(db, "PRG3C1", accord=True, statut="termine")
+    data = (await client.get("/api/v1/programme/apercu")).json()
+    assert data["courses"]["PRG3C1"]["accord_marche"] is True
 
 
 async def test_apercu_programme_ignore_les_courses_non_analysees(client: AsyncClient, db: AsyncSession):
