@@ -516,7 +516,9 @@ DETAIL_JACKPOT = {
         {"libelle": "e-Multi en 5", "combinaison": "1-4-3-10", "rapport": 115.5},
         {"libelle": "e-Multi en 6", "combinaison": "1-4-3-10", "rapport": 38.5},
     ],
-    "deux_sur_quatre": [{"combinaison": "1-4", "rapport": 6.0}],
+    # Le PMU publie les 6 paires du top 4, au même rapport (pool unique).
+    "deux_sur_quatre": [{"combinaison": c, "rapport": 6.0}
+                        for c in ("1-4", "1-3", "1-10", "4-3", "4-10", "3-10")],
     "couple_ordre": [{"combinaison": "1-4", "rapport": 31.0}],
     "super_quatre": [{"combinaison": "1-4-3-10", "rapport": 900.0}],
 }
@@ -722,3 +724,70 @@ async def test_course_avancee_ferme_plus_tot(db):
     c.heure_depart_initiale = MAINTENANT + timedelta(hours=1)
     c.date_heure = MAINTENANT + timedelta(minutes=20)       # le PMU avance la course
     assert defi.limite_depot(c) == MAINTENANT + timedelta(minutes=20)
+
+
+# ─── Règlement sur le détail officiel (cas réels rejoués le 2026-09-30) ──────
+def _d(**cles):
+    return {k: [{"libelle": l, "rapport": r, "combinaison": c} for l, r, c in v] for k, v in cles.items()}
+
+
+def _regle(type_pari, nums, detail, np=(), classement=None):
+    return defi.regler_ticket(type_pari, nums, classement or [], {"x": 1}, 12, detail, set(np))
+
+
+def test_detail_couple_avec_non_partant_paye_le_rapport_np():
+    d = _d(e_couple_gagnant=[("e-Couplé Gagnant", 8.1, "13-2"), ("e-Couplé Gagnant 1 NP", 10.4, "13-NP")])
+    r = _regle("Couplé Gagnant", [13, 5], d, np={5})
+    assert r["gagne"] and r["rapport_reel"] == 10.4
+    # Le NP avec un cheval non placé : perdu, pas remboursé (règle PMU).
+    assert not _regle("Couplé Gagnant", [7, 5], d, np={5})["gagne"]
+    assert not _regle("Couplé Gagnant", [7, 5], d, np={5}).get("rembourse")
+
+
+def test_detail_simple_et_quinte_avec_non_partant_rembourses():
+    d = _d(e_simple_gagnant=[("e-Simple Gagnant", 3.0, "4")])
+    assert _regle("Simple Gagnant", [5], d, np={5})["rembourse"]
+    q = _d(e_quinte_plus=[("e-Quinté+ Ordre", 900.0, "1-2-3-4-5")])
+    assert _regle("Quinté+", [1, 2, 3, 4, 9], q, np={9})["rembourse"]
+
+
+def test_detail_multi_ex_aequo_a_la_4e_place():
+    d = _d(e_multi=[("e-Multi en 5", 23.1, "1-7-3-5"), ("e-Multi en 5", 23.1, "1-7-3-8")])
+    r = _regle("Multi en 5", [1, 7, 3, 8, 4], d)
+    assert r["gagne"] and r["rapport_reel"] == 23.1
+    assert not _regle("Multi en 5", [1, 7, 2, 8, 4], d)["gagne"]
+
+
+def test_detail_place_suit_la_liste_payee_par_le_pmu():
+    d = _d(e_simple_place=[("e-Simple Placé", 2.9, "6"), ("e-Simple Placé", 1.2, "8"), ("e-Simple Placé", 1.4, "5")])
+    cl = [{"numero": n, "position": i + 1} for i, n in enumerate([6, 8, 5, 1])]
+    r = defi.regler_ticket("Simple Placé", [5], cl, {"x": 1}, 8, d, {2})
+    assert r["gagne"] and r["rapport_reel"] == 1.4
+    assert not _regle("Simple Placé", [1], d)["gagne"]
+
+
+def test_detail_quinte_ordre_sans_la_tirelire():
+    d = _d(e_quinte_plus=[("e-Quinté+ Ordre", 22818.2, "4-10-12-11-7"),
+                          ("e-Quinté+ Ordre + e-Tirelire", 47818.2, "4-10-12-11-7"),
+                          ("e-Quinté+ Désordre", 456.3, "4-10-12-11-7"),
+                          ("e-Bonus 4sur5", 30.0, "4-10-12-11"), ("e-Bonus 3", 9.0, "4-10-12")])
+    assert _regle("Quinté+", [4, 10, 12, 11, 7], d)["rapport_reel"] == 22818.2
+    assert _regle("Quinté+", [10, 4, 12, 11, 7], d)["rapport_reel"] == 456.3
+    assert _regle("Quinté+", [4, 10, 12, 11, 1], d)["rapport_reel"] == 30.0
+    assert _regle("Quinté+", [4, 10, 12, 2, 1], d)["rapport_reel"] == 9.0
+    assert not _regle("Quinté+", [4, 10, 2, 3, 1], d)["gagne"]
+
+
+def test_detail_2sur4_formule_avec_non_partant():
+    d = _d(e_deux_sur_quatre=[("e-2sur4", 3.0, "4-7"), ("e-2sur4 1 NP", 1.5, "4-NP")])
+    r = _regle("2sur4", [4, 7, 9], d, np={9})
+    # 3 combinaisons : 4-7 (3,0), 4-9=4-NP (1,5), 7-9 (rien) → 2/3 payées, moyenne 2,25.
+    assert r["gagne"] and r["gain_mult"] == pytest.approx(2 / 3) and r["rapport_reel"] == pytest.approx(2.25)
+
+
+def test_detail_desaccord_attend_au_lieu_de_perdre():
+    # L'arrivée dit Couplé Gagnant 1-2, le détail publié (incomplet) ne l'a pas.
+    d = _d(e_couple_gagnant=[("e-Couplé Gagnant", 5.0, "1-3")])
+    cl = [{"numero": 1, "position": 1}, {"numero": 2, "position": 2}]
+    r = defi.regler_ticket("Couplé Gagnant", [1, 2], cl, {"e_couple_gagnant": 5.0}, 12, d, set())
+    assert r["gagne"] and r["rapport_reel"] is None

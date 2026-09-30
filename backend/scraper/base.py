@@ -268,6 +268,10 @@ class ResultatScrape:
     incidents: Optional[str] = None
     commentaire: Optional[str] = None      # commentaireApresCourse.texte (narratif PMU/GENY)
     duree_course: Optional[int] = None     # dureeCourse (ms)
+    # Numéros déclarés NON_PARTANT dans /participants à l'arrivée : un retrait tardif
+    # (après le dernier rafraîchissement du programme) n'était jamais enregistré, et
+    # un ticket qui le contenait se réglait perdant au lieu de remboursé/payé « NP ».
+    non_partants: Optional[list] = None
     source: str = "pmu"
     scraped_at: str = ""
 

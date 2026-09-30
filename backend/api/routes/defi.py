@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.routes.auth import _access_token, get_current_user, require_admin
 from db.database import get_db
-from db.models import Course, DefiPari, DefiRecompense, User
+from db.models import Course, DefiPari, DefiRecompense, Resultat, User
 from services import defi
 
 router = APIRouter()
@@ -179,17 +179,30 @@ async def get_course(
             .order_by(DefiPari.engage_at)
         )).scalars().all())
         solde = await defi.solde(db, user.user_id, defi.mois_de(course.date_heure))
+    mois = defi.mois_de(course.date_heure)
+    # Même règle que engager_pari : fermé avant le lancement ou dès qu'une arrivée
+    # est en base, pour ne jamais afficher un bouton que le serveur refusera.
+    avant = defi.avant_lancement(mois)
+    ouvert = (defi.depot_ouvert(course) and not avant
+              and await db.get(Resultat, course_id) is None)
+    joueur = await defi.progression(db, user, mois) if user else None
     return {
-        "mois": defi.mois_de(course.date_heure),
+        "mois": mois,
         # Les paris que le PMU ouvre sur CETTE course, dans l'ordre du catalogue.
         "types": defi.types_disponibles(course),
-        "ouvert": defi.depot_ouvert(course),
+        "ouvert": ouvert,
+        "avant_lancement": avant,
+        "statut_course": course.statut,
         "limite": defi.limite_depot(course),
         "solde": solde,
-        "tendance": await defi.tendance_course(db, course_id, defi.depot_ouvert(course)),
+        "joueur": joueur,
+        "tendance": await defi.tendance_course(db, course_id, ouvert),
         "mes_paris": await _pari_out(db, mes_paris),
         # Le plan que CE joueur a déjà consulté sur la course (vide sinon).
         "plan": await defi.paris_du_plan(db, user.user_id, course, mes_paris) if user else [],
+        # Tous les tickets des plans qu'il a vus : l'étiquette « Plan BlackTurf »
+        # affichée avant validation suit la même règle que celle enregistrée.
+        "tickets_plan": await defi.tickets_des_plans(db, user.user_id, course_id) if user else [],
     }
 
 

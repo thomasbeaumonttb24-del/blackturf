@@ -44,6 +44,7 @@ POINTS_MAX = 100
 MIN_PARIS_CLASSEMENT = 10
 # Au-delà, on n'est plus dans le pronostic mais dans l'arrosage de la course.
 MAX_PARIS_PAR_COURSE = 3
+MAX_MINI_MULTI = 6
 # Les paris ferment PILE à l'heure de départ annoncée au programme, et le restent
 # si la course part en retard (cf. heure_fermeture).
 VERROU_AVANT_DEPART = timedelta(0)
@@ -139,6 +140,11 @@ def types_disponibles(course: Course) -> list[dict]:
         ligne = {k: v for k, v in t.items() if k != "drapeau"}
         if t["type"] == "Multi":
             ligne["libelle"] = _libelle_multi(course)
+            if ligne["libelle"] == "Mini Multi":
+                # Le PMU ne publie le Mini Multi qu'en 4, 5 et 6 (vérifié sur 45 jours
+                # de rapports) : un « Mini Multi en 7 » gagnant ne serait jamais payé.
+                ligne["max"] = MAX_MINI_MULTI
+                ligne["aide"] = ligne["aide"].replace("4 à 7", "4 à 6")
         out.append(ligne)
     return out
 
@@ -276,6 +282,10 @@ async def paris_du_plan(session, user_id: str, course: Course,
     if not isinstance(plan, dict):
         return []
     dispo = {t["type"] for t in types_disponibles(course)}
+    np_set = set((await session.execute(
+        select(Participation.numero).where(Participation.course_id == course.course_id,
+                                           Participation.non_partant == True)  # noqa: E712
+    )).scalars().all())
     out: list[dict] = []
     vus: set[tuple] = set()
     for niveau in plan.get("niveaux") or []:
@@ -295,8 +305,45 @@ async def paris_du_plan(session, user_id: str, course: Course,
                 "niveau": niveau.get("niveau"), "niveau_label": niveau.get("label"),
                 "deja_joue": any(_meme_pari(libelle, nums, p.type_pari, list(p.chevaux))
                                  for p in deja_joues),
+                # Retiré depuis le calcul du plan : ce ticket ne peut plus être joué.
+                "non_partant": sorted(set(nums) & np_set),
             })
     return out
+
+
+_TYPES_PLAN_ORDRE = ("Couplé Ordre", "Trio Ordre", "Super 4", "Tiercé Ordre", "Quinté+")
+
+
+async def tickets_des_plans(session, user_id: str, course_id: str) -> list[dict]:
+    """Tickets de TOUS les plans montrés à ce joueur sur la course, sous la forme que
+    compare _meme_pari : {type (famille du défi), chevaux, ordre (le plan joue l'ordre)}."""
+    out, vus = [], set()
+    for plan in await _plans_emis(session, user_id, course_id):
+        for niveau in plan.get("niveaux") or []:
+            for pari in niveau.get("paris") or []:
+                libelle = str(pari.get("type") or "")
+                nums = [int(c["numero"]) for c in (pari.get("chevaux") or []) if c.get("numero") is not None]
+                cle = (libelle, tuple(nums))
+                if nums and cle not in vus:
+                    vus.add(cle)
+                    out.append({"type": famille_type(libelle), "chevaux": nums,
+                                "ordre": libelle in _TYPES_PLAN_ORDRE})
+    return out
+
+
+async def progression(session, user: User, mois: str) -> dict:
+    """Où en est le joueur ce mois-ci : paris engagés, points encore en jeu, rang."""
+    nb, en_jeu = (await session.execute(text("""
+        SELECT COUNT(*), COALESCE(SUM(CASE WHEN statut = 'en_attente' THEN points ELSE 0 END), 0)
+        FROM defi_paris WHERE user_id = :u AND mois = :m
+    """), {"u": user.user_id, "m": mois})).one()
+    # Classement frais (pas le cache par processus) : juste après un pari, le rang
+    # affiché sur la carte doit déjà en tenir compte, quel que soit le worker.
+    ligne = None
+    if nb and int(nb) >= MIN_PARIS_CLASSEMENT:
+        ligne = next((l for l in await classement(session, mois) if l["user_id"] == user.user_id), None)
+    return {"nb_paris": int(nb or 0), "en_jeu": int(en_jeu or 0),
+            "rang": ligne["rang"] if ligne else None, "hors_concours": hors_concours(user)}
 
 
 def _meme_pari(type_plan: str, nums_plan: list[int], type_defi: str, nums: list[int]) -> bool:
@@ -371,8 +418,12 @@ async def engager_pari(session, user: User, course_id: str, type_pari: str,
     if deja >= MAX_PARIS_PAR_COURSE:
         raise DefiErreur(f"Maximum {MAX_PARIS_PAR_COURSE} paris par course.")
 
-    if type_pari not in {t["type"] for t in types_disponibles(course)}:
+    ouverts = {t["type"]: t for t in types_disponibles(course)}
+    if type_pari not in ouverts:
         raise DefiErreur(f"Le {type_pari} n'est pas proposé sur cette course.")
+    if len(nums) > ouverts[type_pari]["max"]:
+        raise DefiErreur(f"{ouverts[type_pari].get('libelle', type_pari)} : "
+                         f"{ouverts[type_pari]['max']} chevaux au plus sur cette course.")
 
     partants = set((await session.execute(
         select(Participation.numero).where(
@@ -527,15 +578,212 @@ async def _notifier_rangs(session, avant: dict[str, list[dict]]) -> None:
         await notifier_rangs(session, mois, lignes)
 
 
+# ─── Règlement sur le détail officiel ──────────────────────────────────────
+# Le PMU publie chaque rapport AVEC sa combinaison gagnante (« 4-2-12 », « 13-NP »…).
+# Régler un ticket, c'est donc chercher sa combinaison dans cette liste : c'est
+# exactement ce que fait le PMU, ex æquo, non-partants et places payées compris.
+# Rejoué le 2026-09-30 sur 45 jours d'arrivées réelles : le calcul d'après le
+# classement (settle_pari) remboursait les tickets « 1 NP » que le PMU paie,
+# ignorait les ex æquo du Multi, comptait mal les places payées quand un partant
+# est retiré, et payait la Tirelire en plus du rapport Ordre du Quinté+.
+_CLES_DETAIL: dict[str, tuple[str, ...]] = {
+    "Simple Gagnant": ("simple_gagnant", "e_simple_gagnant", "simple_gagnant_international"),
+    "Simple Placé": ("simple_place", "e_simple_place", "simple_place_international"),
+    "Couplé Gagnant": ("couple_gagnant", "e_couple_gagnant", "couple_gagnant_international"),
+    "Couplé Placé": ("couple_place", "e_couple_place", "couple_place_international"),
+    "Couplé Ordre": ("couple_ordre", "e_couple_ordre", "couple_ordre_international"),
+    "Trio": ("trio", "e_trio", "trio_international"),
+    "Trio Ordre": ("trio_ordre", "e_trio_ordre", "trio_ordre_international"),
+    "2sur4": ("deux_sur_quatre", "e_deux_sur_quatre"),
+    "Super 4": ("super_quatre", "e_super_quatre"),
+    "Tiercé": ("tierce", "e_tierce", "tierce_ordre", "e_tierce_ordre"),
+    "Quarté+": ("quarte_plus", "e_quarte_plus"),
+    "Quinté+": ("quinte_plus", "e_quinte_plus"),
+    "Pick5": ("pick5", "e_pick5", "pick_5"),
+    "Multi": ("multi", "e_multi"),
+    "Mini Multi": ("mini_multi", "e_mini_multi"),
+}
+# Paris unitaires dont le PMU publie des rapports « 1 NP » : un non-partant dans le
+# ticket ne le rembourse pas, le ticket est payé à ce rapport si le reste est bon
+# (perdu sinon). Simples : remboursés. Multi, Quarté+, Quinté+ : aucun rapport NP
+# publié sur 45 jours alors que des non-partants y figuraient → remboursés.
+_AVEC_RAPPORT_NP = {"Couplé Gagnant", "Couplé Placé", "Couplé Ordre", "Trio", "Trio Ordre",
+                    "2sur4", "Super 4", "Tiercé", "Pick5"}
+_ORDONNES = {"Couplé Ordre", "Trio Ordre", "Super 4"}
+_NP = -1
+
+
+def _entrees_detail(rapports_detail: Optional[dict], cles: tuple[str, ...]) -> list[dict]:
+    """[{libelle, comb (numéros, -1 pour NP), rapport}] des clés du type, sans doublon."""
+    import re
+
+    out, vus = [], set()
+    for cle in cles:
+        for e in (rapports_detail or {}).get(cle) or []:
+            if not isinstance(e, dict):
+                continue
+            try:
+                rapport = float(e.get("rapport"))
+            except (TypeError, ValueError):
+                continue
+            brut = str(e.get("combinaison") or "")
+            if rapport <= 0 or not brut or "autre" in brut.casefold():
+                continue
+            comb = [(_NP if p.strip().upper() == "NP" else int(p)) for p in brut.split("-")
+                    if p.strip().upper() == "NP" or re.fullmatch(r"\s*\d+\s*", p)]
+            libelle = str(e.get("libelle") or "")
+            cle_unique = (libelle.casefold(), tuple(comb), rapport)
+            if comb and cle_unique not in vus:
+                vus.add(cle_unique)
+                out.append({"libelle": libelle.casefold(), "comb": comb, "rapport": rapport})
+    return out
+
+
+def _combinaison_payee(entrees: list[dict], ticket: list[int], np_set: set[int],
+                       ordonne: bool, filtre=lambda lib: True) -> Optional[float]:
+    """Rapport de l'entrée qui correspond EXACTEMENT au ticket (non-partants du ticket
+    rapprochés des « NP » de la combinaison), ou None."""
+    nb_np = sum(1 for n in ticket if n in np_set)
+    for e in entrees:
+        if not filtre(e["libelle"]):
+            continue
+        comb = e["comb"]
+        if len(comb) != len(ticket) or comb.count(_NP) != nb_np:
+            continue
+        if ordonne:
+            ok = all((c == _NP and t in np_set) or (c != _NP and c == t) for c, t in zip(comb, ticket))
+        else:
+            ok = sorted(c for c in comb if c != _NP) == sorted(t for t in ticket if t not in np_set)
+        if ok:
+            return e["rapport"]
+    return None
+
+
+def _regler_par_detail(type_pari: str, nums: list[int], rapports_detail: Optional[dict],
+                       non_partants: set[int]) -> Optional[dict]:
+    """Règlement d'après le détail officiel ; None si le détail ne permet pas de conclure
+    (rien de publié pour ce type) — l'appelant retombe alors sur le calcul d'avant."""
+    from itertools import combinations
+
+    famille = famille_type(type_pari)
+    if famille == "Multi":
+        cles = _CLES_DETAIL["Mini Multi" if type_pari.startswith("Mini Multi") else "Multi"]
+    else:
+        cles = _CLES_DETAIL.get(famille)
+    if not cles:
+        return None
+    entrees = _entrees_detail(rapports_detail, cles)
+    if not entrees:
+        return None
+    np_ticket = [n for n in nums if n in non_partants]
+    rembourse = {"gagne": False, "rembourse": True, "rapport_reel": 1.0, "gain_mult": 1.0,
+                 "note": "Cheval non-partant — mise remboursée."}
+    perd = {"gagne": False, "rapport_reel": None, "gain_mult": 1.0, "note": None}
+
+    def gagne(rapport: float, mult: float = 1.0, note: Optional[str] = None) -> dict:
+        return {"gagne": True, "rapport_reel": rapport, "gain_mult": mult, "note": note}
+
+    if np_ticket and famille not in _AVEC_RAPPORT_NP:
+        return rembourse
+    if np_ticket and not any(_NP in e["comb"] for e in entrees):
+        # Non-partant dans le ticket mais aucun rapport « NP » publié pour ce pari :
+        # on ne sait pas ce que le PMU aurait fait → remboursement, jamais un gain inventé.
+        return rembourse
+
+    if famille in ("2sur4", "Pick5"):
+        k = 2 if famille == "2sur4" else 5
+        combis = list(combinations(nums, k))
+        payes = [r for c in combis
+                 if (r := _combinaison_payee(entrees, list(c), non_partants, False)) is not None]
+        if not payes:
+            return perd
+        if len(combis) == 1:
+            return gagne(payes[0])
+        return gagne(sum(payes) / len(payes), len(payes) / len(combis),
+                     f"Formule {len(nums)} chevaux : {len(payes)}/{len(combis)} combinaison(s) gagnante(s).")
+
+    if famille == "Multi":
+        n = len(nums)
+        for e in entrees:
+            import re
+            m = re.search(r"en\s+(\d+)", e["libelle"])
+            if m and int(m.group(1)) == n and _NP not in e["comb"] and set(e["comb"]) <= set(nums):
+                return gagne(e["rapport"])
+        return perd
+
+    if famille == "Tiercé":
+        r = _combinaison_payee(entrees, nums, non_partants, True, lambda l: "ordre" in l and "désordre" not in l and "np" not in l)
+        if r is not None:
+            return gagne(r, note="Rang de gain : Ordre.")
+        r = _combinaison_payee(entrees, nums, non_partants, False, lambda l: "désordre" in l or " np" in l)
+        return gagne(r) if r is not None else perd
+
+    if famille in ("Quarté+", "Quinté+"):
+        ordre = lambda l: "ordre" in l and "désordre" not in l
+        # Ordre sans la Tirelire (jackpot à part, pas le rapport du ticket), sinon avec.
+        r = (_combinaison_payee(entrees, nums, non_partants, True, lambda l: ordre(l) and "tirelire" not in l)
+             or _combinaison_payee(entrees, nums, non_partants, True, ordre))
+        if r is not None:
+            return gagne(r, note="Rang de gain : Ordre.")
+        r = _combinaison_payee(entrees, nums, non_partants, False, lambda l: "désordre" in l)
+        if r is not None:
+            return gagne(r)
+        # Bonus : le PMU publie la combinaison du bonus (4 ou 3 chevaux), payée à
+        # tout ticket qui la contient. Un seul rang : le plus élevé.
+        for filtre, taille, rang in ((lambda l: "4sur5" in l, 4, "Bonus 4sur5"),
+                                     (lambda l: l.endswith("bonus") or l.endswith("bonus 3"), 3, "Bonus")):
+            for e in entrees:
+                if filtre(e["libelle"]) and len(e["comb"]) == taille and set(e["comb"]) <= set(nums):
+                    return gagne(e["rapport"], note=f"Rang de gain : {rang}.")
+        return perd
+
+    r = _combinaison_payee(entrees, nums, non_partants, famille in _ORDONNES)
+    return gagne(r) if r is not None else perd
+
+
 def regler_ticket(type_pari: str, nums: list[int], classement: list[dict],
                   rapports: Optional[dict], nb_partants: int,
                   rapports_detail: Optional[dict], non_partants: set[int]) -> dict:
     """Règle un pari du défi comme le PMU règle le ticket unitaire correspondant.
 
-    Tiercé, Quarté+ et Quinté+ se jouent dans un ordre : l'arrivée exacte paie le
-    rapport Ordre, sinon le Désordre, sinon (Quarté+/Quinté+) le Bonus. Les autres
-    types sont réglés tels quels par ``settle_pari``.
+    D'abord sur le détail officiel (combinaisons payées, cf. _regler_par_detail).
+    À défaut de détail pour ce type : calcul d'après le classement — Tiercé, Quarté+
+    et Quinté+ joués dans un ordre (Ordre si exact, sinon Désordre, sinon Bonus),
+    les autres types par ``settle_pari``. Un ticket que ce calcul donne gagnant
+    alors que le détail publié ne le paie pas reste en attente, jamais inventé.
     """
+    par_detail = _regler_par_detail(type_pari, nums, rapports_detail, non_partants)
+    if par_detail is not None and par_detail["gagne"] and famille_type(type_pari) in ("Tiercé", "Quarté+", "Quinté+")             and not str(par_detail.get("note") or "").endswith("Ordre."):
+        # Arrivée dans l'ordre exact du ticket mais rapport Ordre pas encore publié :
+        # on attend plutôt que de payer le Désordre à un ticket qui vaut l'Ordre.
+        par_pos: dict[int, int] = {}
+        for e in classement or []:
+            try:
+                par_pos.setdefault(int(e["position"]), int(e["numero"]))
+            except (TypeError, ValueError, KeyError):
+                continue
+        if all(par_pos.get(i + 1) == n for i, n in enumerate(nums)):
+            return {"gagne": True, "rapport_reel": None, "gain_mult": 1.0,
+                    "note": "Rapport Ordre pas encore publié."}
+    if par_detail is not None:
+        if not par_detail["gagne"] and not par_detail.get("rembourse"):
+            calcul = _regler_par_classement(type_pari, nums, classement, rapports, nb_partants,
+                                            rapports_detail, non_partants)
+            if calcul.get("gagne"):
+                # Désaccord : l'arrivée dit gagné, le détail publié ne le paie pas
+                # (détail incomplet ?). On attend plutôt que de perdre un bon ticket.
+                log.warning("defi.reglement_desaccord", type_pari=type_pari, chevaux=nums)
+                return {"gagne": True, "rapport_reel": None, "gain_mult": 1.0,
+                        "note": "Rapport de cette combinaison pas encore publié."}
+        return par_detail
+    return _regler_par_classement(type_pari, nums, classement, rapports, nb_partants,
+                                  rapports_detail, non_partants)
+
+
+def _regler_par_classement(type_pari: str, nums: list[int], classement: list[dict],
+                           rapports: Optional[dict], nb_partants: int,
+                           rapports_detail: Optional[dict], non_partants: set[int]) -> dict:
+    """Calcul d'avant le 2026-09-30, d'après le classement (repli sans détail publié)."""
     from services.bet_settlement import _RAPPORT_KEYS, _rapport_par_libelle
 
     if type_pari == "Quinté+":

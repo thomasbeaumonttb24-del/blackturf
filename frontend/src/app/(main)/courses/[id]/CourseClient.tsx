@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useRef, Fragment } from "react";
+import { useCallback, useEffect, useState, useRef, Fragment } from "react";
 import { useParams } from "next/navigation";
 import {
   ArrowLeft, Brain, Loader2, TrendingUp, AlertTriangle, Cloud,
@@ -555,8 +555,24 @@ function MiseCalculatorWidget({
   const [quotaExceeded, setQuotaExceeded] = useState(false);
   const [quotaMessage, setQuotaMessage] = useState<string | null>(null);
 
-  async function generate(profilOverride?: string) {
-    const m = parseFloat(montant);
+  // Budget et profil retenus pour cette course pendant la session : l'onglet est
+  // démonté à chaque changement d'onglet, et le joueur qui revenait du Défi
+  // retrouvait un formulaire vide. Au retour, le plan se recalcule seul (la même
+  // course ne consomme pas de nouveau quota).
+  const cleSession = `bt:plan:${courseId}`;
+  useEffect(() => {
+    if (!userPlan) return;
+    let memo: { montant?: string; profil?: string } | null = null;
+    try { memo = JSON.parse(sessionStorage.getItem(cleSession) || "null"); } catch { memo = null; }
+    if (!memo?.montant) return;
+    setMontant(memo.montant);
+    if (memo.profil) setProfilChoisi(memo.profil);
+    void generate(memo.profil, memo.montant);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cleSession, userPlan]);
+
+  async function generate(profilOverride?: string, montantOverride?: string) {
+    const m = parseFloat(montantOverride ?? montant);
     if (!m || m <= 0) return;
     const prof = profilOverride ?? profilChoisi;
     setLoading(true);
@@ -567,6 +583,7 @@ function MiseCalculatorWidget({
       });
       setPlan(res.data);
       if (typeof res.data?.quota_restant === "number") setQuotaRestant(res.data.quota_restant);
+      try { sessionStorage.setItem(cleSession, JSON.stringify({ montant: String(m), profil: prof })); } catch { /* navigation privée */ }
     } catch (e: unknown) {
       const response = (e as { response?: { data?: { detail?: unknown }; status?: number } })?.response;
       // Le `detail` FastAPI n'est pas TOUJOURS une string (422 de validation Pydantic
@@ -732,7 +749,7 @@ function MiseCalculatorWidget({
       profil={profilChoisi}
       switching={loading}
       onChangeProfil={switchProfil}
-      onClose={() => setPlan(null)}
+      onClose={() => { setPlan(null); try { sessionStorage.removeItem(cleSession); } catch { /* rien */ } }}
       onJouerDefi={statut === "a_venir" ? onJouerDefi : undefined}
     />
   );
@@ -2288,6 +2305,7 @@ export default function CoursePage({
   const [onglet, setOnglet] = useState<Onglet | null>(null);
   // Ticket du plan de mise envoyé vers le Défi du mois (pré-remplissage).
   const [defiPrefill, setDefiPrefill] = useState<DefiPrefill | null>(null);
+  const oublierPrefill = useCallback(() => setDefiPrefill(null), []);
   // Cheval à ouvrir en arrivant sur « Partants » depuis un autre onglet.
   const [chevalCible, setChevalCible] = useState<number | null>(null);
   useEffect(() => {
@@ -3703,6 +3721,7 @@ export default function CoursePage({
               partants={course.partants}
               connecte={!!user}
               prefill={defiPrefill}
+              onPrefillConsomme={oublierPrefill}
               voirPlan={() => allerA("plan")}
             />
             <DefiClassementLive top={5} />

@@ -300,12 +300,20 @@ export type DefiCourse = {
   /** Paris ouverts par le PMU sur cette course. */
   types: DefiTypeInfo[];
   ouvert: boolean;
+  /** Mois d'avant le lancement du défi : aucun pari accepté. */
+  avant_lancement?: boolean;
+  /** Statut PMU de la course (a_venir, termine, annule…). */
+  statut_course?: string;
   limite: string;
   solde: number | null;
+  /** Le joueur ce mois-ci (absent pour un visiteur). */
+  joueur?: { nb_paris: number; en_jeu: number; rang: number | null; hors_concours: boolean } | null;
   tendance: { nb_joueurs: number; nb_paris: number; cheval_plus_joue: number | null };
   mes_paris: DefiPari[];
   /** Paris du dernier plan de mise que CE joueur a consulté sur la course. */
   plan?: DefiPlanPari[];
+  /** Tickets de tous les plans qu'il a vus : sert à l'étiquette Plan / Perso du ticket. */
+  tickets_plan?: { type: string; chevaux: number[]; ordre: boolean }[];
 };
 
 export type DefiPlanPari = {
@@ -316,6 +324,8 @@ export type DefiPlanPari = {
   niveau: string | null;
   niveau_label: string | null;
   deja_joue: boolean;
+  /** Chevaux du ticket retirés depuis le calcul du plan : ticket injouable. */
+  non_partant?: number[];
 };
 
 export type DefiPalmares = { mois: string; rang: number; nom: string; solde: number; plan_offert: string }[];

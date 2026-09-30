@@ -61,13 +61,13 @@ export function EssaiGratuitBanner() {
       <div className="mx-auto flex max-w-5xl flex-wrap items-center gap-x-4 gap-y-2 px-4 py-2.5 text-sm text-slate-800">
         <Gift className="h-4 w-4 shrink-0 text-emerald-700" aria-hidden />
         {remise ? (
-          <p className="min-w-0 flex-1">
+          <p className="min-w-[14rem] flex-1">
             <span className="font-semibold">{user?.prenom ? `${user.prenom}, v` : "V"}os 5 € de parrainage vous attendent</span>
             {" "}: déduits automatiquement de votre premier abonnement.{" "}
             <span className="text-slate-600">Sans engagement, résiliable en un clic.</span>
           </p>
         ) : (
-          <p className="min-w-0 flex-1">
+          <p className="min-w-[14rem] flex-1">
             <span className="font-semibold">{user?.prenom ? `${user.prenom}, v` : "V"}otre essai de 7 jours est offert</span>
             {" "}: Standard ou Expert, pronostics complets, paris de valeur et plans de mise.{" "}
             <span className="text-slate-600">Carte demandée, 0 € prélevé avant la fin de l&apos;essai, résiliable en un clic.</span>

@@ -209,5 +209,6 @@ async def test_ni_rappel_ni_recompense_avant_le_lancement(db, monkeypatch):
 @pytest.mark.asyncio
 async def test_api_sans_notion_d_essai(client):
     r = (await client.get("/api/v1/defi/regles")).json()
-    assert "essai" not in r and "premier_mois" not in r
+    # premier_mois sert seulement à annoncer le lot unique du mois de lancement.
+    assert "essai" not in r
     assert "essai" not in (await client.get("/api/v1/defi/classement")).json()

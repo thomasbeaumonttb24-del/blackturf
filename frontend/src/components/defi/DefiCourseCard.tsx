@@ -12,9 +12,9 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import useSWR from "swr";
+import useSWR, { useSWRConfig } from "swr";
 import { toast } from "sonner";
-import { ArrowRight, Calculator, Check, Info, Loader2, Lock, ShieldCheck, Sparkles, Ticket, TrendingUp, Users, Zap } from "lucide-react";
+import { ArrowRight, Calculator, Check, Info, Loader2, Lock, ShieldCheck, Sparkles, Ticket, Timer, TrendingUp, Users, Zap } from "lucide-react";
 import { defiApi, type DefiCourse, type DefiPlanPari, type DefiRegles, type DefiTypeInfo, type DefiTypePari } from "@/lib/api";
 import { CompteGratuitCta } from "@/components/billing/CompteGratuitCta";
 import { PseudoRequis } from "@/components/layout/PseudoRequis";
@@ -30,6 +30,11 @@ export type DefiPrefill = { type: DefiTypePari; chevaux: number[]; cle: number }
 type PartantDefi = { numero: number; nom_cheval: string; non_partant?: boolean; cote_pmu?: number | null };
 
 const PALIERS = [10, 25, 50, 100];
+
+// Mise de base du ticket PMU quand elle n'est pas 1 € : le PMU affiche le rapport
+// pour cette mise, le défi le ramène à 1 point (rapport « pour 1 € » publié par le
+// PMU). Sans le dire, un joueur qui compare verrait un rapport 3 fois plus petit.
+const MISE_BASE_PMU: Record<string, string> = { "2sur4": "3 €", Multi: "3 €", "Quarté+": "1,50 €", "Quinté+": "2 €" };
 
 function detailErreur(e: unknown): string {
   const d = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;
@@ -116,9 +121,13 @@ function PlanConsulte({ paris, types, onJouer, actif }: {
                   <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-bold text-emerald-700 ring-1 ring-inset ring-emerald-200">
                     <Check className="h-3 w-3" aria-hidden="true" /> Joué
                   </span>
+                ) : p.non_partant && p.non_partant.length > 0 ? (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-stone-100 px-2.5 py-1 text-[11px] font-bold text-slate-500 ring-1 ring-inset ring-stone-200">
+                    Non-partant : n°{p.non_partant.join(", n°")}
+                  </span>
                 ) : (
                   <button type="button" onClick={() => onJouer(p)} aria-pressed={choisi}
-                    className={cn("inline-flex min-h-[34px] items-center gap-1 rounded-lg px-3 text-[12px] font-bold ring-1 ring-inset transition-colors",
+                    className={cn("inline-flex min-h-[40px] items-center gap-1 rounded-lg px-3 text-[12px] font-bold ring-1 ring-inset transition-colors",
                       choisi ? "bg-amber-600 text-white ring-amber-700" : "bg-amber-50 text-amber-900 ring-amber-300 hover:bg-amber-100")}>
                     {choisi ? <><Check className="h-3.5 w-3.5" aria-hidden="true" /> Sélectionné</> : "Jouer ce pari"}
                   </button>
@@ -132,11 +141,14 @@ function PlanConsulte({ paris, types, onJouer, actif }: {
   );
 }
 
-export function DefiCourseCard({ courseId, partants, connecte, prefill, voirPlan }: {
+export function DefiCourseCard({ courseId, partants, connecte, prefill, onPrefillConsomme, voirPlan }: {
   courseId: string;
   partants: PartantDefi[];
   connecte: boolean;
   prefill?: DefiPrefill | null;
+  /** Le ticket pré-rempli a été appliqué : le parent l'oublie, pour qu'un retour sur
+   *  l'onglet ne le ré-applique pas (et ne pousse pas à le rejouer en double). */
+  onPrefillConsomme?: () => void;
   /** Ouvre l'onglet Plan de mise (lien affiché tant qu'aucun plan n'est consulté). */
   voirPlan?: () => void;
 }) {
@@ -155,21 +167,31 @@ export function DefiCourseCard({ courseId, partants, connecte, prefill, voirPlan
   const [chevaux, setChevaux] = useState<number[]>([]);
   const [points, setPoints] = useState(25);
   const [envoi, setEnvoi] = useState(false);
+  const [prefillRefuse, setPrefillRefuse] = useState<string | null>(null);
   const carteRef = useRef<HTMLDivElement>(null);
-
-  // Venu d'un ticket du plan de mise : on pré-remplit, le joueur garde la main
-  // sur les points et valide lui-même.
-  useEffect(() => {
-    if (!prefill) return;
-    setType(prefill.type);
-    setChevaux(prefill.chevaux);
-    carteRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-  }, [prefill]);
+  const { mutate: mutateGlobal } = useSWRConfig();
+  const maintenant = useMaintenant(data?.ouvert ? 1000 : null);
 
   // Paris ouverts par le PMU sur CETTE course (le serveur fait foi). Si le type
   // choisi n'y est pas (course à champ réduit, ticket du plan non proposé…), on
   // retombe sur le premier disponible.
   const types = useMemo(() => data?.types ?? [], [data?.types]);
+
+  // Venu d'un ticket du plan de mise : on pré-remplit une seule fois, dès que les
+  // paris ouverts sont connus ; le joueur garde la main sur les points et valide.
+  useEffect(() => {
+    if (!prefill || types.length === 0) return;
+    const t = types.find((x) => x.type === prefill.type);
+    if (t) {
+      setType(t.type);
+      setChevaux(prefill.chevaux.slice(0, t.max));
+      setPrefillRefuse(null);
+    } else {
+      setPrefillRefuse(prefill.type);
+    }
+    carteRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    onPrefillConsomme?.();
+  }, [prefill, types, onPrefillConsomme]);
   const spec = types.find((t) => t.type === typeChoisi) ?? types[0];
   const type = spec?.type ?? typeChoisi;
   const min = spec?.min ?? 1;
@@ -180,10 +202,27 @@ export function DefiCourseCard({ courseId, partants, connecte, prefill, voirPlan
     for (const t of types) m.set(t.famille, [...(m.get(t.famille) ?? []), t]);
     return [...m.entries()];
   }, [types]);
-  const prefillRefuse = !!prefill && types.length > 0 && !types.some((t) => t.type === prefill.type);
   const nomTicket = type === "Multi" ? `${spec?.libelle ?? "Multi"} en ${Math.max(min, chevaux.length)}` : type;
   const nbCombis = combinaisons(type, chevaux.length);
   const jouables = useMemo(() => partants.filter((p) => !p.non_partant).sort((a, b) => a.numero - b.numero), [partants]);
+
+  // Un cheval déclaré non-partant pendant qu'on compose le ticket en sort, avec un
+  // mot : sinon il y resterait, invisible dans la grille, et le serveur refuserait.
+  useEffect(() => {
+    if (jouables.length === 0) return;
+    const ok = new Set(jouables.map((p) => p.numero));
+    setChevaux((c) => {
+      const retires = c.filter((n) => !ok.has(n));
+      if (retires.length === 0) return c;
+      toast.warning(`n°${retires.join(", n°")} retiré${retires.length > 1 ? "s" : ""} du ticket : non-partant`);
+      return c.filter((n) => ok.has(n));
+    });
+  }, [jouables]);
+
+  // Jamais plus de chevaux que le pari retenu n'en prend (repli de type, pré-remplissage…).
+  useEffect(() => {
+    setChevaux((c) => (c.length > max ? c.slice(0, max) : c));
+  }, [max]);
   const mesParis = data?.mes_paris ?? [];
   const restants = regles.max_paris_par_course - mesParis.length;
   const solde = data?.solde ?? null;
@@ -194,7 +233,19 @@ export function DefiCourseCard({ courseId, partants, connecte, prefill, voirPlan
   const mois = data ? moisLabel(data.mois) : null;
 
   const planConsulte = data?.plan ?? [];
-  const correspondPlan = planConsulte.some((p) => memeTicket(p, type, chevaux, aOrdre));
+  // Même règle que le serveur (_meme_pari) : l'ordre ne compte que si le plan ET le
+  // pari du défi se jouent à l'ordre ; tous les plans vus sur la course comptent.
+  const correspondPlan = (data?.tickets_plan ?? []).some((p) =>
+    memeTicket({ type: p.type, chevaux: p.chevaux }, type, chevaux, p.ordre && aOrdre));
+
+  // Fermeture à la seconde près, sans attendre le rafraîchissement du serveur.
+  const msRestant = data ? Date.parse(data.limite) - maintenant : 0;
+  const ouvert = !!data?.ouvert && msRestant > 0;
+  const expire = !!data?.ouvert && msRestant <= 0;
+  useEffect(() => {
+    if (expire) void mutate();
+  }, [expire, mutate]);
+  const joueur = data?.joueur;
 
   function jouerDuPlan(p: DefiPlanPari) {
     setType(p.type);
@@ -223,7 +274,9 @@ export function DefiCourseCard({ courseId, partants, connecte, prefill, voirPlan
       const { data: pari } = await defiApi.engager({ course_id: courseId, type_pari: type, chevaux, points: pointsJoues });
       toast.success(`Pari validé : ${pari.points} pts sur ${pari.type_pari} ${chevauxLisibles(pari.type_pari, pari.chevaux)}`);
       setChevaux([]);
-      await mutate();
+      // Solde, classement, bandeau, page /defi : tout ce qui montre le défi se recharge.
+      await mutateGlobal((k) => (typeof k === "string" && k.startsWith("/defi"))
+        || (Array.isArray(k) && typeof k[0] === "string" && k[0].startsWith("/defi")));
     } catch (e) {
       toast.error(detailErreur(e));
       await mutate();
@@ -247,6 +300,13 @@ export function DefiCourseCard({ courseId, partants, connecte, prefill, voirPlan
           <div className="rounded-2xl bg-white/90 px-3 py-1.5 text-right shadow-sm ring-1 ring-inset ring-amber-200">
             <div className="text-[9.5px] font-bold uppercase tracking-[0.14em] text-amber-700">Mon solde</div>
             <div className="font-display text-[17px] font-bold tabular-nums text-slate-900">{formatPts(solde)}</div>
+            {joueur && (
+              <div className="text-[10.5px] font-semibold text-slate-500">
+                {joueur.hors_concours ? "Hors concours (équipe)"
+                  : joueur.rang != null ? `${joueur.rang}${joueur.rang === 1 ? "er" : "e"} du classement`
+                  : `${Math.min(joueur.nb_paris, regles.min_paris_classement)}/${regles.min_paris_classement} paris pour être classé`}
+              </div>
+            )}
           </div>
         ) : undefined}
       />
@@ -271,9 +331,9 @@ export function DefiCourseCard({ courseId, partants, connecte, prefill, voirPlan
         <div className="flex justify-center py-10"><Loader2 className="h-5 w-5 animate-spin text-slate-400" /></div>
       ) : (
         <>
-          {data.ouvert && sansPseudo ? (
+          {ouvert && sansPseudo ? (
             <PseudoRequis className="px-5 py-5" />
-          ) : data.ouvert && restants > 0 && pointsMax >= regles.points_min ? (
+          ) : ouvert && types.length > 0 && restants > 0 && pointsMax >= regles.points_min ? (
             <>
               {planConsulte.length > 0 ? (
                 <PlanConsulte paris={planConsulte} types={types} onJouer={jouerDuPlan}
@@ -282,9 +342,9 @@ export function DefiCourseCard({ courseId, partants, connecte, prefill, voirPlan
                 <div className="flex flex-wrap items-center justify-between gap-2 border-b border-stone-100 px-5 py-3 text-[12px] text-slate-600">
                   <span className="inline-flex items-center gap-1.5">
                     <Calculator className="h-3.5 w-3.5 text-amber-700" aria-hidden="true" />
-                    Besoin d&apos;une idée ? Le plan de mise propose des paris pour cette course.
+                    Besoin d&apos;une idée ? Consultez le plan de mise de cette course.
                   </span>
-                  <button type="button" onClick={voirPlan} className="inline-flex items-center gap-0.5 font-semibold text-amber-800 hover:underline">
+                  <button type="button" onClick={voirPlan} className="inline-flex min-h-[40px] items-center gap-0.5 font-semibold text-amber-800 hover:underline">
                     Voir le plan <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
                   </button>
                 </div>
@@ -293,7 +353,7 @@ export function DefiCourseCard({ courseId, partants, connecte, prefill, voirPlan
                 droite={<span className="text-[11px] text-slate-500">{types.length} pari{types.length > 1 ? "s" : ""} ouvert{types.length > 1 ? "s" : ""} sur cette course</span>}>
                 {prefillRefuse && (
                   <p className="mb-3 rounded-xl bg-amber-50 px-3 py-2 text-[12px] text-amber-900 ring-1 ring-inset ring-amber-200">
-                    Le {prefill?.type} n&apos;est pas ouvert par le PMU sur cette course : choisissez un autre pari.
+                    Le {prefillRefuse} n&apos;est pas ouvert par le PMU sur cette course : choisissez un autre pari.
                   </p>
                 )}
                 <div className="space-y-3">
@@ -337,7 +397,7 @@ export function DefiCourseCard({ courseId, partants, connecte, prefill, voirPlan
                 droite={
                   <span className="inline-flex items-center gap-2">
                     {chevaux.length > 0 && (
-                      <button type="button" onClick={() => setChevaux([])} className="text-[11px] font-semibold text-slate-500 underline-offset-2 hover:underline">
+                      <button type="button" onClick={() => setChevaux([])} className="inline-flex min-h-[36px] items-center px-2 text-[11.5px] font-semibold text-slate-500 underline-offset-2 hover:underline">
                         Effacer
                       </button>
                     )}
@@ -387,7 +447,7 @@ export function DefiCourseCard({ courseId, partants, connecte, prefill, voirPlan
                     </button>
                   ))}
                 </div>
-                <input type="range" min={regles.points_min} max={pointsMax} step={5}
+                <input type="range" min={regles.points_min} max={pointsMax} step={1}
                   value={pointsJoues} onChange={(e) => setPoints(Number(e.target.value))}
                   aria-label="Points misés" className="mt-3 w-full accent-amber-600" />
                 <div className="flex justify-between text-[10.5px] tabular-nums text-slate-400">
@@ -426,6 +486,12 @@ export function DefiCourseCard({ courseId, partants, connecte, prefill, voirPlan
                     {coteIndicative != null && <> (≈ {formatPts(pointsJoues * coteIndicative)} à la cote actuelle ; le rapport final fait foi)</>}.
                     {" "}Définitif une fois validé : ni modifiable, ni annulable.
                   </p>
+                  {MISE_BASE_PMU[type] && (
+                    <p className="mt-1.5 text-[11px] leading-relaxed text-slate-500">
+                      Le PMU affiche ce rapport pour une mise de {MISE_BASE_PMU[type]} ; au défi, il est ramené à 1 point
+                      (rapport officiel « pour 1 € »). Même rendement, sans arrondi.
+                    </p>
+                  )}
                   <button type="button" onClick={valider} disabled={!pret || envoi}
                     className="mt-3 inline-flex min-h-[50px] w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-b from-amber-600 to-amber-800 px-4 text-[14px] font-bold text-white shadow-[inset_0_1px_0_rgba(255,255,255,.25),0_10px_20px_-12px_rgba(146,64,14,.9)] transition-opacity disabled:cursor-not-allowed disabled:opacity-45">
                     {envoi ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
@@ -434,6 +500,10 @@ export function DefiCourseCard({ courseId, partants, connecte, prefill, voirPlan
                       : `Valider mon pari · ${pointsJoues} pts`}
                   </button>
                   <div className="mt-2 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-[11px] text-slate-500">
+                    <span className={cn("inline-flex items-center gap-1 font-semibold", msRestant < 5 * 60_000 ? "text-orange-700" : "text-slate-600")}>
+                      <Timer className="h-3 w-3" aria-hidden="true" /> {dureeRestante(msRestant)}
+                    </span>
+                    <span aria-hidden="true">·</span>
                     <span>Fermeture à {new Date(data.limite).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Paris" })}, heure de départ annoncée</span>
                     <span aria-hidden="true">·</span>
                     <span>{restants} pari{restants > 1 ? "s" : ""} restant{restants > 1 ? "s" : ""} sur cette course</span>
@@ -447,9 +517,14 @@ export function DefiCourseCard({ courseId, partants, connecte, prefill, voirPlan
                 <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white ring-1 ring-stone-200">
                   <Lock className="h-4 w-4 text-slate-500" aria-hidden="true" />
                 </span>
-                {!data.ouvert ? "Paris fermés : l'heure de départ annoncée est passée. Le résultat de vos paris s'affiche ici après l'arrivée."
+                {data.avant_lancement ? `Le Défi du mois ouvre le 1er ${moisLabel(regles.premier_mois ?? "2026-10").toLowerCase()} : les courses d'avant ne comptent pas.`
+                  : data.statut_course === "annule" ? "Course annulée par le PMU : les paris engagés sont remboursés."
+                  : !ouvert ? "Paris fermés : l'heure de départ annoncée est passée. Le résultat de vos paris s'affiche ici après l'arrivée."
+                  : types.length === 0 ? "Aucun pari du défi n'est ouvert par le PMU sur cette course."
                   : restants <= 0 ? `Vous avez joué vos ${regles.max_paris_par_course} paris sur cette course.`
-                  : "Solde insuffisant pour ce mois. Nouvelle cagnotte le 1er du mois prochain !"}
+                  : joueur && joueur.en_jeu > 0
+                    ? `Solde insuffisant pour un nouveau pari. ${formatPts(joueur.en_jeu)} encore en jeu sur vos paris en attente : un gain vous relance.`
+                    : "Solde insuffisant pour ce mois. Nouvelle cagnotte le 1er du mois prochain !"}
               </div>
             </div>
           )}
@@ -477,7 +552,7 @@ export function DefiCourseCard({ courseId, partants, connecte, prefill, voirPlan
           <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-stone-100 bg-stone-50/60 px-5 py-3 text-[11.5px] text-slate-600">
             <span className="inline-flex items-center gap-1.5">
               <Users className="h-3.5 w-3.5 text-slate-400" aria-hidden="true" />
-              {data.tendance.nb_joueurs === 0 ? "Soyez le premier joueur du défi sur cette course"
+              {data.tendance.nb_joueurs === 0 ? (ouvert ? "Soyez le premier joueur du défi sur cette course" : "Aucun joueur du défi sur cette course")
                 : `${data.tendance.nb_joueurs} joueur${data.tendance.nb_joueurs > 1 ? "s" : ""} sur cette course`}
               {data.tendance.cheval_plus_joue != null && <> · n°{data.tendance.cheval_plus_joue} le plus joué</>}
             </span>
@@ -492,4 +567,24 @@ export function DefiCourseCard({ courseId, partants, connecte, prefill, voirPlan
       )}
     </div>
   );
+}
+
+/** Heure courante rafraîchie toutes les `pas` ms (null : figée). */
+function useMaintenant(pas: number | null): number {
+  const [t, setT] = useState(() => Date.now());
+  useEffect(() => {
+    if (pas == null) return;
+    const id = window.setInterval(() => setT(Date.now()), pas);
+    return () => window.clearInterval(id);
+  }, [pas]);
+  return t;
+}
+
+function dureeRestante(ms: number): string {
+  if (ms <= 0) return "Fermé";
+  const min = Math.floor(ms / 60_000);
+  if (min >= 120) return `Ferme dans ${Math.floor(min / 60)} h`;
+  if (min >= 60) return `Ferme dans 1 h ${String(min - 60).padStart(2, "0")}`;
+  if (min >= 1) return `Ferme dans ${min} min`;
+  return `Ferme dans ${Math.ceil(ms / 1000)} s`;
 }

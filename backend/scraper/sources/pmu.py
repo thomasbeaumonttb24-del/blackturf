@@ -681,6 +681,12 @@ class PmuScraper(BaseScraper):
         if not ordre:
             return None  # course pas encore arrivée
         ordre.sort(key=lambda x: x["position"])
+        non_partants = sorted(
+            int(p["numPmu"]) for p in participants
+            if p.get("numPmu") is not None and (
+                (p.get("statut") or "").upper() == "NON_PARTANT"
+                or (p.get("incident") or "").upper() == "NON_PARTANT")
+        )
 
         # Disqualifiés / distancés : partants SANS place à l'arrivée mais avec un
         # `incident` PMU (DAI au trot, tombé/distancé/arrêté au galop/obstacle…). On les
@@ -729,8 +735,15 @@ class PmuScraper(BaseScraper):
                     if not type_pari or not raps:
                         continue
                     detail = []
+                    # `dividende` est donné pour la MISE DE BASE du pari (3 € pour le
+                    # 2sur4 et le Multi, 1,50 € le Quarté+, 2 € le Quinté+) : repris tel
+                    # quel à défaut de `dividendePourUnEuro`, il multipliait le rapport
+                    # « pour 1 € » par 3. On le ramène à 1 €.
+                    mise_base = item.get("miseBase") or 100
                     for rp in raps:
-                        div = rp.get("dividendePourUnEuro") or rp.get("dividende")
+                        div = rp.get("dividendePourUnEuro")
+                        if not div and rp.get("dividende"):
+                            div = rp["dividende"] * 100 / mise_base
                         if not div:
                             continue
                         detail.append({
@@ -774,6 +787,7 @@ class PmuScraper(BaseScraper):
             incidents=None,
             commentaire=commentaire,
             duree_course=duree_course,
+            non_partants=non_partants or None,
             source="pmu",
         )
 

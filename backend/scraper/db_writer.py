@@ -753,6 +753,18 @@ async def save_resultat_to_db(session: AsyncSession, resultat: ResultatScrape) -
     )
     await session.execute(stmt)
 
+    # Retraits tardifs publiés avec l'arrivée : le règlement (plans, Défi) les lit
+    # dans participations.non_partant. On ne fait que poser le drapeau, jamais l'ôter.
+    nps = [int(n) for n in (getattr(resultat, "non_partants", None) or [])]
+    if nps:
+        await session.execute(
+            update(Participation)
+            .where(Participation.course_id == resultat.course_id,
+                   Participation.numero.in_(nps),
+                   Participation.non_partant.is_not(True))
+            .values(non_partant=True)
+        )
+
     # Marquer la course comme terminée
     await session.execute(
         update(Course)
