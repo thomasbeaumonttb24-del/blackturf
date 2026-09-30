@@ -791,3 +791,16 @@ def test_detail_desaccord_attend_au_lieu_de_perdre():
     cl = [{"numero": 1, "position": 1}, {"numero": 2, "position": 2}]
     r = defi.regler_ticket("Couplé Gagnant", [1, 2], cl, {"e_couple_gagnant": 5.0}, 12, d, set())
     assert r["gagne"] and r["rapport_reel"] is None
+
+
+async def test_admin_efface_un_pseudo_injurieux(client, db, inscrire, admin_headers):
+    await inscrire(email="grossier@x.fr", pseudo="Grossier")
+    u = (await db.execute(select(User).where(User.email == "grossier@x.fr"))).scalars().one()
+    refus = await client.patch(f"/admin/api/users/{u.user_id}", headers=admin_headers, json={"pseudo": "Autre"})
+    assert refus.status_code == 400, "l'admin efface, il n'impose jamais un pseudo"
+    r = await client.patch(f"/admin/api/users/{u.user_id}", headers=admin_headers, json={"pseudo": None})
+    assert r.status_code == 200
+    await db.refresh(u)
+    assert u.pseudo is None and defi.nom_public(u).startswith("Joueur ")
+    fiche = (await client.get(f"/admin/api/users/{u.user_id}", headers=admin_headers)).json()
+    assert fiche["user"]["pseudo"] is None

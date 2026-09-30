@@ -344,7 +344,7 @@ export interface UserDetail {
   user: {
     user_id: string; email: string; nom: string | null; prenom: string | null;
     plan: string; is_active: boolean; is_admin: boolean; profil_risque: string;
-    email_verified: boolean; auth_method: string;
+    email_verified: boolean; auth_method: string; pseudo?: string | null;
     stripe_client: boolean; created_at: string; updated_at: string; last_login: string | null;
   };
   acces_offert?: { plan: string; jusqu_au: string | null; motif: string | null; depuis: string; actif: boolean } | null;

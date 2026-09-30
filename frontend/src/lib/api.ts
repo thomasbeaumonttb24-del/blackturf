@@ -305,6 +305,8 @@ export type DefiCourse = {
   /** Statut PMU de la course (a_venir, termine, annule…). */
   statut_course?: string;
   limite: string;
+  /** Heure du serveur au moment de la réponse. */
+  maintenant?: string;
   solde: number | null;
   /** Le joueur ce mois-ci (absent pour un visiteur). */
   joueur?: { nb_paris: number; en_jeu: number; rang: number | null; hors_concours: boolean } | null;

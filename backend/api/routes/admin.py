@@ -293,6 +293,7 @@ async def get_user_detail(
             "is_admin": user.is_admin,
             "profil_risque": user.profil_risque,
             "email_verified": user.email_verified,
+            "pseudo": user.pseudo,
             "auth_method": "google" if user.google_id else "email",
             "stripe_client": bool(user.stripe_customer_id),
             "created_at": user.created_at,
@@ -439,7 +440,18 @@ async def update_user(
     for k, v in body.items():
         if k in allowed:
             setattr(user, k, v)
+    # Pseudo injurieux ou trompeur : l'admin peut seulement l'EFFACER (jamais en
+    # imposer un). Le joueur apparaît en « Joueur XXXX » et en choisit un autre
+    # avant son prochain pari ou message.
+    pseudo_efface = "pseudo" in body and body["pseudo"] is None and user.pseudo is not None
+    if "pseudo" in body and body["pseudo"] is not None:
+        raise HTTPException(status_code=400, detail="Le pseudo peut seulement être effacé.")
+    if pseudo_efface:
+        user.pseudo = None
     await db.commit()
+    if pseudo_efface:
+        from services import defi as _defi
+        _defi.invalider_classement()
     if "plan" in body:
         # Compatibilité : un plan posé ici devient un accès offert sans fin
         # (« free » le retire) — respecté par les webhooks, journalisé.
@@ -451,7 +463,7 @@ async def update_user(
         else:
             raise HTTPException(status_code=400, detail="Plan invalide. Valeurs: free/standard/expert")
     log.info("admin.update_user", admin_id=admin.user_id, user_id=user_id,
-             changes={k: body[k] for k in body if k in allowed})
+             changes={k: body[k] for k in body if k in allowed or k == "pseudo"})
     return {"ok": True}
 
 

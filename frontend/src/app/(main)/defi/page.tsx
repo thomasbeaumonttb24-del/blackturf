@@ -142,7 +142,9 @@ function Hero({ mois, enCours, setMois, regles, classement }: {
         {/* Pas de « 0 joueur » pendant le chargement : la pastille attend le classement. */}
         {classement && (
           <span className="inline-flex items-center gap-1.5 rounded-full bg-white/90 px-2.5 py-1 font-semibold text-slate-700 shadow-sm ring-1 ring-inset ring-amber-200">
-            <Users className="h-3.5 w-3.5 text-amber-600" aria-hidden="true" /> {classement.nb_joueurs} joueur{classement.nb_joueurs > 1 ? "s" : ""} · {classement.nb_classes} classé{classement.nb_classes > 1 ? "s" : ""}
+            <Users className="h-3.5 w-3.5 text-amber-600" aria-hidden="true" /> {classement.nb_joueurs === 0
+              ? (enCours ? "Soyez parmi les premiers joueurs" : "Aucun joueur")
+              : <>{classement.nb_joueurs} joueur{classement.nb_joueurs > 1 ? "s" : ""} · {classement.nb_classes} classé{classement.nb_classes > 1 ? "s" : ""}</>}
           </span>
         )}
         {leader && (
@@ -288,6 +290,7 @@ function Reglement({ regles }: { regles: DefiRegles }) {
         <li>Le pari porte l&apos;étiquette « Plan BlackTurf » quand il reprend un pari du plan de mise que vous avez consulté sur la course, « Perso » sinon. L&apos;étiquette n&apos;a pas d&apos;effet sur le classement.</li>
         <li>Sont classés les joueurs ayant engagé au moins <b>{regles.min_paris_classement} paris</b> dans le mois, par solde décroissant ; à égalité, le plus grand nombre de paris gagnants puis le premier pari le plus ancien l&apos;emportent.</li>
         <li>Récompense : {lots}{regles.premier_mois && regles.mois === regles.premier_mois ? ` pour le mois de lancement (${moisLabel(regles.premier_mois)}) ; d'autres lots s'ajouteront les mois suivants` : ""}. Elle est remise après la clôture du mois, une fois tous les paris réglés et le compte vérifié. Un abonné payant reçoit l&apos;équivalent en déduction de son abonnement. La récompense est nominative et ne s&apos;échange pas contre de l&apos;argent.</li>
+        <li>Une question ou une contestation sur un pari ? Écrivez à <a href="mailto:contact@blackturf.fr" className="font-semibold text-amber-800 underline">contact@blackturf.fr</a> avec votre pseudo et la course, avant la remise de la récompense du mois. Le règlement se fait toujours sur l&apos;arrivée et les rapports officiels du PMU.</li>
         <li><b>Un seul compte par personne.</b> BlackTurf peut vérifier l&apos;identité des gagnants et exclure du défi, sans récompense, tout compte multiple, automatisé ou ayant contourné les règles.</li>
         <li>Les comptes de l&apos;équipe BlackTurf jouent hors concours. BlackTurf peut modifier ou arrêter le défi ; un mois commencé se termine avec les règles en vigueur à son début.</li>
       </ol>

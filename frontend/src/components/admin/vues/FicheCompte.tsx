@@ -72,6 +72,19 @@ export default function FicheCompte({ userId, onClose }: { userId: string; onClo
     { refreshInterval: 30_000, revalidateOnFocus: true, keepPreviousData: true },
   );
 
+  async function effacerPseudo() {
+    if (!data?.user.pseudo) return;
+    if (!window.confirm(`Effacer le pseudo « ${data.user.pseudo} » ?
+
+Le joueur apparaîtra en « Joueur XXXX » au classement et devra en choisir un autre avant de rejouer.`)) return;
+    try {
+      await adminApi.updateUser(userId, { pseudo: null });
+      await mutate();
+    } catch {
+      window.alert("Effacement impossible pour le moment.");
+    }
+  }
+
   // Échap ferme, et le défilement de la page de fond est gelé : sans ça, le
   // doigt qui défile dans la fiche entraîne la liste derrière elle.
   React.useEffect(() => {
@@ -117,6 +130,15 @@ export default function FicheCompte({ userId, onClose }: { userId: string; onClo
                 </div>
                 <p className="mt-1 truncate text-xs text-muted-foreground" title={data.user.email}>
                   {data.user.email}
+                </p>
+                <p className="mt-0.5 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                  Pseudo : <span className="font-semibold text-foreground">{data.user.pseudo ?? "aucun"}</span>
+                  {data.user.pseudo && (
+                    <button type="button" onClick={effacerPseudo}
+                      className="min-h-[32px] rounded-md px-2 font-semibold text-destructive underline-offset-2 hover:underline">
+                      Effacer (injurieux ou trompeur)
+                    </button>
+                  )}
                 </p>
               </>
             )}

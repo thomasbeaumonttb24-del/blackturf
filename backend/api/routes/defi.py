@@ -5,7 +5,7 @@ Ouvert à TOUS les comptes connectés, quel que soit l'abonnement et sans quota 
 on peut engager ses propres paris sans avoir vu (ni pouvoir voir) le plan de mise.
 """
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -194,6 +194,8 @@ async def get_course(
         "avant_lancement": avant,
         "statut_course": course.statut,
         "limite": defi.limite_depot(course),
+        # Heure du serveur : le compte à rebours s'y recale (horloge du téléphone fausse).
+        "maintenant": datetime.now(timezone.utc),
         "solde": solde,
         "joueur": joueur,
         "tendance": await defi.tendance_course(db, course_id, ouvert),

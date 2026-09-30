@@ -39,7 +39,7 @@ export function EmailVerificationBanner() {
         <MailWarning className="h-4 w-4 shrink-0" aria-hidden />
         <p className="min-w-0 flex-1">
           Confirmez votre adresse <span className="font-semibold">{user.email}</span> pour
-          activer l&apos;abonnement et l&apos;assistant.
+          activer l&apos;abonnement, l&apos;assistant et recevoir un lot du Défi du mois.
         </p>
         <button
           onClick={renvoyer}

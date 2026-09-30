@@ -15,7 +15,7 @@ import Link from "next/link";
 import useSWR, { useSWRConfig } from "swr";
 import { toast } from "sonner";
 import { ArrowRight, Calculator, Check, Info, Loader2, Lock, ShieldCheck, Sparkles, Ticket, Timer, TrendingUp, Users, Zap } from "lucide-react";
-import { defiApi, type DefiCourse, type DefiPlanPari, type DefiRegles, type DefiTypeInfo, type DefiTypePari } from "@/lib/api";
+import { authApi, defiApi, type DefiCourse, type DefiPlanPari, type DefiRegles, type DefiTypeInfo, type DefiTypePari } from "@/lib/api";
 import { CompteGratuitCta } from "@/components/billing/CompteGratuitCta";
 import { PseudoRequis } from "@/components/layout/PseudoRequis";
 import { useAuth } from "@/hooks/useAuth";
@@ -238,8 +238,14 @@ export function DefiCourseCard({ courseId, partants, connecte, prefill, onPrefil
   const correspondPlan = (data?.tickets_plan ?? []).some((p) =>
     memeTicket({ type: p.type, chevaux: p.chevaux }, type, chevaux, p.ordre && aOrdre));
 
-  // Fermeture à la seconde près, sans attendre le rafraîchissement du serveur.
-  const msRestant = data ? Date.parse(data.limite) - maintenant : 0;
+  // Fermeture à la seconde près, sans attendre le rafraîchissement du serveur, et
+  // recalée sur l'heure du serveur : une horloge de téléphone en avance fermait le
+  // ticket trop tôt (le serveur, lui, acceptait encore), en retard l'ouvrait trop.
+  const [decalage, setDecalage] = useState(0);
+  useEffect(() => {
+    if (data?.maintenant) setDecalage(Date.parse(data.maintenant) - Date.now());
+  }, [data?.maintenant]);
+  const msRestant = data ? Date.parse(data.limite) - (maintenant + decalage) : 0;
   const ouvert = !!data?.ouvert && msRestant > 0;
   const expire = !!data?.ouvert && msRestant <= 0;
   useEffect(() => {
@@ -348,6 +354,15 @@ export function DefiCourseCard({ courseId, partants, connecte, prefill, onPrefil
                     Voir le plan <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
                   </button>
                 </div>
+              )}
+              {user && !user.email_verified && (
+                <p className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-amber-200 bg-amber-50 px-5 py-2.5 text-[12px] leading-snug text-amber-900">
+                  <Info className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                  <span className="min-w-0 flex-1">
+                    <b>Confirmez votre adresse e-mail</b> : vous pouvez jouer dès maintenant, mais la récompense du mois n&apos;est remise qu&apos;à une adresse confirmée.
+                  </span>
+                  <RenvoyerLien />
+                </p>
               )}
               <Etape n={1} titre="Type de pari"
                 droite={<span className="text-[11px] text-slate-500">{types.length} pari{types.length > 1 ? "s" : ""} ouvert{types.length > 1 ? "s" : ""} sur cette course</span>}>
@@ -504,7 +519,7 @@ export function DefiCourseCard({ courseId, partants, connecte, prefill, onPrefil
                       <Timer className="h-3 w-3" aria-hidden="true" /> {dureeRestante(msRestant)}
                     </span>
                     <span aria-hidden="true">·</span>
-                    <span>Fermeture à {new Date(data.limite).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Paris" })}, heure de départ annoncée</span>
+                    <span>Fermeture à {new Date(data.limite).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Paris" })} (heure de Paris), départ annoncé</span>
                     <span aria-hidden="true">·</span>
                     <span>{restants} pari{restants > 1 ? "s" : ""} restant{restants > 1 ? "s" : ""} sur cette course</span>
                   </div>
@@ -566,6 +581,22 @@ export function DefiCourseCard({ courseId, partants, connecte, prefill, onPrefil
         </>
       )}
     </div>
+  );
+}
+
+function RenvoyerLien() {
+  const [envoi, setEnvoi] = useState(false);
+  return (
+    <button type="button" disabled={envoi}
+      onClick={async () => {
+        setEnvoi(true);
+        try { await authApi.resendVerification(); toast.success("Lien de confirmation renvoyé : pensez à regarder vos courriers indésirables."); }
+        catch { toast.error("Envoi impossible pour le moment, réessayez dans quelques minutes."); }
+        finally { setEnvoi(false); }
+      }}
+      className="inline-flex min-h-[36px] items-center font-semibold underline underline-offset-2 disabled:opacity-50">
+      {envoi ? "Envoi…" : "Renvoyer le lien"}
+    </button>
   );
 }
 
