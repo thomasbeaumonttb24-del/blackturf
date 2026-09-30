@@ -94,8 +94,8 @@ function LotUnique({ lot, lancement, mois }: { lot: DefiRegles["recompenses"][nu
   );
 }
 
-function Hero({ mois, enCours, setMois, regles, classement }: {
-  mois: string; enCours: boolean; setMois: (m: string) => void; regles: DefiRegles; classement?: DefiClassement;
+function Hero({ mois, enCours, avantLancement = false, setMois, regles, classement }: {
+  mois: string; enCours: boolean; avantLancement?: boolean; setMois: (m: string) => void; regles: DefiRegles; classement?: DefiClassement;
 }) {
   const jours = joursRestants(mois);
   const leader = classement?.lignes.find((l) => l.rang === 1);
@@ -134,8 +134,13 @@ function Hero({ mois, enCours, setMois, regles, classement }: {
       </div>
 
       <div className="mt-5 flex flex-wrap items-center gap-2 text-[12px]">
-        {enCours && <PastilleDirect />}
-        {enCours && (
+        {avantLancement && (
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-white/90 px-2.5 py-1 font-semibold text-amber-800 shadow-sm ring-1 ring-inset ring-amber-300">
+            <Timer className="h-3.5 w-3.5 text-amber-600" aria-hidden="true" /> Ouverture le 1er {moisLabel(mois).toLowerCase()} à minuit
+          </span>
+        )}
+        {enCours && !avantLancement && <PastilleDirect />}
+        {enCours && !avantLancement && (
           <span className="inline-flex items-center gap-1.5 rounded-full bg-white/90 px-2.5 py-1 font-semibold text-slate-700 shadow-sm ring-1 ring-inset ring-amber-200">
             <Timer className="h-3.5 w-3.5 text-amber-600" aria-hidden="true" />
             {jours <= 1 ? "Dernier jour du défi" : `Encore ${jours} jours`}
@@ -305,7 +310,11 @@ function Reglement({ regles }: { regles: DefiRegles }) {
 
 export default function DefiPage() {
   const { user } = useAuth();
-  const moisCourant = useMemo(() => moisCourantParis(), []);
+  // Avant le lancement, la page montre déjà le mois de lancement (vide, « ouvre le
+  // 1er ») plutôt qu'un mois qui ne compte pas, affiché « en direct ».
+  const moisReel = useMemo(() => moisCourantParis(), []);
+  const avantLancement = moisReel < PREMIER_MOIS_DEFI;
+  const moisCourant = avantLancement ? PREMIER_MOIS_DEFI : moisReel;
   const [mois, setMois] = useState(moisCourant);
   const [voirNonClasses, setVoirNonClasses] = useState(false);
   const enCours = mois === moisCourant;
@@ -330,7 +339,7 @@ export default function DefiPage() {
 
   return (
     <div className="mx-auto flex max-w-4xl flex-col gap-8 px-4 py-6 sm:px-6 sm:py-8">
-      <Hero mois={mois} enCours={enCours} setMois={setMois} regles={regles} classement={classement} />
+      <Hero mois={mois} enCours={enCours} avantLancement={avantLancement} setMois={setMois} regles={regles} classement={classement} />
 
       {user ? (
         moi ? <MaSaison moi={moi} regles={regles} enCours={enCours} /> : erreurMoi ? (
