@@ -775,6 +775,24 @@ export async function fetchTrackRecord(): Promise<SeoTrackRecord | null> {
 }
 
 /**
+ * Palmarès public (paris gagnés, total encaissé) — pré-remplit le hero de
+ * /track-record. Caché côté API (Redis) ; plafonné à 3 s pour qu'une API lente ne
+ * retienne pas la page : sans lui, le client le recharge comme avant.
+ */
+export async function fetchPalmaresPublic(): Promise<Record<string, unknown> | null> {
+  try {
+    const res = await fetch(`${API}/stats/palmares-public`, {
+      next: { revalidate: 60 },
+      signal: AbortSignal.timeout(3000),
+    });
+    if (!res.ok) return null;
+    return (await res.json()) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * « 2026-08-30 » + « 2026-09-05 » → « du 30 août au 5 septembre ».
  *
  * Le mois du début est omis quand les deux dates le partagent : « du 1er au 7 mars »
