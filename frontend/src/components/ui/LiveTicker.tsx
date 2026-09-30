@@ -32,9 +32,7 @@ function hippoCourt(s: string | null): string {
   return s.replace(/^HIPPODROME\s+(DE\s+|D'|DU\s+|DES\s+|DE LA\s+)?/i, "").toUpperCase();
 }
 
-const fetcher = () =>
-  statsApi.palmaresPublic().then((r) => {
-    const d = r.data as { gagnants?: TickerBet[]; top_gains?: TickerBet[] };
+function versTicker(d: { gagnants?: TickerBet[]; top_gains?: TickerBet[] }): TickerBet[] {
     // Mélange derniers gagnants + plus gros gains, dédoublonné : le bandeau reste
     // varié même quand peu de courses viennent d'être réglées.
     const seen = new Set<string>();
@@ -44,13 +42,22 @@ const fetcher = () =>
       seen.add(k);
       return true;
     }).slice(0, 12);
-  });
+}
 
-export function LiveTicker() {
+const fetcher = () =>
+  statsApi.palmaresPublic().then((r) => versTicker(r.data as { gagnants?: TickerBet[]; top_gains?: TickerBet[] }));
+
+/**
+ * `initial` : palmarès lu par le serveur au rendu de l'accueil. Sans lui, le bandeau
+ * n'existait qu'après l'hydratation et un appel API, puis surgissait en poussant
+ * tout le contenu vers le bas.
+ */
+export function LiveTicker({ initial }: { initial?: { gagnants?: unknown[]; top_gains?: unknown[] } | null }) {
   const { data } = useSWR<TickerBet[]>("ticker-palmares", fetcher, {
     refreshInterval: 120_000,
     revalidateOnFocus: false,
     shouldRetryOnError: false,
+    fallbackData: initial ? versTicker(initial as { gagnants?: TickerBet[]; top_gains?: TickerBet[] }) : undefined,
   });
 
   // Aucune donnée réelle → aucun bandeau (plutôt qu'un remplissage inventé).

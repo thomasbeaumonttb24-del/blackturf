@@ -776,13 +776,14 @@ export async function fetchTrackRecord(): Promise<SeoTrackRecord | null> {
 
 /**
  * Palmarès public (paris gagnés, total encaissé) — pré-remplit le hero de
- * /track-record. Caché côté API (Redis) ; plafonné à 10 s (la régénération ISR tourne en arrière-plan, le visiteur ne l'attend pas) pour qu'une API lente ne
- * retienne pas la page : sans lui, le client le recharge comme avant.
+ * /track-record, le bandeau défilant et la section « Palmarès en direct » de
+ * l'accueil. Sans lui, le client le recharge comme avant.
+ *
+ * Plafond de 10 s : l'endpoint met ~4 s à froid (cache Redis de 5 min expiré), et
+ * le plafond initial de 3 s renvoyait `null` à chaque régénération ISR en prod.
+ * La régénération tourne en arrière-plan : le visiteur n'attend pas ce délai.
  */
 export async function fetchPalmaresPublic(): Promise<Record<string, unknown> | null> {
-  // Plafond par course et non par `signal: AbortSignal.timeout()` : avec un signal,
-  // le fetch de Next ne passe pas par son cache de données et, en régénération ISR
-  // en prod, revenait `null` à chaque fois (hero servi en chargement).
   const lecture = (async () => {
     try {
       const res = await fetch(`${API}/stats/palmares-public`, { next: { revalidate: 60 } });

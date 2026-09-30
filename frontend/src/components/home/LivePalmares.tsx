@@ -31,10 +31,16 @@ interface PalmaresResp {
 const fetcher = () => statsApi.palmaresPublic().then((r) => r.data as PalmaresResp);
 const fmtInt = (n: number) => n.toLocaleString("fr-FR");
 
-export function LivePalmares() {
+/**
+ * `initial` : palmarès lu par le serveur au rendu de l'accueil. Sans lui, la section
+ * affichait d'abord « Les premiers paris gagnants s'afficheront ici », puis se
+ * remplissait d'un coup une fois l'appel API revenu.
+ */
+export function LivePalmares({ initial }: { initial?: Partial<PalmaresResp> | Record<string, unknown> | null }) {
   const { data } = useSWR<PalmaresResp>("palmares-public", fetcher, {
     refreshInterval: 60_000,
     revalidateOnFocus: true,
+    fallbackData: (initial as PalmaresResp | null) ?? undefined,
   });
 
   const top = data?.top_gains ?? [];

@@ -19,6 +19,7 @@ import { JaugeHasard, JaugeBrier } from "@/components/track-record/Jauges";
 import { QuinteLigne, type QuintePalmaresData } from "@/components/track-record/QuinteLigne";
 import { statsApi } from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
+import { useCountUp } from "@/hooks/useCountUp";
 import { EchantillonNotice } from "@/components/stats/EchantillonNotice";
 import { cn } from "@/lib/utils";
 
@@ -115,15 +116,18 @@ export interface TrackRecord {
 const nf = (n: number, d = 0) =>
   n.toLocaleString("fr-FR", { minimumFractionDigits: d, maximumFractionDigits: d });
 /**
- * Chiffre affiché TEL QUEL, sans compteur animé. L'animation (0 → valeur) montrait
- * pendant ~1,5 s des chiffres faux, et pouvait rester figée sur une valeur
- * intermédiaire — voire négative (« −74 courses analysées ») — quand les données
- * s'actualisaient pendant qu'elle tournait. La valeur exacte, dès le premier rendu.
+ * Compteur animé, le même que le hero de l'accueil (`useCountUp`). L'ancien compteur
+ * de cette page avait été retiré : il partait de 0 au rendu, et restait parfois figé
+ * sur une valeur intermédiaire — voire négative (« −74 courses analysées ») — quand
+ * les données s'actualisaient pendant qu'il tournait. `useCountUp` n'a aucun de ces
+ * défauts : la valeur réelle est servie dans le HTML, l'animation ne se joue que
+ * quand le chiffre entre à l'écran, et une nouvelle cible repart de la valeur affichée.
  */
 function CountUp({ value, decimals = 0, suffix = "", prefix = "", className }: {
   value: number; decimals?: number; suffix?: string; prefix?: string; className?: string;
 }) {
-  return <span className={className}>{prefix}{nf(value, decimals)}{suffix}</span>;
+  const { val, ref } = useCountUp(value);
+  return <span ref={ref} className={className}>{prefix}{nf(val, decimals)}{suffix}</span>;
 }
 
 function CountUpEuro({ value, className, decimals = 0, prefix = "" }: { value: number; className?: string; decimals?: number; prefix?: string }) {
