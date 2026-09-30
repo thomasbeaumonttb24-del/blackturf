@@ -1,12 +1,10 @@
 import type { Metadata } from "next";
 import { OG_IMAGE, jsonLd } from "@/lib/seo";
 import Link from "next/link";
-import { Check, X, Zap, ChevronRight, Calculator, Gift } from "lucide-react";
+import { Check, X, Zap, ChevronRight, Gift } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent } from "@/components/ui/card";
-import { CheckoutButton } from "@/components/billing/CheckoutButton";
-import { MentionPaiement } from "@/components/billing/MentionPaiement";
+import { PlansTarifs } from "@/components/billing/PlansTarifs";
 
 export const metadata: Metadata = {
   // Le corps de la page employait déjà trente et une fois le vocabulaire de l'IA sans
@@ -89,23 +87,49 @@ const FAQ = [
 // que Standard donne un accès illimité alors qu'il est plafonné (cf. quotas
 // PRONO_DAILY_LIMITS / MISE_PLAN_DAILY_LIMITS côté backend), et masquerait le
 // délai de 15 min appliqué à Standard sur les paris de valeur.
+// Chaque ligne correspond à un contrôle d'accès RÉEL du backend : cotes-live et
+// cotes-historique = compte connecté ; /enjeux = require_pro ; SPI, assistant et
+// stratégies = Expert ; comparateur, confrontations et pronos presse = publics.
+// Pas d'« Accès API » ni d'« Historique N mois » : rien ne les implémente.
 type Cellule = boolean | string;
 
-const FEATURES_COMPARISON: { label: string; free: Cellule; standard: Cellule; expert: Cellule }[] = [
-  { label: "Programme PMU du jour", free: true, standard: true, expert: true },
-  { label: "Cotes publiques + marché en direct", free: true, standard: true, expert: true },
-  { label: "Prédictions IA", free: "1 course/jour", standard: "5 courses/jour", expert: "Illimité" },
-  { label: "Paris de valeur", free: false, standard: "Délai 15 min", expert: "Temps réel" },
-  { label: "Calculateur de mise personnalisé", free: false, standard: true, expert: true },
-  { label: "Alertes e-mail + notifications", free: false, standard: true, expert: true },
-  { label: "Suivi de capital", free: false, standard: true, expert: true },
-  { label: "Historique 6 mois", free: false, standard: true, expert: true },
-  { label: "Indicateur de mouvement de cote (SPI)", free: false, standard: false, expert: true },
-  { label: "Assistant IA (Claude Opus)", free: false, standard: false, expert: true },
-  { label: "Créateur de stratégies", free: false, standard: false, expert: true },
-  { label: "Historique 18 mois", free: false, standard: false, expert: true },
-  { label: "Accès API", free: false, standard: false, expert: true },
-  { label: "Support prioritaire", free: false, standard: false, expert: true },
+const FEATURES_COMPARISON: { groupe: string; lignes: { label: string; free: Cellule; standard: Cellule; expert: Cellule }[] }[] = [
+  {
+    groupe: "Courses & marché",
+    lignes: [
+      { label: "Programme PMU du jour + fiches partants", free: true, standard: true, expert: true },
+      { label: "Cotes en direct + évolution cheval par cheval", free: true, standard: true, expert: true },
+      { label: "Comparaison des cotes entre bookmakers", free: true, standard: true, expert: true },
+      { label: "Argent engagé cheval par cheval", free: false, standard: true, expert: true },
+      { label: "Argent pro détecté (SPI / steam)", free: false, standard: false, expert: true },
+    ],
+  },
+  {
+    groupe: "Analyse des chevaux",
+    lignes: [
+      { label: "Comparateur de 2 chevaux", free: true, standard: true, expert: true },
+      { label: "Duels (confrontations directes)", free: true, standard: true, expert: true },
+      { label: "Pronostics presse", free: true, standard: true, expert: true },
+    ],
+  },
+  {
+    groupe: "Algorithme BlackTurf",
+    lignes: [
+      { label: "Classement de l'algorithme (probabilités, cote juste, signaux)", free: "1 course/jour", standard: "5 courses/jour", expert: "Illimité" },
+      { label: "Paris de valeur", free: false, standard: "Délai 15 min", expert: "Temps réel" },
+      { label: "Plan de mise personnalisé", free: "1 essai/jour", standard: "5 courses/jour", expert: "Illimité" },
+      { label: "Assistant IA (Claude Opus)", free: false, standard: false, expert: true },
+      { label: "Créateur de stratégies + backtest 12 mois", free: false, standard: false, expert: true },
+    ],
+  },
+  {
+    groupe: "Suivi",
+    lignes: [
+      { label: "Suivi de capital + export", free: false, standard: true, expert: true },
+      { label: "Alertes e-mail + notifications", free: false, standard: true, expert: true },
+      { label: "Support prioritaire", free: false, standard: false, expert: true },
+    ],
+  },
 ];
 
 export default function TarifsPage() {
@@ -127,140 +151,8 @@ export default function TarifsPage() {
         </div>
       </div>
 
-      {/* Plans */}
-      <div className="grid md:grid-cols-3 gap-5 sm:gap-6 mb-12 sm:mb-16">
-        {/* Découverte */}
-        <Card className="card-hover">
-          <CardContent className="p-6 sm:p-8">
-            <h2 className="text-xl font-bold mb-1">Découverte</h2>
-            <p className="text-xs text-muted-foreground mb-3">Gratuit pour toujours</p>
-            <div className="flex items-baseline gap-1 mb-6">
-              <span className="text-4xl font-extrabold">0€</span>
-              <span className="text-muted-foreground">/mois</span>
-            </div>
-            <ul className="space-y-3 mb-8">
-              {["Programme PMU du jour", "Marché des cotes en direct", "Classement IA : 1 course/jour", "1 alerte par jour"].map((f) => (
-                <li key={f} className="flex items-center gap-2 text-sm">
-                  <Check className="h-4 w-4 text-muted-foreground flex-shrink-0" />
-                  {f}
-                </li>
-              ))}
-            </ul>
-            <Button variant="outline" className="w-full" asChild>
-              <Link href="/inscription">Commencer gratuitement</Link>
-            </Button>
-          </CardContent>
-        </Card>
-
-        {/* Standard */}
-        <Card className="card-hover relative">
-          <CardContent className="p-6 sm:p-8">
-            <h2 className="text-xl font-bold mb-1">Standard</h2>
-            <div className="flex items-baseline gap-1 mb-1">
-              <span className="text-4xl font-extrabold">12€</span>
-              <span className="text-muted-foreground">/mois</span>
-            </div>
-            <p className="text-xs text-muted-foreground mb-6">ou 115,20 €/an, soit 9,60 €/mois (−20 %)</p>
-            <ul className="space-y-3 mb-8">
-              {[
-                { label: "Prédictions IA : 5 courses/jour", icon: null },
-                { label: "Paris de valeur illimités (délai 15 min)", icon: null },
-                { label: "Calculateur de mise", icon: <Calculator className="h-3 w-3" /> },
-                { label: "Alertes e-mail + notifications", icon: null },
-                { label: "Suivi de capital", icon: null },
-                { label: "Historique 6 mois", icon: null },
-              ].map((f) => (
-                <li key={f.label} className="flex items-center gap-2 text-sm">
-                  <Check className="h-4 w-4 text-brand-gold-dark flex-shrink-0" />
-                  {f.label}
-                  {f.icon && <span className="text-brand-gold-dark">{f.icon}</span>}
-                </li>
-              ))}
-            </ul>
-            <CheckoutButton
-              plan="standard"
-              periodicite="monthly"
-              label="Essayer 7 jours gratuit"
-              variant="brand-outline"
-              className="w-full"
-            />
-            <CheckoutButton
-              plan="standard"
-              periodicite="annual"
-              label="À l'année : 115,20 € (−20 %)"
-              variant="outline"
-              size="default"
-              className="mt-2 w-full"
-            />
-            <p className="mt-1 text-center text-[11px] leading-snug text-muted-foreground">
-              Engagement 12 mois, payé en une fois ; résiliable à tout moment pour la fin de l&apos;année.
-              Rappel par e-mail un mois avant la reconduction.
-            </p>
-            {/* « Sans CB requis » était FAUX : la session Stripe est créée avec
-                payment_method_collection="always" (api/routes/stripe_routes.py), donc la carte
-                est exigée depuis la mise en place de l'essai unique par compte. La FAQ de
-                l'accueil disait déjà l'inverse de cette ligne. Ce qui est vrai, et qui est le
-                vrai argument, c'est qu'aucun prélèvement n'a lieu avant le terme. */}
-            <MentionPaiement />
-          </CardContent>
-        </Card>
-
-        {/* Expert */}
-        <Card className="card-hover border-brand-emerald ring-2 ring-brand-emerald/30 relative">
-          <div className="absolute -top-4 left-1/2 -translate-x-1/2">
-            <Badge variant="gold">Recommandé</Badge>
-          </div>
-          <CardContent className="p-6 sm:p-8">
-            <h2 className="text-xl font-bold mb-1">Expert</h2>
-            <div className="flex items-baseline gap-1 mb-1">
-              <span className="text-4xl font-extrabold">19€</span>
-              <span className="text-muted-foreground">/mois</span>
-            </div>
-            <p className="text-xs text-muted-foreground mb-6">ou 182,40 €/an, soit 15,20 €/mois (−20 %)</p>
-            <ul className="space-y-3 mb-8">
-              {[
-                "Tout Standard",
-                "Indicateur de mouvement de cote",
-                "Assistant IA (Claude Opus)",
-                "Créateur de stratégies",
-                "Historique 18 mois",
-                "Accès API",
-                "Support prioritaire",
-              ].map((f) => (
-                <li key={f} className="flex items-center gap-2 text-sm">
-                  <Check className="h-4 w-4 text-brand-emerald-dark flex-shrink-0" />
-                  {f}
-                </li>
-              ))}
-            </ul>
-            <CheckoutButton
-              plan="expert"
-              periodicite="monthly"
-              label="Essayer 7 jours gratuit"
-              variant="brand"
-              className="w-full"
-            />
-            <CheckoutButton
-              plan="expert"
-              periodicite="annual"
-              label="À l'année : 182,40 € (−20 %)"
-              variant="outline"
-              size="default"
-              className="mt-2 w-full"
-            />
-            <p className="mt-1 text-center text-[11px] leading-snug text-muted-foreground">
-              Engagement 12 mois, payé en une fois ; résiliable à tout moment pour la fin de l&apos;année.
-              Rappel par e-mail un mois avant la reconduction.
-            </p>
-            {/* « Sans CB requis » était FAUX : la session Stripe est créée avec
-                payment_method_collection="always" (api/routes/stripe_routes.py), donc la carte
-                est exigée depuis la mise en place de l'essai unique par compte. La FAQ de
-                l'accueil disait déjà l'inverse de cette ligne. Ce qui est vrai, et qui est le
-                vrai argument, c'est qu'aucun prélèvement n'a lieu avant le terme. */}
-            <MentionPaiement />
-          </CardContent>
-        </Card>
-      </div>
+      {/* Plans — un sélecteur mensuel/annuel, un seul bouton par formule */}
+      <PlansTarifs />
 
       {/* Parrainage : l'argument « abonnement gratuit » dit là où l'on regarde le prix. */}
       <section className="relative mb-12 overflow-hidden rounded-3xl bg-gradient-to-br from-stone-900 via-stone-900 to-stone-800 p-6 text-white shadow-[0_30px_60px_-30px_rgba(28,25,23,.7)] ring-1 ring-white/10 sm:p-8">
@@ -303,23 +195,26 @@ export default function TarifsPage() {
         </div>
       </section>
 
-      {/* Comparison — stacked cards on mobile */}
+      {/* Comparatif détaillé — une carte par formule sur mobile (Expert d'abord) */}
+      <h2 className="text-xl sm:text-2xl font-bold text-center mb-6">Le détail des formules</h2>
       <div className="sm:hidden space-y-4 mb-12">
         {[
-          { name: "Découverte", key: "free" as const, color: "text-muted-foreground" },
-          { name: "Standard", key: "standard" as const, color: "text-brand-gold-dark" },
           { name: "Expert", key: "expert" as const, color: "text-brand-emerald-dark" },
+          { name: "Standard", key: "standard" as const, color: "text-brand-gold-dark" },
+          { name: "Découverte", key: "free" as const, color: "text-muted-foreground" },
         ].map((plan) => (
-          <div key={plan.name} className="rounded-2xl border border-border p-4">
+          <div key={plan.name} className={`rounded-2xl border p-4 ${plan.key === "expert" ? "border-brand-emerald ring-2 ring-brand-emerald/20" : "border-border"}`}>
             <h3 className={`font-semibold mb-3 ${plan.color}`}>{plan.name}</h3>
             <ul className="space-y-2">
-              {FEATURES_COMPARISON.filter((row) => row[plan.key]).map((row) => (
-                <li key={row.label} className="flex items-center gap-2 text-sm">
-                  <Check className={`h-4 w-4 flex-shrink-0 ${plan.color}`} />
-                  {row.label}
-                  {typeof row[plan.key] === "string" && (
-                    <span className={`text-xs ${plan.color}`}>· {row[plan.key]}</span>
-                  )}
+              {FEATURES_COMPARISON.flatMap((g) => g.lignes).filter((row) => row[plan.key]).map((row) => (
+                <li key={row.label} className="flex items-start gap-2 text-sm">
+                  <Check className={`mt-0.5 h-4 w-4 flex-shrink-0 ${plan.color}`} />
+                  <span>
+                    {row.label}
+                    {typeof row[plan.key] === "string" && (
+                      <span className={`text-xs ${plan.color}`}> · {row[plan.key]}</span>
+                    )}
+                  </span>
                 </li>
               ))}
             </ul>
@@ -327,39 +222,44 @@ export default function TarifsPage() {
         ))}
       </div>
 
-      {/* Comparison table — sm+ */}
+      {/* Comparatif détaillé — tableau groupé, sm+ */}
       <div className="hidden sm:block rounded-2xl border border-border overflow-x-auto mb-12">
-        <table className="w-full text-sm min-w-[520px]">
+        <table className="w-full text-sm min-w-[560px]">
           <thead>
             <tr className="border-b border-border bg-muted/30">
               <th className="text-left p-4 font-semibold">Fonctionnalité</th>
-              <th className="text-center p-4 font-semibold">Découverte</th>
-              <th className="text-center p-4 font-semibold text-brand-gold-dark">Standard</th>
-              <th className="text-center p-4 font-semibold text-brand-emerald-dark">Expert</th>
+              <th className="text-center p-4 font-semibold w-[17%]">Découverte</th>
+              <th className="text-center p-4 font-semibold w-[17%] text-brand-gold-dark">Standard</th>
+              <th className="text-center p-4 font-semibold w-[17%] text-brand-emerald-dark bg-brand-emerald/10">Expert</th>
             </tr>
           </thead>
-          <tbody>
-            {FEATURES_COMPARISON.map((row, i) => (
-              <tr key={row.label} className={i % 2 === 0 ? "bg-muted/10" : ""}>
-                <td className="p-4">{row.label}</td>
-                <td className="p-4 text-center">
-                  {typeof row.free === "string"
-                    ? <span className="text-muted-foreground text-xs">{row.free}</span>
-                    : row.free ? <Check className="h-4 w-4 text-muted-foreground mx-auto" /> : <X className="h-4 w-4 text-muted/30 mx-auto" />}
-                </td>
-                <td className="p-4 text-center">
-                  {typeof row.standard === "string"
-                    ? <span className="text-brand-gold-dark text-xs font-medium">{row.standard}</span>
-                    : row.standard ? <Check className="h-4 w-4 text-brand-gold-dark mx-auto" /> : <X className="h-4 w-4 text-muted/30 mx-auto" />}
-                </td>
-                <td className="p-4 text-center">
-                  {typeof row.expert === "string"
-                    ? <span className="text-brand-emerald-dark text-xs font-medium">{row.expert}</span>
-                    : row.expert ? <Check className="h-4 w-4 text-brand-emerald-dark mx-auto" /> : <X className="h-4 w-4 text-muted/30 mx-auto" />}
-                </td>
+          {FEATURES_COMPARISON.map((g) => (
+            <tbody key={g.groupe}>
+              <tr className="border-t border-border bg-muted/40">
+                <th colSpan={4} className="px-4 py-2 text-left text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{g.groupe}</th>
               </tr>
-            ))}
-          </tbody>
+              {g.lignes.map((row) => (
+                <tr key={row.label} className="border-t border-border/60">
+                  <td className="px-4 py-3">{row.label}</td>
+                  <td className="px-4 py-3 text-center">
+                    {typeof row.free === "string"
+                      ? <span className="text-muted-foreground text-xs">{row.free}</span>
+                      : row.free ? <Check className="h-4 w-4 text-muted-foreground mx-auto" /> : <X className="h-4 w-4 text-muted-foreground/30 mx-auto" />}
+                  </td>
+                  <td className="px-4 py-3 text-center">
+                    {typeof row.standard === "string"
+                      ? <span className="text-brand-gold-dark text-xs font-medium">{row.standard}</span>
+                      : row.standard ? <Check className="h-4 w-4 text-brand-gold-dark mx-auto" /> : <X className="h-4 w-4 text-muted-foreground/30 mx-auto" />}
+                  </td>
+                  <td className="px-4 py-3 text-center bg-brand-emerald/5">
+                    {typeof row.expert === "string"
+                      ? <span className="text-brand-emerald-dark text-xs font-semibold">{row.expert}</span>
+                      : row.expert ? <Check className="h-4 w-4 text-brand-emerald-dark mx-auto" /> : <X className="h-4 w-4 text-muted-foreground/30 mx-auto" />}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          ))}
         </table>
       </div>
 
@@ -380,14 +280,10 @@ export default function TarifsPage() {
       <div className="mt-12 sm:mt-16 text-center p-6 sm:p-8 rounded-2xl gradient-hero border border-brand-gold/20">
         <h2 className="text-xl sm:text-2xl font-bold mb-3">Prêt à parier plus intelligemment ?</h2>
         <p className="text-muted-foreground mb-6">7 jours d&apos;essai gratuit. Carte requise, aucun prélèvement avant la fin de l&apos;essai.</p>
-        <CheckoutButton
-          plan="standard"
-          periodicite="monthly"
-          label="Commencer l'essai gratuit"
-          variant="brand"
-          size="xl"
-          className="w-auto"
-        />
+        {/* Ce bouton ouvrait directement Standard : on renvoie au choix des formules. */}
+        <Button variant="brand" size="xl" asChild>
+          <Link href="#formules">Choisir ma formule</Link>
+        </Button>
       </div>
 
       {/* Disclaimer */}

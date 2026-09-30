@@ -15,7 +15,6 @@ import { CasaquesProvider, CasaqueNumero, IdentiteCheval } from "@/components/co
 import { coursesApi, predictionsApi, api } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { CheckoutButton } from "@/components/billing/CheckoutButton";
 import { useAuth } from "@/hooks/useAuth";
 import { useCotesLive } from "@/hooks/useWebSocket";
 import {
@@ -702,15 +701,11 @@ function MiseCalculatorWidget({
         <Calculator className="h-10 w-10 mx-auto mb-3" style={{ color: CX.gold, opacity: 0.6 }} />
         <p style={{ fontSize: 14, fontWeight: 600, marginBottom: 4, color: CX.ink2 }}>Essai gratuit utilisé aujourd&apos;hui</p>
         <p style={{ fontSize: 12, color: CX.gray400, marginBottom: 16 }}>
-          {quotaMessage || "Revenez demain pour un nouvel essai gratuit, ou passez à Standard pour un accès illimité au calculateur."}
+          {quotaMessage || "Revenez demain pour un nouvel essai gratuit, ou passez à Expert pour un calculateur illimité."}
         </p>
-        <CheckoutButton
-          plan="standard"
-          periodicite="monthly"
-          label="Passer Standard — 12€/mois"
-          variant="brand"
-          className="w-auto"
-        />
+        <Button variant="brand" asChild>
+          <Link href="/tarifs#formules">Voir les formules</Link>
+        </Button>
       </div>
     );
   }
@@ -1967,16 +1962,16 @@ function BilanMiseSection({ courseId, paywall = false }: { courseId: string; pay
               )}
             </p>
             <div className="mt-3 flex flex-wrap items-center gap-3">
-              <CheckoutButton
-                plan="standard"
-                periodicite="monthly"
-                label="Recevoir les plans avant le départ — 12€/mois"
+              <Button
                 variant="brand"
                 size="default"
+                asChild
                 // Libellé trop long pour une ligne sur téléphone : il débordait
                 // du bouton. Pleine largeur et retour à la ligne autorisé.
                 className="h-auto min-h-10 w-full whitespace-normal py-2 text-center leading-snug sm:w-auto"
-              />
+              >
+                <Link href="/tarifs#formules">Recevoir les plans avant le départ</Link>
+              </Button>
               <Link
                 href="/track-record"
                 className="text-[12.5px] font-medium text-stone-600 underline underline-offset-2 hover:text-amber-700"
@@ -3005,7 +3000,7 @@ export default function CoursePage({
               texte="Probabilité de victoire et de place pour chaque partant, cote juste, signaux retenus contre le cheval comme en sa faveur. Inclus dès la formule Standard."
               action={
                 <Button variant="brand" size="sm" asChild>
-                  <Link href="/tarifs">Passer Standard — 12€/mois</Link>
+                  <Link href="/tarifs#formules">Voir les formules</Link>
                 </Button>
               }
             />

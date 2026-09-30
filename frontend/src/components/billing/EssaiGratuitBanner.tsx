@@ -6,7 +6,7 @@ import { usePathname } from "next/navigation";
 import { Gift, X } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { peutDemarrerEssai, peutProfiterRemise } from "@/lib/auth";
-import { CheckoutButton } from "@/components/billing/CheckoutButton";
+import { Button } from "@/components/ui/button";
 
 /**
  * Essai de 7 jours à prendre — bandeau des comptes gratuits.
@@ -68,22 +68,17 @@ export function EssaiGratuitBanner() {
           </p>
         ) : (
           <p className="min-w-0 flex-1">
-            <span className="font-semibold">{user?.prenom ? `${user.prenom}, v` : "V"}otre essai Standard de 7 jours est offert</span>
-            {" "}: pronostics complets, paris de valeur et plans de mise.{" "}
+            <span className="font-semibold">{user?.prenom ? `${user.prenom}, v` : "V"}otre essai de 7 jours est offert</span>
+            {" "}: Standard ou Expert, pronostics complets, paris de valeur et plans de mise.{" "}
             <span className="text-slate-600">Carte demandée, 0 € prélevé avant la fin de l&apos;essai, résiliable en un clic.</span>
           </p>
         )}
         <div className="flex items-center gap-3">
-          <CheckoutButton
-            plan="standard"
-            periodicite="monthly"
-            label={remise ? "M'abonner avec −5 €" : "Démarrer mon essai gratuit"}
-            size="default"
-            className="h-8 px-3 text-[13px]"
-          />
-          <Link href="/tarifs" className="text-[13px] font-medium text-slate-600 underline underline-offset-2 hover:text-slate-900">
-            Comparer
-          </Link>
+          {/* Renvoie au choix de la formule : le bouton ouvrait directement Standard
+              en un clic, sans laisser choisir Expert. */}
+          <Button variant="brand" size="default" className="h-8 px-3 text-[13px]" asChild>
+            <Link href="/tarifs#formules">{remise ? "Choisir ma formule (−5 €)" : "Choisir mon essai gratuit"}</Link>
+          </Button>
           <button onClick={fermer} className="text-slate-500 hover:text-slate-800" aria-label="Masquer ce rappel pendant 3 jours">
             <X className="h-4 w-4" />
           </button>

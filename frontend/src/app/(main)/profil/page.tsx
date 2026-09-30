@@ -310,7 +310,7 @@ export default function ProfilPage() {
             href="/tarifs"
             className="flex-shrink-0 self-start inline-flex items-center gap-1.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-brand-dark text-sm font-semibold px-4 py-2 transition-colors shadow-sm shadow-amber-200"
           >
-            <Zap className="h-4 w-4" /> Passer Standard
+            <Zap className="h-4 w-4" /> Voir les formules
           </Link>
         )}
       </div>
