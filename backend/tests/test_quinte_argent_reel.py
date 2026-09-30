@@ -1,12 +1,7 @@
-"""Ticket Quinté+ traité comme de l'argent réellement misé — décision du 2026-09-24.
+"""Quinté+ : règlement du ticket aux rapports réels, palmarès public, exposition.
 
-1. « Enregistrer ce plan » écrit AUSSI le ticket Quinté+ dans le capital
-   (bankroll_entries), réglé ensuite aux vrais rapports — champ de plusieurs
-   combinaisons et Bonus 4sur5 / Bonus 3 compris — et tenu hors de l'apprentissage
-   des poids par type du plan principal.
-2. Le plafond d'exposition quotidienne compte le coût du Quinté+.
-3. Le palmarès montre le Quinté+ sur une ligne à part, jamais dans le ROI du plan
-   principal, et « premiers résultats à venir » tant qu'aucun ticket n'est réglé.
+Les tests de l'ancien « Enregistrer ce plan » (capital, retiré avec le Défi du mois)
+sont partis avec lui ; tout le reste protège du code toujours en service.
 """
 import json
 from datetime import datetime, timedelta, timezone
@@ -61,6 +56,14 @@ AGREGAT_2409 = {"e_quinte_plus": 4703.3}
 
 # ── 1. Lignes de capital écrites par « Enregistrer ce plan » ─────────────────
 
+
+
+
+
+
+
+
+
 def test_note_du_ticket_quinte():
     assert note_ligne_module_quinte("agressif", "tendue") == f"{MARQUEUR_MODULE_QUINTE} · agressif · tendue"
     assert not est_ligne_module_quinte("Plan de mise IA · agressif")
@@ -84,6 +87,8 @@ async def _course_quinte_a_venir(db, course_id="QUINTE1"):
                           course_id=course_id, proba_top1=p["proba_top1"],
                           proba_top3=p["proba_top3"], rang_predit=p["numero"]))
     await db.commit()
+
+
 
 
 # ── 1. Règlement d'une ligne Quinté+ du capital ──────────────────────────────
@@ -177,6 +182,32 @@ async def _course_terminee(db, course_id="24092026R1C1"):
     db.add(Resultat(course_id=course_id, classement=ARRIVEE_2409, rapports=AGREGAT_2409,
                     rapports_detail=DETAIL_2409))
     await db.commit()
+
+
+@pytest.mark.asyncio
+async def test_settle_pending_bets_regle_la_ligne_quinte_du_capital(db):
+    from services.capital_historique import settle_pending_bets
+    from db.models import BankrollEntry
+    await _course_terminee(db)
+    now = datetime(2026, 9, 24, 11, 0, tzinfo=timezone.utc)
+    champ = BankrollEntry(entry_id="q1", user_id="u1", course_id="24092026R1C1", date=now,
+                          type_pari="Quinté+ Désordre",
+                          chevaux="N°8 + N°7 + N°4 + N°16 + N°10 + N°6", mise=12.0,
+                          suivi_reco_ia=True,
+                          notes=note_ligne_module_quinte("equilibre", "champ 6 chevaux"))
+    principal = BankrollEntry(entry_id="p1", user_id="u1", course_id="24092026R1C1",
+                              date=now, type_pari="Simple Gagnant", chevaux="N°8",
+                              mise=8.0, suivi_reco_ia=True, notes="Plan de mise IA · equilibre")
+    db.add_all([champ, principal])
+    await db.commit()
+
+    await settle_pending_bets(db, None)
+    await db.refresh(champ)
+    await db.refresh(principal)
+    assert champ.resultat == "gagne"
+    assert champ.gain_perte == pytest.approx(2 * 2.0 * 2.4 - 12.0)
+    assert champ.cote == pytest.approx(0.8)
+    assert principal.resultat == "perd" and principal.gain_perte == -8.0
 
 
 # ── 1. Hors de l'apprentissage des poids par type ────────────────────────────
@@ -388,6 +419,8 @@ async def test_palmares_public_quinte_sans_roi_ni_montants(client):
     for champ in ("roi", "net", "mise_totale", "par_profil"):
         assert champ not in q, champ
     assert {"nb_tickets", "nb_bonus", "nb_tickets_gagnants", "retour"} <= set(q)
+
+
 
 
 @pytest.mark.asyncio

@@ -20,7 +20,9 @@ import { planLabel, formatDate, cn } from "@/lib/utils";
 const profileSchema = z.object({
   prenom: z.string().min(1, "Requis"),
   nom: z.string().optional(),
-  pseudo: champPseudo,
+  // Facultatif sur cette page : un ancien compte ou un compte Google sans pseudo
+  // doit pouvoir changer son prénom ou son profil sans en choisir un d'abord.
+  pseudo: champPseudo.or(z.literal("")),
   profil_risque: z.enum(["conservateur", "equilibre", "agressif"]),
 });
 type ProfileForm = z.infer<typeof profileSchema>;
@@ -188,7 +190,8 @@ export default function ProfilPage() {
   async function onSave(data: ProfileForm) {
     setSavingProfile(true);
     try {
-      await authApi.updateMe(data);
+      const { pseudo, ...reste } = data;
+      await authApi.updateMe(pseudo ? { ...reste, pseudo } : reste);
       await refreshUser();
       toast.success("Profil mis à jour");
     } catch (e: unknown) {

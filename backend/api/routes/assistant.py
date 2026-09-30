@@ -421,8 +421,8 @@ async def _rule_based_answer(messages: list[dict], db: AsyncSession, user: User)
         return await _answer_programme(db, user)
     if any(k in q for k in ("modèle", "modele", "auc", "précision", "precision", "fiab", "performance", "perf ia", "roi simul")):
         return await _answer_metrics(db, user)
-    if any(k in q for k in ("défi", "defi", "concours", "classement", "mes points", "mon rang",
-                            "mes paris", "mes gains", "mon solde", "mon roi")):
+    if re.search(r"\bd[ée]fi\b|\bconcours\b|mes points|mon rang|mes paris|mes gains|mon solde|mon roi", q) \
+            or ("classement" in q and not m):
         return await _answer_defi(db, user)
     if any(k in q for k in ("répart", "repart", "miser", "mise", "combien jouer", "combien miser", "staking", "stratégie de mise")):
         return _answer_mise()

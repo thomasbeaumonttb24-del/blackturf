@@ -31,9 +31,17 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column("courses", sa.Column("heure_depart_initiale", sa.DateTime(timezone=True), nullable=True))
     if op.get_bind().dialect.name != "postgresql":
+        op.add_column("courses", sa.Column("heure_depart_initiale", sa.DateTime(timezone=True), nullable=True))
         return
+    # Ajouter une colonne verrouille `courses` un instant. Si une longue requête la
+    # lit (réentraînement, scraper), on abandonne au bout de 15 s plutôt que de
+    # bloquer toutes les lectures du site derrière elle : le déploiement s'arrête
+    # alors avant `up -d` (set -e) et se relance tel quel. IF NOT EXISTS : une
+    # relance après un échec partiel ne bute pas sur la colonne déjà ajoutée.
+    op.execute("SET lock_timeout = '15s'")
+    op.execute("ALTER TABLE courses ADD COLUMN IF NOT EXISTS heure_depart_initiale TIMESTAMP WITH TIME ZONE")
+    op.execute("RESET lock_timeout")
     # Seules les courses à venir comptent pour le verrou ; l'historique garde NULL
     # (repli sur date_heure) plutôt que de réécrire toute la table.
     op.execute("""

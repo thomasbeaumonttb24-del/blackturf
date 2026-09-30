@@ -804,3 +804,20 @@ async def test_admin_efface_un_pseudo_injurieux(client, db, inscrire, admin_head
     assert u.pseudo is None and defi.nom_public(u).startswith("Joueur ")
     fiche = (await client.get(f"/admin/api/users/{u.user_id}", headers=admin_headers)).json()
     assert fiche["user"]["pseudo"] is None
+
+
+@pytest.mark.parametrize("question, defi_attendu", [
+    ("où j'en suis au défi du mois ?", True),
+    ("mon rang au concours", True),
+    ("comment définir ma stratégie de mise ?", False),
+    ("j'ai un déficit, combien miser ?", False),
+])
+async def test_assistant_ne_confond_pas_definir_et_defi(db, monkeypatch, question, defi_attendu):
+    from api.routes import assistant as A
+
+    async def faux_defi(db, user):
+        return "DEFI"
+    monkeypatch.setattr(A, "_answer_defi", faux_defi)
+    u = await _user(db)
+    rep = await A._rule_based_answer([{"role": "user", "content": question}], db, u)
+    assert (rep == "DEFI") is defi_attendu
