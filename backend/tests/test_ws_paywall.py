@@ -245,3 +245,16 @@ async def test_plan_expert_ne_subit_pas_le_delai(db, monkeypatch):
     await ws_value_bets(ws, token=token)
 
     assert len(ws.sent[0]["data"]) == 1, "Expert doit voir le value bet immédiatement"
+
+
+def test_canal_commun_ne_relaie_que_la_liste_blanche():
+    """`alertes:broadcast` atteint tous les comptes connectés, Free compris : un
+    pari de valeur publié dessus ne doit jamais être relayé au navigateur."""
+    vb = {"type": "value_bet", "nom_cheval": "Secret", "niveau": 4}
+    assert wsmod._trame_diffusable("alertes:broadcast", vb) is False
+    assert wsmod._trame_diffusable(b"alertes:broadcast", vb) is False
+    assert wsmod._trame_diffusable("alertes:broadcast", {"type": "chat_message"}) is True
+    assert wsmod._trame_diffusable("alertes:broadcast", ["pas", "un", "dict"]) is False
+    # Canal personnel : publié par un code qui connaît le plan du destinataire.
+    assert wsmod._trame_diffusable("alertes:u-1", vb) is True
+    assert not hasattr(wsmod, "broadcast_alert")

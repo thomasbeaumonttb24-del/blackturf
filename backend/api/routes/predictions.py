@@ -19,6 +19,7 @@ from db.models import (
     Cheval, Course, Resultat, User
 )
 from services.cote_juste import cote_juste as _cote_juste
+from services.email_verification import email_confirme
 from services.confiance_course import (
     confiance_course as _confiance_course,
     confiance_depuis_predictions as _confiance_depuis_predictions,
@@ -44,39 +45,19 @@ def _is_prono_fige(date_heure) -> bool:
     return now >= date_heure - timedelta(minutes=PRONO_LOCK_MIN)
 
 
-# Quota journalier de pronostics consultés (funnel freemium).
-# 1 prono = 1 course dont on ouvre les prédictions IA. Re-consulter une course déjà
-# ouverte aujourd'hui ne reconsomme pas le quota.
-# Valeurs arrêtées par Thomas le 2026-08-16 : Free/Découverte 1/jour, Standard/Starter
-# 5/jour, Expert/admin illimité. Identiques à MISE_PLAN_DAILY_LIMITS (courses.py) :
-# un compte Free ouvre le classement IA ET son plan de mise sur la MÊME course du jour.
-PRONO_DAILY_LIMITS = {"free": 1, "decouverte": 1, "standard": 5, "starter": 5}
+# Quota journalier de pronostics consultés (funnel freemium) : tenu par
+# services.quota_classement (atomique, fail-closed pour les plans gratuits, par
+# adresse e-mail normalisée, jour de Paris). Grille : Free/Découverte 1/jour,
+# Standard/Starter 5/jour, Expert/admin illimité — identique au plan de mise.
+from services.quota_classement import LIMITES_CLASSEMENT as PRONO_DAILY_LIMITS  # noqa: E402
+from services import quota_classement as _quota  # noqa: E402
+
+PLANS_GRATUITS = _quota.PLANS_GRATUITS
 
 
 async def _prono_quota_check(user: User, course_id: str) -> tuple[bool, int]:
-    """(autorisé, quota_restant). Compteur Redis par user/jour (set de course_ids,
-    TTL 36h). -1 = illimité. Fail-open si Redis indisponible (dispo > paywall strict)."""
-    if getattr(user, "is_admin", False):
-        return True, -1
-    limit = PRONO_DAILY_LIMITS.get(user.plan)
-    if limit is None:  # expert / pro = illimité
-        return True, -1
-    try:
-        from db.redis_client import get_redis
-        redis = await get_redis()
-        day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        key = f"prono_quota:{user.user_id}:{day}"
-        if await redis.sismember(key, course_id):
-            return True, max(0, limit - await redis.scard(key))
-        used = await redis.scard(key)
-        if used >= limit:
-            return False, 0
-        await redis.sadd(key, course_id)
-        await redis.expire(key, 129600)  # 36h
-        return True, max(0, limit - (used + 1))
-    except Exception:
-        log.warning("prono_quota.redis_unavailable", user_id=getattr(user, "user_id", None))
-        return True, -1
+    """(autorisé, quota_restant ; -1 = illimité). Consomme la course si besoin."""
+    return await _quota.consommer(user, course_id)
 
 
 # ─────────────────────────────────────────────
@@ -216,14 +197,27 @@ class ValueBetOut(BaseModel):
 # ─────────────────────────────────────────────
 # Routes
 # ─────────────────────────────────────────────
+@router.get("/quota/classement")
+async def get_quota_classement(user: User = Depends(get_current_user)):
+    """Lecture SEULE du quota du jour : plafond, restant, courses déjà ouvertes.
+    Ne consomme rien — la fiche s'en sert pour dire, avant le clic, si la course
+    du jour est encore disponible et, sinon, sur quelle course elle a servi."""
+    return await _quota.etat(user)
+
+
 @router.get("/courses/{course_id}/predictions", response_model=CoursePredictionsOut)
 async def get_predictions(
     course_id: str,
     bankroll: float = Query(default=100.0, ge=0),
+    reveler: bool = Query(default=False),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """Prédictions IA pour une course. Quota journalier selon le plan (funnel freemium)."""
+    """Prédictions IA pour une course. Quota journalier selon le plan (funnel freemium).
+
+    Compte gratuit : sa course du jour n'est consommée que sur demande EXPLICITE
+    (`reveler=true`, bouton « Révéler » de la fiche). Ouvrir une fiche ne coûte
+    donc rien, et il choisit la course sur laquelle il dépense son accès."""
     course_res = await db.execute(select(Course).where(Course.course_id == course_id))
     course = course_res.scalar_one_or_none()
     if not course:
@@ -233,7 +227,14 @@ async def get_predictions(
     # course terminee pour consulter l'arrivee (info publique) ne consomme PAS le prono
     # du jour -> evite le faux "deja utilise" quand on a juste regarde une course finie.
     if course.statut in ("a_venir", "en_cours"):
-        autorise, quota_restant = await _prono_quota_check(user, course_id)
+        if user.plan in PLANS_GRATUITS and not email_confirme(user):
+            autorise, quota_restant = False, 0
+        elif user.plan in PLANS_GRATUITS and not reveler and not await _quota.deja_ouverte(user, course_id):
+            # Simple consultation : rien n'est consommé, le classement reste verrouillé.
+            etat = await _quota.etat(user)
+            autorise, quota_restant = False, etat["restant"]
+        else:
+            autorise, quota_restant = await _prono_quota_check(user, course_id)
     else:
         autorise, quota_restant = True, -1
 
@@ -268,15 +269,20 @@ async def get_predictions(
     # une seule règle de visibilité (`services.valuebets_visibilite`) : la fiche,
     # /value-bets, le flux WS et le compteur montrent désormais le même pari, au
     # même niveau, à la même espérance.
-    from services.valuebets_visibilite import visible as _vb_visible, course_etrangere as _course_etrangere
-    _etranger = await _course_etrangere(db, course.hippodrome_nom)
-    vb_res = await db.execute(
-        select(ValueBet)
-        .where(and_(ValueBet.course_id == course_id, ValueBet.actif == True))  # noqa: E712
-    )
-    vbs_by_pid = {vb.participation_id: vb
-                  for vb in vb_res.scalars().all()
-                  if _vb_visible(vb, user.plan, etranger=_etranger)}
+    # `visible()` ne connaît que le délai : la liste blanche des plans qui voient des
+    # paris de valeur (Free : jamais) s'applique ici, comme sur /value-bets.
+    from services.valuebets_visibilite import (
+        PLANS_AVEC_VALUE_BETS, visible as _vb_visible, course_etrangere as _course_etrangere)
+    vbs_by_pid: dict = {}
+    if user.plan in PLANS_AVEC_VALUE_BETS:
+        _etranger = await _course_etrangere(db, course.hippodrome_nom)
+        vb_res = await db.execute(
+            select(ValueBet)
+            .where(and_(ValueBet.course_id == course_id, ValueBet.actif == True))  # noqa: E712
+        )
+        vbs_by_pid = {vb.participation_id: vb
+                      for vb in vb_res.scalars().all()
+                      if _vb_visible(vb, user.plan, etranger=_etranger)}
 
     # Cote AFFICHÉE : live avant gel, dernière connue après. Le pari de valeur,
     # lui, reste celui du cycle : son espérance est calculée sur la cote relevée au
@@ -365,7 +371,7 @@ async def get_predictions(
             predictions=predictions_masquees,
             recommandations=[],
             verrouille=True,
-            quota_restant=0,
+            quota_restant=quota_restant if quota_restant > 0 else 0,
         )
 
     _conf = _confiance_depuis_predictions([p for p, _, _ in rows])
@@ -595,9 +601,13 @@ async def get_apercu_analyse(
 
     # Favori du marché = plus petite cote PMU réellement cotée du champ.
     cotes = [(pa.cote_pmu, pa.numero) for _, pa, _ in rows if pa.cote_pmu and pa.cote_pmu > 1]
-    if cotes:
-        base.accord_marche = (min(cotes)[1] == part1.numero)
-    base.bande_cote = _bande_cote(part1.cote_pmu or pred1.cote_figee)
+    # Course non courue : ni l'accord avec le favori des cotes, ni la bande de cote
+    # du n°1. L'un comme l'autre, croisé avec les cotes publiques, NOMME ce n°1 —
+    # le classement sans compte ni quota (cf. services.quota_classement).
+    if course.statut == "termine":
+        if cotes:
+            base.accord_marche = (min(cotes)[1] == part1.numero)
+        base.bande_cote = _bande_cote(part1.cote_pmu or pred1.cote_figee)
 
     vbs = (await db.execute(
         select(ValueBet).where(and_(ValueBet.course_id == course_id, ValueBet.actif == True))  # noqa: E712

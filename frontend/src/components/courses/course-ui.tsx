@@ -237,7 +237,7 @@ export const INCLINABLE_CLS =
  *  (l'essai part de là), un compte gratuit passe directement aux formules. */
 export function lienAbonnement(connecte: boolean, suite?: string) {
   return connecte
-    ? { href: "/tarifs", libelle: "Passer Standard — 12 €/mois" }
+    ? { href: "/tarifs#formules", libelle: "Voir les formules" }
     : { href: `/inscription${suite ? `?suite=${encodeURIComponent(suite)}` : ""}`, libelle: "Essai gratuit 7 jours" };
 }
 

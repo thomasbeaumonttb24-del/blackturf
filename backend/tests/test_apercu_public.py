@@ -91,9 +91,10 @@ async def test_apercu_est_public_et_ne_livre_aucune_identite(client: AsyncClient
     assert data["nb_analyses"] == 3
     assert data["confiance"] == 61
     assert data["proba_top1"] == pytest.approx(0.30)
-    # Le n°1 du modèle n'est pas le favori des cotes → c'est l'accroche de la carte.
-    assert data["accord_marche"] is False
-    assert data["bande_cote"] == "8 à 15"
+    # Ni accord avec le favori des cotes, ni bande de cote du n°1 avant la course :
+    # croisés avec les cotes publiques, ils nommeraient ce n°1.
+    assert data["accord_marche"] is None
+    assert data["bande_cote"] is None
     assert data["nb_ecartes"] == 1  # le cheval à 1 % de chances
 
     # AUCUN numéro ni nom de cheval ne doit transiter tant que la course n'est pas

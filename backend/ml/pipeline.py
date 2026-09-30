@@ -3868,67 +3868,6 @@ def _get_cheval_id_from_resultat(entry: dict, resultat: Resultat) -> str:
     return entry.get("cheval_id", "")
 
 
-async def _broadcast_value_bet_alert(
-    course_id: str,
-    nom_cheval: str,
-    hippodrome: str,
-    heure: str,
-    vb: dict,
-    cote: Optional[float],
-) -> None:
-    """
-    Diffuse un value bet via :
-    - Redis pub/sub → tous les WS connectés
-    - Push notifications → utilisateurs abonnés avec push_subscription
-    """
-    try:
-        from api.routes.ws import broadcast_alert
-        from services.alerts import send_web_push, send_inapp
-        from db.database import AsyncSessionLocal
-
-        etoiles = "⭐" * vb["niveau"]
-        payload = {
-            "type": "value_bet",
-            "vb_id": None,
-            "course_id": course_id,
-            "nom_cheval": nom_cheval,
-            "hippodrome": hippodrome,
-            "heure": heure,
-            "cote": cote,
-            "ev": round(vb["ev_max"], 4),
-            "niveau": vb["niveau"],
-            "spi_detected": vb.get("spi_detected", False),
-            "ts": datetime.now(timezone.utc).isoformat(),
-        }
-
-        # Broadcast WebSocket (tous les users connectés)
-        await broadcast_alert(payload)
-
-        # Push notifications aux users abonnés standard+
-        if vb["niveau"] >= 2:
-            async with AsyncSessionLocal() as session:
-                from db.models import User
-                from sqlalchemy import select
-                users_res = await session.execute(
-                    select(User).where(
-                        User.push_subscription.isnot(None),
-                        User.is_active == True,
-                        User.plan.in_(["starter", "standard", "expert"]),
-                    )
-                )
-                users = users_res.scalars().all()
-                for user in users:
-                    await send_web_push(
-                        subscription=user.push_subscription,
-                        title=f"Value Bet {etoiles} — {nom_cheval}",
-                        body=f"{hippodrome} {heure} · EV +{round(vb['ev_max']*100, 1)}%",
-                        data=payload,
-                    )
-
-    except Exception as e:
-        log.error("pipeline.broadcast_vb.failed", error=str(e))
-
-
 # ─────────────────────────────────────────────
 # RQ-callable wrapper (sync, runs in worker)
 # ─────────────────────────────────────────────
