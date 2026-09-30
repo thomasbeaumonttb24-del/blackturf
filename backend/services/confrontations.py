@@ -6,8 +6,9 @@ duels passés entre les chevaux engagés aujourd'hui : qui a déjà battu qui, c
 de fois, avec quel écart, et lors de quelle dernière rencontre.
 
 Aucune source externe : tout est calculé depuis la base. Deux chevaux se sont
-"affrontés" s'ils ont une ligne d'historique partageant la même date + le même
-hippodrome (≈ même course). On compare alors leurs positions d'arrivée.
+"affrontés" s'ils ont une ligne d'historique partageant la même date, le même
+hippodrome, la même discipline, la même distance et le même nombre de partants
+(≈ même course, cf. `_race_key`). On compare alors leurs positions d'arrivée.
 """
 from __future__ import annotations
 
@@ -36,8 +37,17 @@ def _norm_hippo(nom: Optional[str]) -> str:
 
 
 def _race_key(h: HistoriqueCourse) -> tuple:
-    """Clé d'une course passée : même date + même hippodrome ⇒ même épreuve."""
-    return (h.date_course, _norm_hippo(h.hippodrome))
+    """Clé d'une course passée.
+
+    Date + hippodrome ne suffisent PAS : une réunion compte 6 à 9 courses le même
+    jour sur la même piste. Deux chevaux engagés dans deux courses différentes de
+    la même réunion devenaient des « adversaires », et comme chacun avait gagné
+    (ou fini 2e…) sa propre course, l'écran affichait des duels « 1er contre 1er »
+    à 0 – 0 — impossibles. La discipline, la distance et le nombre de partants
+    distinguent les courses d'une même réunion.
+    """
+    return (h.date_course, _norm_hippo(h.hippodrome), (h.discipline or "").lower(),
+            h.distance, h.nb_partants)
 
 
 def _valid_position(pos: Optional[int]) -> bool:
@@ -123,6 +133,11 @@ async def compute_confrontations(
                 a, b = presents[i], presents[j]
                 ha, hb = par_cheval[a], par_cheval[b]
                 if not (_valid_position(ha.position_arrivee) and _valid_position(hb.position_arrivee)):
+                    continue
+                # Même place dans « la même course » : sauf dead-heat (rarissime),
+                # ce sont deux courses distinctes que la clé n'a pas su séparer.
+                # Un duel sans vainqueur n'apprend rien : on l'écarte.
+                if ha.position_arrivee == hb.position_arrivee:
                     continue
                 pair = (a, b) if a < b else (b, a)
                 duels[pair].append({

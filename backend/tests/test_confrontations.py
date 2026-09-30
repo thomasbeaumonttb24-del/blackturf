@@ -107,3 +107,26 @@ async def test_confrontations_no_field(db):
     assert res["nb_partants"] == 0
     assert res["paires"] == []
     assert res["par_cheval"] == []
+
+
+@pytest.mark.asyncio
+async def test_confrontations_courses_differentes_meme_reunion(db):
+    """Deux courses de la même réunion (même jour, même hippodrome) ne sont pas
+    un duel. Avant, chaque gagnant de sa course « rencontrait » l'autre : l'écran
+    affichait « 1er contre 1er » et un score de 0 – 0."""
+    db.add_all([Cheval(cheval_id="X", nom="XRAY"), Cheval(cheval_id="Y", nom="YANKEE")])
+    for cid, num in [("X", 1), ("Y", 2)]:
+        db.add(Participation(participation_id=f"p-{cid}", course_id="R2C1", cheval_id=cid, numero=num))
+    db.add_all([
+        # R1C3 (2100 m) et R1C6 (2850 m) le même jour à Vincennes : chacun gagne la sienne
+        _hist("X", date(2026, 7, 25), "Vincennes", 1, dist=2100, disc="Attelé"),
+        _hist("Y", date(2026, 7, 25), "Vincennes", 1, dist=2850, disc="Attelé"),
+        # Même distance, même discipline, même place : collision résiduelle → écartée
+        _hist("X", date(2026, 6, 10), "Caen", 2, dist=2450, disc="Attelé"),
+        _hist("Y", date(2026, 6, 10), "Caen", 2, dist=2450, disc="Attelé"),
+    ])
+    await db.commit()
+
+    res = await compute_confrontations(db, "R2C1")
+    assert res["paires"] == []
+    assert res["nb_paires_avec_duel"] == 0
