@@ -126,10 +126,10 @@ const FEATURES_COMPARISON: { groupe: string; lignes: { label: string; free: Cell
     ],
   },
   {
-    groupe: "Suivi",
+    groupe: "Défi et alertes",
     lignes: [
       { label: "Défi du mois (concours en points)", free: true, standard: true, expert: true },
-      { label: "Alertes e-mail + notifications", free: false, standard: true, expert: true },
+      { label: "Alertes paris de valeur (e-mail + notifications)", free: false, standard: true, expert: true },
       { label: "Support prioritaire", free: false, standard: false, expert: true },
     ],
   },

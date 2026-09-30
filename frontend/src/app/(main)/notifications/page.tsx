@@ -481,7 +481,7 @@ export default function NotificationsPage() {
                 checked={prefs?.alertes_systeme ?? true}
                 onChange={(v) => updatePref({ alertes_systeme: v })}
                 label="Rappels et annonces"
-                description="Rappels du Défi du mois (nouvelle cagnotte, paris manquants pour être classé, fin de mois), maintenance, informations importantes"
+                description="Rappels du Défi du mois (nouveaux points du mois, paris manquants pour être classé, fin de mois), maintenance, informations importantes"
               />
             </div>
           </CardContent>

@@ -121,8 +121,8 @@ export async function GET() {
         `C'est ce qu'aucun ticket type ne fait : un pronostic recopié à l'identique pour ` +
         `tout le monde ignore votre budget. À dix euros comme à cent, la répartition se ` +
         `recalcule — elle ne se contente pas de multiplier les mises.\n\n` +
-        `Après l'arrivée, chaque pari est réglé au rapport PMU officiel et votre suivi se ` +
-        `met à jour. Les paris perdus sont affichés aussi, et notre rendement réellement ` +
+        `Après l'arrivée, chaque pari est réglé au rapport PMU officiel, et vous pouvez ` +
+        `le jouer au Défi du mois, en points. Les paris perdus sont affichés aussi, et notre rendement réellement ` +
         `mesuré est publié, négatif compris.\n\n` +
         `Plan d'exemple : rendement et gains sont estimés, jamais garantis.\n\n` +
         `Enregistrez ce post pour retrouver la répartition avant votre prochaine course.\n` +

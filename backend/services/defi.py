@@ -104,7 +104,7 @@ CATALOGUE_DEFI: tuple[dict, ...] = (
      "aide": "Les 4 premiers parmi vos 4 à 7 chevaux, dans n'importe quel ordre. Moins de chevaux, plus gros rapport."},
     {"type": "Quarté+", "famille": "Quarté+, Quinté+ & plus", "min": 4, "max": 4, "ordre": True,
      "drapeau": "est_quarte",
-     "aide": "Les 4 premiers : Ordre si exact, sinon Désordre ; Bonus si vos 3 premiers font le podium."},
+     "aide": "Les 4 premiers : Ordre si exact, sinon Désordre ; Bonus si 3 de vos 4 chevaux font le podium."},
     {"type": "Quinté+", "famille": "Quarté+, Quinté+ & plus", "min": 5, "max": 5, "ordre": True,
      "drapeau": "est_quinte",
      "aide": "Les 5 premiers : Ordre, Désordre, puis Bonus 4sur5 et Bonus 3."},
@@ -213,9 +213,17 @@ def depot_ouvert(course: Course, now: Optional[datetime] = None) -> bool:
     return course.statut == "a_venir" and now < limite_depot(course)
 
 
+# Comptes de l'équipe qui ne sont pas administrateurs (compte perso du fondateur…) :
+# adresses séparées par des virgules. Le règlement annonce « les comptes de l'équipe
+# jouent hors concours » : sans cette liste, un compte perso non admin pouvait gagner.
+EQUIPE_HORS_CONCOURS = {
+    e.strip().lower() for e in os.getenv("DEFI_HORS_CONCOURS", "").split(",") if e.strip()
+}
+
+
 def hors_concours(user: User) -> bool:
-    """Les comptes d'administration jouent pour tester, jamais pour le prix."""
-    return bool(user.is_admin)
+    """Les comptes de l'équipe jouent pour tester, jamais pour le prix."""
+    return bool(user.is_admin) or (user.email or "").lower() in EQUIPE_HORS_CONCOURS
 
 
 def nom_public(user: User) -> str:
@@ -438,7 +446,9 @@ async def engager_pari(session, user: User, course_id: str, type_pari: str,
         raise DefiErreur("Plus de chevaux choisis que de partants.")
 
     mois = mois_de(course.date_heure)
-    if avant_lancement(mois):
+    # Le mois de la course ET le mois en cours : le programme du 1er est publié la
+    # veille, et un pari du 30 au soir sur une course du 1er ouvrait le défi en avance.
+    if avant_lancement(mois) or avant_lancement(mois_courant(now)):
         raise DefiErreur("Le Défi du mois ouvre le 1er octobre.")
     if await solde(session, user.user_id, mois) < points:
         raise DefiErreur("Solde de points insuffisant pour ce mois.")
@@ -506,6 +516,16 @@ async def regler_course(session, course_id: str) -> int:
         return len(paris)
 
     if course.statut != "termine":
+        if _utc(course.date_heure) + DELAI_RAPPORT_MAX < now:
+            # Jamais d'arrivée (statut resté « à venir », collecte en panne) : remboursé
+            # au bout de 72 h, sinon le pari bloquerait la remise du lot à vie.
+            avant = await classements_avant()
+            for p in paris:
+                p.statut, p.rapport, p.points_retour, p.regle_at = "rembourse", 1.0, float(p.points), now
+            await session.commit()
+            invalider_classement()
+            await _notifier_rangs(session, avant)
+            return len(paris)
         await session.commit()  # rien n'a changé : libère seulement les verrous
         return 0
     res = await session.get(Resultat, course_id)
@@ -765,6 +785,25 @@ def regler_ticket(type_pari: str, nums: list[int], classement: list[dict],
         if all(par_pos.get(i + 1) == n for i, n in enumerate(nums)):
             return {"gagne": True, "rapport_reel": None, "gain_mult": 1.0,
                     "note": "Rapport Ordre pas encore publié."}
+    if par_detail is not None and famille_type(type_pari) == "Quinté+" and not par_detail.get("rembourse"):
+        # 4 chevaux du ticket dans les 5 premiers, mais la combinaison exacte du Bonus
+        # 4sur5 absente d'un détail tronqué (ex æquo) : le PMU paie tout 4-uplet de
+        # l'arrivée au même rapport, on le reprend plutôt que payer le Bonus 3 ou rien.
+        note = str(par_detail.get("note") or "")
+        rang_superieur = note.endswith("Ordre.") or "4sur5" in note or (par_detail["gagne"] and not note)
+        if not rang_superieur:
+            from services.bet_settlement import _RAPPORT_KEYS, _rapport_bonus_4sur5
+            top5 = set()
+            for e in classement or []:
+                try:
+                    if 1 <= int(e["position"]) <= 5:
+                        top5.add(int(e["numero"]))
+                except (TypeError, ValueError, KeyError):
+                    continue
+            if len(top5) >= 5 and len(set(nums) & top5) == 4:
+                r = _rapport_bonus_4sur5(rapports_detail, _RAPPORT_KEYS["Quinté+"], top5)
+                if r is not None:
+                    return {"gagne": True, "rapport_reel": r, "gain_mult": 1.0, "note": "Rang de gain : Bonus 4sur5."}
     if par_detail is not None:
         if not par_detail["gagne"] and not par_detail.get("rembourse"):
             calcul = _regler_par_classement(type_pari, nums, classement, rapports, nb_partants,
@@ -822,8 +861,8 @@ async def regler_en_attente(session) -> int:
         SELECT DISTINCT d.course_id FROM defi_paris d
         JOIN courses c ON c.course_id = d.course_id
         WHERE d.statut = 'en_attente'
-          AND c.statut IN ('termine', 'annule', 'sans_resultat')
-    """))).scalars().all()
+          AND (c.statut IN ('termine', 'annule', 'sans_resultat') OR c.date_heure < :limite)
+    """), {"limite": datetime.now(timezone.utc) - DELAI_RAPPORT_MAX})).scalars().all()
     total = 0
     for cid in course_ids:
         total += await regler_course(session, cid)
@@ -989,6 +1028,11 @@ async def attribuer_recompense(session, mois: str, rang: int,
     if ligne is None:
         raise DefiErreur("Personne n'occupe ce rang.")
     user = await session.get(User, ligne["user_id"])
+    from services.email_verification import email_confirme
+    if not email_confirme(user):
+        # Annoncé dans le règlement et sur la carte de pari : le lot n'est remis qu'à
+        # une adresse confirmée. L'admin demande au joueur de la confirmer, puis remet.
+        raise DefiErreur("Adresse e-mail du gagnant non confirmée : demandez-lui de la confirmer avant la remise.")
     plan_offert, jours = RECOMPENSES[rang]
 
     # Un abonné payant ne peut pas recevoir un plan « à la main » : son plan suit
@@ -1006,10 +1050,15 @@ async def attribuer_recompense(session, mois: str, rang: int,
     if statut == "applique":
         user.plan = plan_offert
     libelle = plan_offert.capitalize()
-    _notifier(session, user.user_id, f"🏆 {rang}{'er' if rang == 1 else 'e'} du Défi du mois !",
-              f"Vous gagnez {jours} jours {libelle} offerts."
-              if statut == "applique" else
-              f"Vous gagnez {jours} jours {libelle} offerts : ils seront déduits de votre abonnement.")
+    if statut == "applique":
+        message = f"Vous gagnez {jours} jours {libelle} offerts, actifs dès maintenant."
+    elif abonne is not None:
+        message = f"Vous gagnez {jours} jours {libelle} offerts : ils seront déduits de votre abonnement."
+    else:
+        # Déjà au niveau du lot sans abonnement payant (accès offert en cours…) :
+        # pas de facture sur laquelle déduire, l'équipe prolonge l'accès à la main.
+        message = f"Vous gagnez {jours} jours {libelle} offerts : l'équipe les ajoute à votre accès actuel."
+    _notifier(session, user.user_id, f"🏆 {rang}{'er' if rang == 1 else 'e'} du Défi du mois !", message)
     try:
         await session.commit()
     except IntegrityError:

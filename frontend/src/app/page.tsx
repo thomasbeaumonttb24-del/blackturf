@@ -97,7 +97,7 @@ const PLANS = [
   // CTA « Essayer 7 jours gratuit » comme Standard : depuis le 2026-08-17 l'essai de
   // 7 jours s'applique AUSSI à Expert (cf. subscription_data dans stripe_routes.py).
   { name: "Expert", price: "19€", period: "/mois", desc: "Pour les parieurs sérieux", badge: "Populaire",
-    features: ["Pronostics illimités", "Paris de valeur en temps réel ★★★★", "Calculateur de mise avancé", "Assistant illimité", "Performances détaillées par discipline", "Créateur de stratégies 30+ filtres", "Export des données"],
+    features: ["Pronostics illimités", "Paris de valeur en temps réel ★★★★", "Calculateur de mise avancé", "Assistant illimité", "Performances détaillées par discipline", "Créateur de stratégies 30+ filtres"],
     cta: "Essayer 7 jours gratuit", href: "/inscription?plan=expert", popular: true },
 ];
 

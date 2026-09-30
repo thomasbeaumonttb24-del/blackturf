@@ -21,7 +21,7 @@ export function etapesDefi({ capital = 1000, pointsMin = 10, pointsMax = 100,
   return [
     { icone: Coins, court: `${formatNombre(capital, 2)} pts offerts`,
       titre: `${formatNombre(capital, 2)} points offerts`,
-      texte: "Chaque 1er du mois, tout compte, même gratuit, reçoit sa cagnotte. Aucun argent réel n'est en jeu." },
+      texte: "Chaque 1er du mois, tout compte avec un pseudo, même gratuit, reçoit 1 000 points. Aucun argent réel n'est en jeu." },
     { icone: Target, court: "Pariez avant le départ",
       titre: "Pariez avant le départ",
       texte: `Vos chevaux ou ceux du plan de mise : ${pointsMin} à ${pointsMax} points par pari, verrouillé au départ.` },

@@ -14,7 +14,7 @@ export default function ConfidentialitePage() {
   return (
     <div className="mx-auto max-w-3xl px-4 sm:px-6 py-12 space-y-8">
       <h1 className="text-2xl font-bold">Politique de confidentialité</h1>
-      <p className="text-xs text-muted-foreground">Dernière mise à jour : juin 2026</p>
+      <p className="text-xs text-muted-foreground">Dernière mise à jour : octobre 2026</p>
 
       <section className="space-y-3">
         <h2 className="text-lg font-semibold">1. Responsable du traitement</h2>
@@ -29,8 +29,8 @@ export default function ConfidentialitePage() {
       <section className="space-y-3">
         <h2 className="text-lg font-semibold">2. Données collectées</h2>
         <ul className="text-sm text-muted-foreground space-y-1 list-disc list-inside">
-          <li>Informations de compte : e-mail, prénom, nom (optionnel)</li>
-          <li>Données d'utilisation : courses consultées, paris enregistrés, capital</li>
+          <li>Informations de compte : e-mail, pseudo, prénom, nom (optionnel)</li>
+          <li>Données d'utilisation : courses consultées, plans de mise consultés, paris du Défi du mois (en points)</li>
           <li>Données de paiement : gérées exclusivement par Stripe (nous ne stockons aucun numéro de carte)</li>
           <li>Données de navigation : adresse IP, navigateur, logs d'accès (fins de sécurité)</li>
           <li>Préférences push : token de notification si activé</li>
@@ -45,6 +45,7 @@ export default function ConfidentialitePage() {
           <li>Amélioration du modèle ML (données agrégées et anonymisées)</li>
           <li>Sécurité de la plateforme</li>
           <li>Envoi d'alertes paris de valeur (avec consentement)</li>
+          <li>Défi du mois : affichage public du pseudo, du solde de points et des paris au classement ; vérification des comptes (dont la détection des comptes multiples) avant la remise d'une récompense</li>
         </ul>
       </section>
 
@@ -112,8 +113,8 @@ export default function ConfidentialitePage() {
       </section>
 
       <div className="rounded-xl border border-border/50 bg-muted/20 p-4 text-xs text-muted-foreground">
-        <strong>⚠️ Jeu responsable</strong> — Les données de paris sont conservées pour vous aider
-        à suivre votre bankroll. Si vous souhaitez supprimer toutes vos données, contactez-nous.
+        <strong>⚠️ Jeu responsable</strong> — Vos paris du Défi du mois (en points, sans argent réel)
+        sont conservés pour établir le classement. Si vous souhaitez supprimer toutes vos données, contactez-nous.
         09 74 75 13 13 — joueurs-info-service.fr
       </div>
     </div>

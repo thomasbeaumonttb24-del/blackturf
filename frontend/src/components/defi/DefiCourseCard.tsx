@@ -504,7 +504,7 @@ export function DefiCourseCard({ courseId, partants, connecte, prefill, onPrefil
                   {MISE_BASE_PMU[type] && (
                     <p className="mt-1.5 text-[11px] leading-relaxed text-slate-500">
                       Le PMU affiche ce rapport pour une mise de {MISE_BASE_PMU[type]} ; au défi, il est ramené à 1 point
-                      (rapport officiel « pour 1 € »). Même rendement, sans arrondi.
+                      (rapport officiel « pour 1 € »). Même rendement.
                     </p>
                   )}
                   <button type="button" onClick={valider} disabled={!pret || envoi}
@@ -543,7 +543,7 @@ export function DefiCourseCard({ courseId, partants, connecte, prefill, onPrefil
                   : restants <= 0 ? `Vous avez joué vos ${regles.max_paris_par_course} paris sur cette course.`
                   : joueur && joueur.en_jeu > 0
                     ? `Solde insuffisant pour un nouveau pari. ${formatPts(joueur.en_jeu)} encore en jeu sur vos paris en attente : un gain vous relance.`
-                    : "Solde insuffisant pour ce mois. Nouvelle cagnotte le 1er du mois prochain !"}
+                    : "Solde insuffisant pour ce mois. Vos 1 000 nouveaux points arrivent le 1er du mois prochain !"}
               </div>
             </div>
           )}

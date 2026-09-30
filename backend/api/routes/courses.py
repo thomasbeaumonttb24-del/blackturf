@@ -1855,7 +1855,10 @@ async def get_mise_plan(
         raise _H(status_code=422, detail="Montant invalide (0.01–10000€)")
 
     profil = body.get("profil_risque") or (user.profil_risque or "equilibre")
-    bankroll = body.get("bankroll") or user.bankroll_initiale
+    # Plus de repli sur users.bankroll_initiale : ce réglage vivait dans le suivi de
+    # capital, retiré avec le Défi du mois. Invisible et non modifiable, il plafonnait
+    # encore les plans de 9 comptes (« … sur X € de bankroll ») sans recours possible.
+    bankroll = body.get("bankroll")
 
     # Charger la course (avant le plafond d'exposition : le coût réel du plan en
     # dépend — sur une course Quinté+, le ticket peut s'ajouter au montant saisi).

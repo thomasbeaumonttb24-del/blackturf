@@ -191,7 +191,7 @@ async def envoyer_rappels(session, now: Optional[datetime] = None) -> int:
                      if l["rang"] else "")
             envois.append((l["user_id"], f"{mois}:nouveau",
                            f"Défi : {formater_points(CAPITAL_MENSUEL)} tout neufs vous attendent",
-                           bilan + "Nouveau mois, compteurs à zéro : tout le monde repart à égalité."))
+                           bilan + "Nouveau mois : tout le monde repart à 1 000 points, à égalité."))
 
     for l in lignes:
         if l["hors_concours"]:
@@ -211,7 +211,7 @@ async def envoyer_rappels(session, now: Optional[datetime] = None) -> int:
         if l["rang"] and l["rang"] <= 10 and jr <= 3:
             premier = lignes[0]
             if l["rang"] == 1:
-                desc = "Tenez bon : le classement se fige le dernier jour du mois à minuit."
+                desc = "Tenez bon : derniers paris jusqu'au dernier jour du mois, classement définitif une fois tous les paris réglés."
             else:
                 cible = next(x for x in lignes if x["rang"] == (1 if l["rang"] <= 3 else 3))
                 desc = (f"Vous êtes {_rang(l['rang'])}, à {formater_points(cible['solde'] - l['solde'])} "

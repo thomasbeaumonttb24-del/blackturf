@@ -14,7 +14,7 @@ export default function CguPage() {
   return (
     <div className="mx-auto max-w-3xl px-4 sm:px-6 py-12 space-y-8">
       <h1 className="text-2xl font-bold">Conditions Générales d&apos;Utilisation</h1>
-      <p className="text-xs text-muted-foreground">Dernière mise à jour : janvier 2026</p>
+      <p className="text-xs text-muted-foreground">Dernière mise à jour : octobre 2026</p>
 
       <section className="space-y-3">
         <h2 className="text-lg font-semibold">1. Objet</h2>
@@ -43,8 +43,9 @@ export default function CguPage() {
         <h2 className="text-lg font-semibold">3. Description du service</h2>
         <p className="text-sm text-muted-foreground">
           BlackTurf propose des prédictions hippiques générées par un ensemble de modèles d'apprentissage
-          automatique (XGBoost, LightGBM, CatBoost), la détection de paris de valeur, un outil de gestion
-          de capital et un assistant IA. Ces informations sont fournies à titre indicatif uniquement.
+          automatique (XGBoost, LightGBM, CatBoost), la détection de paris de valeur, des plans de mise
+          calculés sur votre budget, un assistant IA et le Défi du mois, concours gratuit de
+          pronostics en points dont le règlement complet figure sur la page /defi. Ces informations sont fournies à titre indicatif uniquement.
         </p>
       </section>
 

@@ -830,3 +830,70 @@ async def test_assistant_ne_confond_pas_definir_et_defi(db, monkeypatch, questio
     u = await _user(db)
     rep = await A._rule_based_answer([{"role": "user", "content": question}], db, u)
     assert (rep == "DEFI") is defi_attendu
+
+
+# ─── Règles ajoutées à la relecture du 2026-09-30 ────────────────────────────
+async def test_recompense_refusee_si_adresse_non_confirmee(db):
+    u = await _gagnant_aout(db)
+    u.email_verified = False
+    u.created_at = datetime(2026, 9, 1, tzinfo=timezone.utc)   # après la règle de confirmation
+    await db.commit()
+    with pytest.raises(defi.DefiErreur, match="non confirmée"):
+        await defi.attribuer_recompense(db, MOIS_PASSE, 1, now=FIN_AOUT)
+    u.email_verified = True
+    await db.commit()
+    r = await defi.attribuer_recompense(db, MOIS_PASSE, 1, now=FIN_AOUT)
+    assert r.statut == "applique"
+
+
+async def test_message_du_gagnant_deja_expert_sans_abonnement(db):
+    u = await _gagnant_aout(db)
+    u.plan = "expert"      # accès offert en cours, aucun abonnement payant
+    await db.commit()
+    r = await defi.attribuer_recompense(db, MOIS_PASSE, 1, now=FIN_AOUT)
+    assert r.statut == "manuel"
+    alerte = (await db.execute(select(AlerteLog).where(AlerteLog.user_id == u.user_id))).scalar_one()
+    assert "abonnement" not in alerte.payload["description"]
+
+
+async def test_compte_de_l_equipe_hors_concours(db, monkeypatch):
+    monkeypatch.setattr(defi, "EQUIPE_HORS_CONCOURS", {"fondateur@exemple.fr"})
+    u = await _user(db, email="Fondateur@exemple.fr")
+    assert defi.hors_concours(u)
+    assert not defi.hors_concours(await _user(db, email="joueur2@exemple.fr"))
+
+
+async def test_aucun_pari_avant_l_ouverture_meme_sur_une_course_du_mois_de_lancement(db, monkeypatch):
+    u = await _user(db)
+    await _course(db)
+    monkeypatch.setattr(defi, "PREMIER_MOIS", "2999-01")
+    with pytest.raises(defi.DefiErreur, match="ouvre le 1er"):
+        await defi.engager_pari(db, u, "C1", "Simple Gagnant", [3], 10)
+    # Mois de la course = mois de lancement, mais on est encore la veille.
+    monkeypatch.setattr(defi, "PREMIER_MOIS", defi.mois_de(MAINTENANT + timedelta(days=40)))
+    c = await db.get(Course, "C1")
+    c.date_heure = MAINTENANT + timedelta(days=40)
+    await db.commit()
+    with pytest.raises(defi.DefiErreur, match="ouvre le 1er"):
+        await defi.engager_pari(db, u, "C1", "Simple Gagnant", [3], 10)
+
+
+async def test_course_restee_a_venir_sans_arrivee_remboursee_apres_72_h(db):
+    u = await _user(db)
+    await _course(db)
+    p = await defi.engager_pari(db, u, "C1", "Simple Gagnant", [3], 30)
+    c = await db.get(Course, "C1")
+    c.date_heure = MAINTENANT - timedelta(hours=80)   # statut resté « a_venir »
+    await db.commit()
+    assert await defi.regler_en_attente(db) == 1
+    await db.refresh(p)
+    assert (p.statut, p.points_retour) == ("rembourse", 30.0)
+
+
+def test_quinte_bonus_4sur5_avec_detail_tronque():
+    # Détail sans la combinaison exacte du ticket (ex æquo) : le Bonus 4sur5 reste payé.
+    d = _d(e_quinte_plus=[("e-Quinté+ Ordre", 900.0, "1-2-3-4-5"), ("e-Bonus 4sur5", 12.0, "1-2-3-5"),
+                          ("e-Bonus 3", 4.0, "1-2-3")])
+    cl = [{"numero": n, "position": i + 1} for i, n in enumerate([1, 2, 3, 4, 5])]
+    r = defi.regler_ticket("Quinté+", [1, 2, 3, 4, 9], cl, {"x": 1}, 16, d, set())
+    assert r["gagne"] and r["rapport_reel"] == 12.0 and "4sur5" in r["note"]

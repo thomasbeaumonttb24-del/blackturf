@@ -152,7 +152,7 @@ export function CalculatorDemo() {
       </div>
 
       <p className="mt-2 text-[10px] text-gray-600">
-        Exemple sur une course type. Le vrai calculateur utilise les rapports PMU réels et règle vos paris à l&apos;arrivée.
+        Exemple sur une course type. Le vrai calculateur utilise les cotes et les probabilités du jour.
       </p>
     </div>
   );

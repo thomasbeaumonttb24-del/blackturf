@@ -41,13 +41,20 @@ export default function CGVPage() {
         </p>
         <ul className="space-y-1.5 text-muted-foreground list-disc list-inside">
           <li><strong>Découverte</strong> : gratuit (0&nbsp;€).</li>
-          <li><strong>Standard</strong> : 12&nbsp;€/mois ou 115&nbsp;€/an.</li>
-          <li><strong>Expert</strong> : 19&nbsp;€/mois ou 182&nbsp;€/an.</li>
+          <li><strong>Standard</strong> : 12&nbsp;€/mois ou 115,20&nbsp;€/an.</li>
+          <li><strong>Expert</strong> : 19&nbsp;€/mois ou 182,40&nbsp;€/an.</li>
         </ul>
         <p className="text-muted-foreground">
           Les tarifs en vigueur sont ceux affichés sur la page{" "}
           <a href="/tarifs" className="underline text-brand-gold-dark">Tarifs</a> au moment de la commande.
           Tout changement de tarif est sans effet sur les abonnements en cours jusqu&apos;à leur échéance.
+        </p>
+        <p className="text-muted-foreground">
+          <strong>Défi du mois.</strong> Le concours gratuit de pronostics en points est régi par son règlement
+          (page <a href="/defi" className="underline text-brand-gold-dark">Défi du mois</a>). Sa récompense
+          (30 jours de la formule Expert) n&apos;a aucune valeur monétaire et ne s&apos;échange pas contre de
+          l&apos;argent ; pour un abonné payant, elle est accordée sous forme de réduction équivalente sur ses
+          prochaines factures d&apos;abonnement.
         </p>
       </section>
 

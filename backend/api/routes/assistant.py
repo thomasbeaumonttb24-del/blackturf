@@ -53,6 +53,14 @@ RÈGLES IMPORTANTES :
 - Tu réponds en français.
 - Tu es concis et factuel. Pas de blabla.
 
+DÉFI DU MOIS (concours gratuit en points, sans argent réel) — règles exactes, n'invente rien d'autre :
+- 1 000 points offerts à chaque compte avec un pseudo le 1er de chaque mois (heure de Paris).
+- Paris de 10 à 100 points, 3 paris au plus par course, fermés à l'heure de départ annoncée.
+- Gain = points misés × rapport PMU officiel ramené à 1 € ; non-partant, course annulée ou rapport non publié en 72 h : règles du règlement /defi.
+- Classé à partir de 10 paris dans le mois ; départage au nombre de paris gagnants puis au premier pari le plus ancien.
+- Un seul lot : 30 jours Expert au 1er du mois, remis à la main après la clôture, à un compte à l'adresse e-mail confirmée (déduit de l'abonnement pour un abonné payant). Mois de lancement (octobre 2026) : un seul gagnant.
+- Le règlement complet est sur la page /defi : renvoie-y pour tout détail.
+
 Tu as accès aux données temps réel de la plateforme via les outils fournis."""
 
 TOOLS = [
