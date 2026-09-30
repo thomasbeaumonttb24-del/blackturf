@@ -20,6 +20,7 @@ import { DefiBandeau } from "@/components/defi/DefiBandeau";
 import { DefiClassementLive } from "@/components/defi/DefiClassementLive";
 import { DefiConcept } from "@/components/defi/DefiConcept";
 import { HeroStats } from "@/components/home/HeroStats";
+import { fetchPalmaresPublic } from "@/lib/seo";
 import { NewsletterForm } from "@/components/newsletter/NewsletterForm";
 
 // Le canonical n'est plus hérité de la racine (il y désignait "/" pour TOUTES les pages) :
@@ -221,8 +222,30 @@ async function fetchTrackRecord(): Promise<TrackRecord | null> {
   } catch { return null; }
 }
 
+/**
+ * Ne garde du palmarès que ce que l'accueil affiche (bandeau : 12 paris ; section :
+ * 3 records + 6 derniers) : la réponse complète (50 + 30 paris) passerait telle
+ * quelle dans le HTML, deux fois.
+ */
+function allegerPalmares(p: Record<string, unknown> | null) {
+  if (!p) return null;
+  const liste = (x: unknown) => (Array.isArray(x) ? x : []);
+  return {
+    gagnants: liste(p.gagnants).slice(0, 12),
+    top_gains: liste(p.top_gains).slice(0, 12),
+    nb_paris_gagnes: p.nb_paris_gagnes,
+    nb_courses_gagnantes: p.nb_courses_gagnantes,
+    nb_courses_reglees: p.nb_courses_reglees,
+    updated_at: p.updated_at,
+  };
+}
+
 export default async function HomePage() {
-  const tr = await fetchTrackRecord();
+  // Palmarès lu en parallèle : le bandeau défilant et la section « Palmarès en
+  // direct » sont servis remplis, au lieu d'apparaître après coup (bandeau qui
+  // surgit et pousse la page, section vide puis remplie d'un coup).
+  const [tr, palmaresBrut] = await Promise.all([fetchTrackRecord(), fetchPalmaresPublic()]);
+  const palmares = allegerPalmares(palmaresBrut);
   const FAQ = buildFaq(tr);
 
   return (
@@ -315,7 +338,7 @@ export default async function HomePage() {
         </a>
       </section>
 
-      <LiveTicker />
+      <LiveTicker initial={palmares} />
 
       {/* ═══════════ COMMENT ÇA MARCHE ═══════════ */}
       <section id="fonctionnement" className="py-24 bg-white scroll-mt-20">
@@ -460,7 +483,7 @@ export default async function HomePage() {
       </section>
 
       {/* ═══════════ PALMARÈS EN DIRECT (paris gagnés réels) ═══════════ */}
-      <LivePalmares />
+      <LivePalmares initial={palmares} />
 
       {/* ═══════════ DÉFI DU MOIS — le concept et le classement en direct ═══════════ */}
       <section id="defi" className="scroll-mt-20 bg-[#FBF8F1] py-20">

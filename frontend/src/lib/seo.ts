@@ -775,6 +775,29 @@ export async function fetchTrackRecord(): Promise<SeoTrackRecord | null> {
 }
 
 /**
+ * Palmarès public (paris gagnés, total encaissé) — pré-remplit le hero de
+ * /track-record, le bandeau défilant et la section « Palmarès en direct » de
+ * l'accueil. Sans lui, le client le recharge comme avant.
+ *
+ * Plafond de 10 s : l'endpoint met ~4 s à froid (cache Redis de 5 min expiré), et
+ * le plafond initial de 3 s renvoyait `null` à chaque régénération ISR en prod.
+ * La régénération tourne en arrière-plan : le visiteur n'attend pas ce délai.
+ */
+export async function fetchPalmaresPublic(): Promise<Record<string, unknown> | null> {
+  const lecture = (async () => {
+    try {
+      const res = await fetch(`${API}/stats/palmares-public`, { next: { revalidate: 60 } });
+      if (!res.ok) return null;
+      return (await res.json()) as Record<string, unknown>;
+    } catch {
+      return null;
+    }
+  })();
+  const plafond = new Promise<null>((resolve) => setTimeout(() => resolve(null), 10_000));
+  return Promise.race([lecture, plafond]);
+}
+
+/**
  * « 2026-08-30 » + « 2026-09-05 » → « du 30 août au 5 septembre ».
  *
  * Le mois du début est omis quand les deux dates le partagent : « du 1er au 7 mars »

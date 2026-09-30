@@ -760,7 +760,9 @@
   from { opacity: 0; transform: perspective(900px) translateY(22px) rotateX(18deg) scale(.96); }
   to   { opacity: 1; transform: perspective(900px) translateY(0) rotateX(0) scale(1); }
 }
-.tr-rise { animation: trRise .9s cubic-bezier(0.16,1,0.3,1) backwards; }
+/* 0,5 s sans délai initial : à 0,9 s + 250-580 ms de retard, la dernière carte
+   restait invisible près d'une seconde et demie après l'affichage de la page. */
+.tr-rise { animation: trRise .5s cubic-bezier(0.16,1,0.3,1) backwards; }
 
 @media (prefers-reduced-motion: reduce) {
   .tr-rise { animation: none !important; }
