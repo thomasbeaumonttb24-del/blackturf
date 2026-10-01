@@ -196,8 +196,11 @@ export function Navbar() {
 
   return (
     <nav className="sticky top-0 z-50 border-b border-[#e2e6df] bg-white/95 backdrop-blur-md">
-      <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-        <div className="flex h-16 items-center justify-between gap-3">
+      {/* Plus large que le contenu (`max-w-7xl`) : dans 1 216 px utiles, logo + 7 liens +
+          icônes + menu du compte se touchaient. La barre prend jusqu'à 1 600 px pour
+          laisser de l'air entre chaque groupe. */}
+      <div className="mx-auto max-w-[1600px] px-4 sm:px-6 lg:px-8">
+        <div className="flex h-16 items-center justify-between gap-3 xl:gap-8">
 
           {/* Logo */}
           <Link href="/" className="flex min-w-0 items-center gap-1.5 flex-shrink-0 sm:gap-2" aria-label="BlackTurf — Accueil">
@@ -222,10 +225,10 @@ export function Navbar() {
           </Link>
 
           {/* Desktop nav */}
-          {/* Liens texte à partir de `lg` seulement : entre 768 et 1 024 px ils
-              passaient sur deux lignes (« Tableau de / bord »). En dessous, le menu
-              replié les porte. */}
-          <div className="hidden lg:flex items-center gap-0.5">
+          {/* Liens texte à partir de `xl` seulement : entre 1 024 et 1 280 px, sept
+              liens + icônes + menu du compte ne tenaient qu'en se collant (2 px entre
+              deux liens, 12 px avant les icônes). En dessous, le menu replié les porte. */}
+          <div className="hidden xl:flex items-center gap-1">
             {(user ? NAV_LINKS_AUTH : NAV_LINKS_PUBLIC).map((link) => {
               const Icon = (link as { icon?: LucideIcon }).icon;
               return (
@@ -236,18 +239,18 @@ export function Navbar() {
                   aria-current={lienActif(link.href) ? "page" : undefined}
                   rel={link.prive ? "nofollow" : undefined}
                   className={cn(
-                    "relative whitespace-nowrap px-2 xl:px-3 py-2 rounded-md text-[13px] xl:text-sm font-medium transition-colors duration-150 flex items-center gap-1.5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#a47b45]",
+                    "relative flex-shrink-0 whitespace-nowrap px-3 py-2 rounded-lg text-sm font-medium transition-colors duration-150 flex items-center gap-1.5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#a47b45]",
                     lienActif(link.href)
                       ? "bg-[#f5f6f2] text-[#17231f] font-semibold"
                       : "text-gray-600 hover:bg-[#f5f6f2] hover:text-[#17231f]"
                   )}
                 >
                   {Icon && <Icon className={cn("hidden h-3.5 w-3.5", !essai && "2xl:block")} />}
-                  {/* Entre 1 024 et 1 280 px, les noms complets se chevauchaient : la
-                      forme courte (celle de la barre du bas sur téléphone) prend le
-                      relais, le nom complet revient dès qu'il y a la place. */}
-                  {/* Avec l'entrée « Défi du mois » (7 liens), les noms complets ne
-                      tiennent qu'à partir de 1 536 px : en dessous, forme courte. */}
+                  {/* Forme courte (celle de la barre du bas sur téléphone) tant que la
+                      place manque, nom complet à partir de `2xl`. Dans l'ancien
+                      conteneur de 1 216 px, les noms complets s'écrasaient les uns sur
+                      les autres (constaté le 2026-10-01) ; avec 1 536 px de barre, il
+                      reste ~50 px entre chaque groupe, quel que soit le compte. */}
                   <span className={cn(!essai && "2xl:hidden")}>{link.court}</span>
                   {!essai && <span className="hidden 2xl:inline">{link.label}</span>}
                 </Link>
@@ -256,7 +259,7 @@ export function Navbar() {
           </div>
 
           {/* Right side */}
-          <div className="flex flex-shrink-0 items-center gap-0.5 sm:gap-1.5">
+          <div className="flex flex-shrink-0 items-center gap-1 sm:gap-2">
             {/* Search button (tous) */}
             <Button
               variant="ghost"
@@ -338,17 +341,17 @@ export function Navbar() {
                 <div className="relative">
                   <button
                     onClick={() => setUserMenuOpen(!userMenuOpen)}
-                    className="flex items-center gap-1 rounded-xl border border-gray-200 bg-white px-2 py-1.5 text-sm hover:border-brand-gold/40 sm:gap-2 sm:px-3 hover:bg-brand-gold-tint/50 transition-all"
+                    className="flex flex-shrink-0 items-center gap-1.5 rounded-xl border border-gray-200 bg-white px-2 py-1.5 text-sm hover:border-brand-gold/40 sm:gap-2 sm:px-3 hover:bg-brand-gold-tint/50 transition-all"
                     aria-expanded={userMenuOpen}
                     aria-haspopup="true"
                   >
                     <div className="h-6 w-6 rounded-full bg-brand-gold-tint flex items-center justify-center ring-1 ring-brand-gold/30">
                       <User className="h-3 w-3 text-brand-gold-dark" />
                     </div>
-                    {/* Entre 1 024 et 1 280 px les liens texte occupent la barre : le
-                        prénom ne revient qu'à `xl`. Sous `lg`, le menu est replié et
-                        il y a de nouveau la place. */}
-                    <span className="hidden max-w-[9rem] truncate whitespace-nowrap sm:block lg:hidden xl:block text-gray-700 font-medium">
+                    {/* Dès `xl` les liens texte occupent la barre : le prénom ne revient
+                        qu'à 1 440 px. Sous `xl`, le menu est replié et il y a de
+                        nouveau la place. */}
+                    <span className="hidden max-w-[9rem] truncate whitespace-nowrap sm:block xl:hidden min-[1440px]:block text-gray-700 font-medium">
                       {user.prenom || user.email.split("@")[0]}
                     </span>
                     <Badge
@@ -360,8 +363,8 @@ export function Navbar() {
                           : "secondary"
                       }
                       className={cn(
-                        "hidden sm:flex lg:hidden text-[10px] px-1.5 py-0",
-                        !essai && "xl:flex"
+                        "hidden sm:flex xl:hidden text-[10px] px-1.5 py-0",
+                        !essai && "min-[1440px]:flex"
                       )}
                     >
                       {planLabel(user.plan)}
@@ -508,7 +511,7 @@ export function Navbar() {
             <Button
               variant="ghost"
               size="icon"
-              className="h-9 w-9 text-gray-600 hover:bg-gray-100 sm:h-10 sm:w-10 lg:hidden"
+              className="h-9 w-9 text-gray-600 hover:bg-gray-100 sm:h-10 sm:w-10 xl:hidden"
               onClick={() => setMenuOpen(!menuOpen)}
               aria-label={menuOpen ? "Fermer le menu" : "Ouvrir le menu"}
             >
@@ -520,7 +523,7 @@ export function Navbar() {
 
       {/* Mobile menu */}
       {menuOpen && (
-        <div className="max-h-[calc(100dvh-4rem)] overflow-y-auto border-t border-gray-100 bg-white p-4 shadow-lg lg:hidden">
+        <div className="max-h-[calc(100dvh-4rem)] overflow-y-auto border-t border-gray-100 bg-white p-4 shadow-lg xl:hidden">
           <div className="space-y-1">
           {(user ? NAV_LINKS_AUTH : NAV_LINKS_PUBLIC).map((link) => (
             <Link
