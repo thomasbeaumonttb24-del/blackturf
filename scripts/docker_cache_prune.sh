@@ -12,7 +12,7 @@ flock -n 9 || exit 0
 
 DRY="${BT_PRUNE_DRY:-0}"
 
-# ── 1. Tags de retour (avant-*, avant_*, retour-*, rollback-*)
+# ── 1. Tags de retour (avant-*, avant_*, retour-*, rollback-*, bench-*)
 # Chaque déploiement tague les cinq images (~3 Go chacune) avant de
 # reconstruire, et rien ne les retirait : le 14/09/2026, 95 tags tenaient
 # ~35 Go et le disque était remonté de 57 % à 81 % en cinq jours.
@@ -20,8 +20,16 @@ DRY="${BT_PRUNE_DRY:-0}"
 # retire ceux dont l'image a plus de MAX_AGE_DAYS jours.
 # KEEP était à 5 : aucun service n'en avait plus de 5, donc rien ne partait —
 # le 27/09/2026, 25 tags de 10 à 13 jours tenaient le disque à 81 %.
-KEEP=2
-MAX_AGE_DAYS=7
+# MAX_AGE_DAYS était à 7 : les sessions parallèles ont déployé une douzaine de
+# fois en trois jours (27-30/09), donc 12 tags par service avaient tous moins de
+# 7 jours et rien ne partait. Le 03/10/2026, 60 tags, disque à 83 %. On garde
+# les 3 plus récents par service quel que soit leur âge (le retour arrière
+# utile est le déploiement d'avant) ; au-delà, tout tag de plus de 3 jours part.
+# Le code, lui, reste dans git : un retour plus ancien = `git revert`.
+# Les tags `bench-*` (images de banc de rejeu) suivent la même règle : ils
+# n'étaient filtrés par rien et restaient indéfiniment.
+KEEP=3
+MAX_AGE_DAYS=3
 LIMITE=$(( $(date +%s) - MAX_AGE_DAYS * 86400 ))
 
 EN_SERVICE=$(docker ps -aq | xargs -r docker inspect --format '{{.Image}}' \
@@ -44,7 +52,7 @@ for repo in $(docker images --format '{{.Repository}}' | grep -E '^blackturf-' |
       docker rmi "${repo}:${tag}" >/dev/null 2>&1 && retires=$((retires + 1)) || true
     fi
   done < <(docker images "$repo" --format '{{.Tag}}	{{.ID}}	{{.CreatedAt}}' \
-             | grep -E '^(avant|retour|rollback)')
+             | grep -E '^(avant|retour|rollback|bench)')
 done
 echo "$(date -Is) tags de retour retires : ${retires}"
 
@@ -61,7 +69,16 @@ echo "$(date -Is) tags de retour retires : ${retires}"
 # 10 Go : de quoi garder le cache des couches lourdes (pip install du backend,
 # node_modules du frontend) et donc des redéploiements rapides, sans laisser le
 # cache dériver vers plusieurs dizaines de gigas.
-/usr/bin/docker builder prune --force --max-used-space 10GB
+#
+# `--max-used-space` ne retirait plus RIEN (0 octet chaque nuit fin septembre,
+# cache à 24,6 Go le 03/10/2026) ; `--reserved-space` a rendu 3 Go le même
+# jour, puis plus rien. Sans `--all`, buildkit ne considère que les entrées
+# orphelines : les couches lourdes (pip install ~2,3 Go par build) n'en font
+# jamais partie. `--all --filter until=168h` retire tout ce qu'aucun build n'a
+# réutilisé depuis 7 jours — 8,9 Go rendus le 03/10/2026 — et laisse intact le
+# cache récent, donc le déploiement suivant reste aussi rapide.
+/usr/bin/docker builder prune --force --reserved-space 10GB
+/usr/bin/docker builder prune --force --all --filter until=168h
 
 echo "$(date -Is) cache après purge : $(docker buildx du 2>/dev/null | tail -1)"
 echo "$(date -Is) disque : $(df -h / | awk 'NR==2{print $5" utilise, "$4" libres"}')"

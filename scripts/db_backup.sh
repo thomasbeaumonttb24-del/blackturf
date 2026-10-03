@@ -119,8 +119,35 @@ chmod 600 "$FILE"
 # retour etait faux. Trace dans backups/backup.log : la derniere ligne « OK » date
 # du 27/08 et porte un nom SANS `.enc`. Personne ne lit un journal qui n'affiche
 # que des avertissements de pg_dump.
-ls -1t "$DIR"/blackturf_*.sql.gz.enc "$DIR"/blackturf_*.sql.gz 2>/dev/null \
-  | tail -n +15 | xargs -r rm -f || true
+#
+# Rotation (03/10/2026) : 7 quotidiennes + 4 hebdomadaires, au lieu des 14
+# dernières. La base grossit d'environ 100 Mo par jour (prediction_snapshots) et
+# chaque sauvegarde avec elle : 14 copies de 2,5 Go tenaient 35 Go, le quart du
+# disque, et c'est ce poste qui ramenait le disque à 83 %. 7 + 4 = 11 copies au
+# plus, et l'historique remonte désormais à ~5 semaines au lieu de 2.
+# Au-delà des QUOTIDIENNES plus récentes, on garde la plus récente de chacune des
+# HEBDO semaines ISO suivantes ; le reste part. Jamais moins de 7 copies.
+QUOTIDIENNES=7
+HEBDO=4
+semaines_gardees=""
+nb_semaines=0
+rang=0
+while IFS= read -r f; do
+  rang=$((rang + 1))
+  [ "$rang" -le "$QUOTIDIENNES" ] && continue
+  jour=$(basename "$f" | sed -n 's/^blackturf_\([0-9]\{8\}\)_.*/\1/p')
+  semaine=$(date -d "$jour" +%G-%V 2>/dev/null || echo "")
+  # Nom illisible : on ne supprime pas ce qu'on ne sait pas dater.
+  [ -z "$semaine" ] && continue
+  if echo "$semaines_gardees" | grep -qx "$semaine"; then
+    rm -f "$f"
+  elif [ "$nb_semaines" -lt "$HEBDO" ]; then
+    semaines_gardees=$(printf '%s\n%s' "$semaines_gardees" "$semaine")
+    nb_semaines=$((nb_semaines + 1))
+  else
+    rm -f "$f"
+  fi
+done < <(ls -1t "$DIR"/blackturf_*.sql.gz.enc "$DIR"/blackturf_*.sql.gz 2>/dev/null || true)
 chmod 600 "$DIR"/blackturf_*.sql.gz* 2>/dev/null || true
 
 echo "OK $FILE ($(du -h "$FILE" | cut -f1), chiffre)"
