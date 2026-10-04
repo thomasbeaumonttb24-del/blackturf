@@ -3,7 +3,7 @@
 Un seul gabarit pour tous les mails envoyés aux visiteurs et aux abonnés
 (pronostic gratuit, valeurs du jour, bilan hebdomadaire, confirmations,
 compte) : bandeau logo, photo en carte, bande de titre, fenêtre du site,
-bouton orange, bloc Instagram, pied légal — en clair ET en sombre (voir
+bouton orange, bloc réseaux (Instagram, TikTok), pied légal — en clair ET en sombre (voir
 « Clair / sombre » plus bas). Chaque mail ne décrit
 que son contenu propre ; l'enveloppe, elle, ne peut plus diverger d'un mail à
 l'autre.
@@ -21,6 +21,8 @@ from typing import Optional
 SITE = "https://blackturf.fr"
 IMG = f"{SITE}/img/email"
 INSTAGRAM = "https://www.instagram.com/blackturf.fr/"
+TIKTOK = "https://www.tiktok.com/@blackturf1"
+# Mêmes comptes que RESEAUX dans frontend/src/lib/social.ts.
 # Mêmes adresses que AVIS dans frontend/src/lib/social.ts.
 AVIS_TRUSTPILOT = "https://fr.trustpilot.com/evaluate/blackturf.fr"
 AVIS_GOOGLE = "https://g.page/r/Ca-aIiYY44FdEBM/review"
@@ -361,31 +363,48 @@ def fort(t: str) -> str:
     return f'<b class="bt-te" style="color:{CLAIR["te"]}">{t}</b>'
 
 
-def bloc_instagram(accroche: str = "Les infos du jour, les coups de cœur et les arrivées, en story.") -> str:
-    """Carte claire : le dégradé de la marque reste dans le pictogramme, jamais
-    sous du texte. Ferme la carte du corps (coins bas)."""
+def _ligne_reseau(url: str, glyphe: str, nom: str, pseudo: str, accroche: str, bouton: str, separe: bool) -> str:
+    """Une ligne du bloc réseaux : pictogramme, pseudo + accroche, bouton « Suivre »."""
+    bord = f"border-top:1px solid {CLAIR['bord']};" if separe else ""
+    cl = ' class="bt-bd"' if separe else ""  # trait de séparation assombri en mode sombre
+    return f"""
+      <tr>
+        <td{cl} width="72" valign="middle" style="width:72px;padding:14px 0 14px 16px;{bord}">
+          <a href="{url}"><img src="{IMG}/{glyphe}" width="50" height="50" alt="{nom}" style="display:block;width:50px;height:50px;border:0;border-radius:14px"></a>
+        </td>
+        <td{cl} valign="middle" style="padding:14px 10px;{bord}">
+          <div class="bt-te" style="font-size:16px;line-height:21px;font-weight:800;color:{CLAIR['te']};font-family:{POLICE}">{pseudo} <span class="bt-td" style="font-size:12px;font-weight:600;color:{CLAIR['td']}">· {nom}</span></div>
+          <div class="bt-td" style="font-size:13px;line-height:19px;color:{CLAIR['td']}">{accroche}</div>
+        </td>
+        <td{cl} align="right" valign="middle" style="padding:14px 16px 14px 0;{bord}">
+          <a href="{url}" style="display:inline-block;padding:10px 14px;border-radius:12px;background-color:{bouton};color:#ffffff;font-size:13px;font-weight:800;text-decoration:none;white-space:nowrap">Suivre</a>
+        </td>
+      </tr>"""
+
+
+def bloc_reseaux(accroche: str = "Les infos du jour, les coups de cœur et les arrivées, en story.") -> str:
+    """Carte claire des réseaux de la marque (Instagram puis TikTok) : les dégradés
+    restent dans les pictogrammes, jamais sous du texte. `accroche` décrit la ligne
+    Instagram. Ferme la carte du corps (coins bas)."""
+    lignes = (
+        _ligne_reseau(INSTAGRAM, "instagram-glyph.png", "Instagram", "@blackturf.fr", accroche, "#C13584", False)
+        + _ligne_reseau(TIKTOK, "tiktok-glyph.png", "TikTok", "@blackturf1",
+                        "Le Quinté+, les arrivées et le turf expliqué, en vidéo.", "#FE2C55", True)
+    )
     return f"""
   <tr><td bgcolor="{CLAIR['fd']}" class="bt-fd px" style="background:{CLAIR['fd']};padding:0 20px 28px;border-radius:0 0 22px 22px">
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" bgcolor="{CLAIR['ca']}" class="bt-ca" style="width:100%;border-collapse:separate;border-radius:18px;
-      background:{CLAIR['ca']};border:1px solid {CLAIR['bord']}">
-      <tr>
-        <td width="72" valign="middle" style="width:72px;padding:14px 0 14px 16px">
-          <a href="{INSTAGRAM}"><img src="{IMG}/instagram-glyph.png" width="50" height="50" alt="Instagram" style="display:block;width:50px;height:50px;border:0;border-radius:14px"></a>
-        </td>
-        <td valign="middle" style="padding:14px 10px">
-          <div class="bt-te" style="font-size:16px;line-height:21px;font-weight:800;color:{CLAIR['te']};font-family:{POLICE}">@blackturf.fr</div>
-          <div class="bt-td" style="font-size:13px;line-height:19px;color:{CLAIR['td']}">{accroche}</div>
-        </td>
-        <td align="right" valign="middle" style="padding:14px 16px 14px 0">
-          <a href="{INSTAGRAM}" style="display:inline-block;padding:10px 14px;border-radius:12px;background-color:#C13584;color:#ffffff;font-size:13px;font-weight:800;text-decoration:none;white-space:nowrap">Suivre</a>
-        </td>
-      </tr>
+      background:{CLAIR['ca']};border:1px solid {CLAIR['bord']}">{lignes}
     </table>
   </td></tr>"""
 
 
+# Nom historique, appelé par tous les gabarits : le bloc montre désormais les deux comptes.
+bloc_instagram = bloc_reseaux
+
+
 def fermeture() -> str:
-    """Arrondi bas de la carte du corps, pour les mails sans bloc Instagram."""
+    """Arrondi bas de la carte du corps, pour les mails sans bloc réseaux."""
     return (
         f'<tr><td bgcolor="{CLAIR["fd"]}" class="bt-fd" style="background:{CLAIR["fd"]};height:8px;line-height:8px;font-size:0;'
         f'border-radius:0 0 22px 22px">&nbsp;</td></tr>'
@@ -419,7 +438,7 @@ def pied(mention: str, responsable: str = RESPONSABLE, avis: bool = True) -> str
     liens = '<span class="bt-td" style="color:#A8A08F">&nbsp;·&nbsp;</span>'.join(
         lien_or(t, u, souligne=False) for t, u in [
             ("Courses du jour", f"{SITE}/programme"), ("Value bets", f"{SITE}/value-bets"),
-            ("Palmarès", f"{SITE}/track-record"), ("Instagram", INSTAGRAM)])
+            ("Palmarès", f"{SITE}/track-record"), ("Instagram", INSTAGRAM), ("TikTok", TIKTOK)])
     return f"""
   <tr><td style="padding:26px 20px 0;text-align:center">
     {bloc_avis() if avis else ""}

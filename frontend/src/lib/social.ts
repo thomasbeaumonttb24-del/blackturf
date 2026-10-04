@@ -16,6 +16,11 @@ export const RESEAUX = [
     pseudo: "@blackturf.fr",
     url: "https://www.instagram.com/blackturf.fr/",
   },
+  {
+    nom: "TikTok",
+    pseudo: "@blackturf1",
+    url: "https://www.tiktok.com/@blackturf1",
+  },
 ] as const;
 
 /**
@@ -46,3 +51,4 @@ export const SAME_AS: string[] = [
 ];
 
 export const INSTAGRAM = RESEAUX[0];
+export const TIKTOK = RESEAUX[1];

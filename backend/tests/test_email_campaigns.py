@@ -223,6 +223,8 @@ def test_render_escapes_and_limits_email_size():
     assert "★★★★" in html and "Niveau 4/4" in html
     assert "hero-valeurs.jpg" in html and "Photo d’illustration" in html
     assert "img/email/instagram-glyph.png" in html
+    # les deux comptes de la marque, dans le bloc ET dans les liens du pied
+    assert html.count("tiktok.com/@blackturf1") >= 3 and "img/email/tiktok-glyph.png" in html
     assert "https://example.com/unsub" in plain
 
 

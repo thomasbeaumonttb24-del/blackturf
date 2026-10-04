@@ -1,7 +1,7 @@
 import Link from "next/link";
 import Image from "next/image";
 import { Mail } from "lucide-react";
-import { AVIS, INSTAGRAM } from "@/lib/social";
+import { AVIS, INSTAGRAM, TIKTOK } from "@/lib/social";
 import { RUBRIQUES as R } from "@/lib/navigation";
 import { TrustpilotAvis } from "./TrustpilotAvis";
 
@@ -67,7 +67,7 @@ const LEGAL = [
   { href: "/cgv", label: "CGV" },
 ];
 
-/** Bouton blanc à logo, commun à Google, Instagram et au contact. */
+/** Bouton blanc à logo, commun à Google, Instagram, TikTok et au contact. */
 const BOUTON_LOGO =
   "inline-flex items-center gap-2.5 rounded-lg border bg-white px-4 text-sm text-[#191919] transition-shadow hover:shadow-md";
 
@@ -128,8 +128,8 @@ export function Footer() {
 
             <div className="mt-5 flex flex-wrap gap-2.5">
               {/*
-                Instagram n'était lié depuis AUCUNE page du site : le pied de page est le
-                seul endroit qui donne un lien depuis chaque page.
+                Instagram et TikTok n'étaient liés depuis AUCUNE page du site : le pied de
+                page est le seul endroit qui donne un lien depuis chaque page.
 
                 `rel="me"` déclare que ce profil appartient à la même entité que le site.
                 C'est le pendant du `sameAs` du balisage : les deux se répondent, et un
@@ -144,6 +144,17 @@ export function Footer() {
                 <Image src="/img/email/instagram-glyph.png" alt="" width={22} height={22} className="rounded-md" />
                 <span>
                   Suivre <strong>{INSTAGRAM.pseudo}</strong>
+                </span>
+              </a>
+              <a
+                href={TIKTOK.url}
+                target="_blank"
+                rel="me noopener noreferrer"
+                className={`${BOUTON_LOGO} h-11 border-gray-200`}
+              >
+                <Image src="/img/logos/tiktok.svg" alt="" width={22} height={22} className="rounded-md" />
+                <span>
+                  Suivre <strong>{TIKTOK.pseudo}</strong>
                 </span>
               </a>
               <a href="mailto:contact@blackturf.fr" className={`${BOUTON_LOGO} h-11 border-gray-200`}>
