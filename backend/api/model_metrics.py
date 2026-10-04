@@ -84,7 +84,8 @@ def plausible_brier(brier: float | None) -> float | None:
     return None
 
 
-async def real_model_metrics(db: AsyncSession, mv: ModelVersion | None) -> dict:
+async def real_model_metrics(db: AsyncSession, mv: ModelVersion | None, *,
+                             with_coverage: bool = False) -> dict:
     """
     Métriques fiables du modèle pour affichage.
 
@@ -99,18 +100,30 @@ async def real_model_metrics(db: AsyncSession, mv: ModelVersion | None) -> dict:
     # précision « réelle » avec du hindsight. created_at n'est jamais réécrit par les
     # re-prédictions (on_conflict ne le touche pas) → garde fiable. En cas d'échec,
     # on échoue fermé (0 observation), jamais vers un comptage brut contaminable.
+    #
+    # Lu sur `prediction_snapshots` directement, pas sur la vue
+    # `prediction_evaluation` : la vue matérialise un DISTINCT ON sur tous les
+    # snapshots puis une UNION avec `predictions` — 7 à 19 s en prod (04/10),
+    # au-delà du délai de 15 s du client, et la page Système restait en
+    # squelette. Les lignes rejouables de la vue ne viennent QUE des snapshots
+    # (la branche legacy est `is_replayable = false`) : la garde est la même,
+    # non-partants exclus comme dans la vue. 0,6 s, même décompte à une course près
+    # (la vue ne regarde que le DERNIER snapshot de chaque partant).
     from sqlalchemy import text as _text
     try:
         _guard = """
             FROM race_learning_log rll
             WHERE EXISTS (
-                SELECT 1 FROM prediction_evaluation pr
-                JOIN courses c ON c.course_id = pr.course_id
-                WHERE pr.course_id = rll.course_id
+                SELECT 1 FROM prediction_snapshots ps
+                JOIN courses c ON c.course_id = ps.course_id
+                LEFT JOIN participations pa ON pa.participation_id = ps.participation_id
+                WHERE ps.course_id = rll.course_id
+                  AND ps.is_pre_course = true
+                  AND ps.is_replayable = true
                   AND c.date_heure IS NOT NULL
-                  AND pr.created_at IS NOT NULL
-                  AND pr.created_at < c.date_heure
-                  AND pr.is_replayable = true
+                  AND ps.observed_at IS NOT NULL
+                  AND ps.observed_at < c.date_heure
+                  AND COALESCE(pa.non_partant, false) = false
             )
         """
         rll_total = (await db.execute(_text(f"SELECT count(*) {_guard}"))).scalar() or 0
@@ -127,18 +140,22 @@ async def real_model_metrics(db: AsyncSession, mv: ModelVersion | None) -> dict:
         rll_total = 0
         rll_top3 = 0
 
-    try:
-        from ml.prediction_evaluation import evaluation_coverage
-        prediction_data_quality = await evaluation_coverage(db)
-    except Exception as e:  # noqa: BLE001
-        await desempoisonner(db)
-        log.warning("model_metrics.coverage_indisponible", err=str(e)[:200])
-        prediction_data_quality = {
-            "n_total": 0, "n_replayable": 0, "n_legacy": 0,
-            "coverage_pct": 0.0, "courses_total": 0,
-            "courses_replayable": 0, "first_replayable_at": None,
-            "last_replayable_at": None,
-        }
+    # Couverture du read-model : un parcours complet de la vue (≈ 8 s). Aucun
+    # écran ne la lit ; seuls les scripts d'audit la demandent.
+    prediction_data_quality = None
+    if with_coverage:
+        try:
+            from ml.prediction_evaluation import evaluation_coverage
+            prediction_data_quality = await evaluation_coverage(db)
+        except Exception as e:  # noqa: BLE001
+            await desempoisonner(db)
+            log.warning("model_metrics.coverage_indisponible", err=str(e)[:200])
+            prediction_data_quality = {
+                "n_total": 0, "n_replayable": 0, "n_legacy": 0,
+                "coverage_pct": 0.0, "courses_total": 0,
+                "courses_replayable": 0, "first_replayable_at": None,
+                "last_replayable_at": None,
+            }
 
     # AUC crédible (ou None). Sert aussi de garde-fou : si le modèle actif n'est
     # pas crédible (AUC hors [0.5,1]), sa précision observée n'est pas représentative

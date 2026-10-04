@@ -21,7 +21,7 @@ import {
 import { cn } from "@/lib/utils";
 import { Panneau, depuis } from "../ui";
 import { incidentsPaiement, useAbonnements, useDashboard, useErreurs, useScrapers } from "../data";
-import { MOUVEMENT_LABELS, scraperSain } from "../types";
+import { MOUVEMENT_LABELS, STATUT_SOURCE_LABELS, scraperSain } from "../types";
 
 /** Au-delà, un modèle « actif » décrit un état du monde qui n'existe plus :
  *  le ré-entraînement tourne chaque nuit, deux nuits muettes sont une panne. */
@@ -113,10 +113,10 @@ export default function BandeauAlertes() {
       cle: "scrapers",
       gravite: "alerte",
       icone: Radio,
-      titre: `${ko.length} scraper${ko.length > 1 ? "s" : ""} en échec`,
-      detail: ko.map(([nom, s]) => `${nom} (${s.statut})`).join(" · "),
+      titre: `${ko.length} source${ko.length > 1 ? "s" : ""} de données en défaut`,
+      detail: ko.map(([nom, s]) => `${s.libelle ?? nom} (${STATUT_SOURCE_LABELS[s.statut] ?? s.statut})`).join(" · "),
       href: "/admin/systeme",
-      lienLabel: "Voir les scrapers",
+      lienLabel: "Voir les sources",
     });
   }
 

@@ -1,7 +1,7 @@
 """Monitoring centralisé des erreurs runtime du site.
 
 Capture les exceptions NON gérées de l'API (vrais 500 + traceback) dans la table
-`system_errors`, et agrège les échecs de scrapers (`scrape_log.statut='error'`) pour
+`system_errors`, et agrège les échecs de scrapers (`scrape_log.statut='erreur'`) pour
 les exposer EN LIVE dans le back-office → l'admin identifie une erreur réelle dès
 qu'elle survient, au lieu d'un « 0 ✓OK » trompeur.
 
@@ -129,7 +129,7 @@ async def error_count(session: AsyncSession, hours: int = 24) -> int:
         n_sys = 0
     try:
         n_scrape = (await session.execute(text(
-            "SELECT COUNT(*) FROM scrape_log WHERE statut = 'error' "
+            "SELECT COUNT(*) FROM scrape_log WHERE statut IN ('erreur', 'error') "
             "AND created_at >= now() - (:h * INTERVAL '1 hour')"), {"h": hours})).scalar() or 0
     except Exception:
         await desempoisonner(session)
@@ -142,7 +142,10 @@ async def recent_errors(session: AsyncSession, hours: int = 72, limit: int = 50)
     out: list[dict] = []
     try:
         await _ensure(session)
-        # Fenêtre lue sur la DERNIÈRE occurrence, pas sur la première : une
+        # Une erreur NON résolue reste listée quel que soit son âge : avant le
+        # 04/10, une exception Stripe du 19/09 jamais traitée sortait de la
+        # fenêtre de 72 h et disparaissait de l'écran sans avoir été lue.
+        # Pour les résolues, fenêtre lue sur la DERNIÈRE occurrence. Une
         # anomalie ouverte depuis quatre jours et toujours active doit rester
         # affichée. La borner sur `created_at` la ferait disparaître de la liste
         # précisément parce qu'elle dure — l'inverse de ce qu'on veut voir.
@@ -150,7 +153,8 @@ async def recent_errors(session: AsyncSession, hours: int = 72, limit: int = 50)
             "SELECT id, created_at, source, level, message, detail, endpoint, resolved, "
             "       occurrences, coalesce(derniere_occurrence, created_at) AS derniere "
             "FROM system_errors "
-            "WHERE coalesce(derniere_occurrence, created_at) >= now() - (:h * INTERVAL '1 hour') "
+            "WHERE resolved = false "
+            "   OR coalesce(derniere_occurrence, created_at) >= now() - (:h * INTERVAL '1 hour') "
             "ORDER BY coalesce(derniere_occurrence, created_at) DESC LIMIT :lim"),
             {"h": hours, "lim": limit})).all()
         for r in rows:
@@ -166,7 +170,7 @@ async def recent_errors(session: AsyncSession, hours: int = 72, limit: int = 50)
     try:
         rows = (await session.execute(text(
             "SELECT source, created_at, erreur FROM scrape_log "
-            "WHERE statut = 'error' AND erreur IS NOT NULL "
+            "WHERE statut IN ('erreur', 'error') AND erreur IS NOT NULL "
             "AND created_at >= now() - (:h * INTERVAL '1 hour') "
             "ORDER BY created_at DESC LIMIT :lim"), {"h": hours, "lim": limit})).all()
         for r in rows:

@@ -154,7 +154,7 @@ async def test_roi_aberrant_masque(db):
 async def test_precision_reelle_observee(db):
     """Précision = ratio réel race_learning_log, pas la métadonnée train (0.0)."""
     await _add_rll(db, n_total=77, n_top3=54)  # 54/77 ≈ 0.7013
-    out = await real_model_metrics(db, _mv(roi_simule=6.029, precision_top3=0.0))
+    out = await real_model_metrics(db, _mv(roi_simule=6.029, precision_top3=0.0), with_coverage=True)
     assert out["precision_top3"] == pytest.approx(54 / 77, abs=1e-4)
     assert out["nb_courses_evaluees"] == 77
     assert out["prediction_data_quality"]["n_replayable"] == 77

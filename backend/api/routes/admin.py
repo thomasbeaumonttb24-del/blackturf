@@ -13,7 +13,7 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, desc, and_, or_, case, text, delete, update
 
-from api.model_metrics import plausible_roi, real_model_metrics
+from api.model_metrics import real_model_metrics
 from api.routes.auth import require_admin
 from db.database import get_db
 from db.models import (
@@ -651,45 +651,100 @@ async def list_models(
     db: AsyncSession = Depends(get_db),
     _=Depends(require_admin),
 ):
+    """Les 20 dernières versions, chacune avec DEUX jeux de mesures qu'on ne
+    mélange pas :
+
+    - `hold_out` : mesuré à l'entraînement, sur des courses tenues à l'écart.
+      Seul jeu disponible pour toutes les versions ; `rank_auc` face à
+      `market_rank_auc` (la cote, sur le même hold-out) dit si le modèle classe
+      mieux que le marché.
+    - `en_course` : ce que la version a RÉELLEMENT fait pendant qu'elle servait.
+      Chaque course analysée (`race_learning_log`) est attribuée à la version du
+      dernier snapshot pris AVANT le départ — jamais un pronostic recalculé après
+      coup. Échantillon de quelques dizaines de courses par version : le nombre
+      est renvoyé avec le taux, l'écran ne publie pas l'un sans l'autre.
+
+    Le ROI simulé n'est plus renvoyé : mesuré dans l'échantillon d'entraînement,
+    il annonçait +13 % quand les plans réglés perdent de l'argent. Le ROI réel
+    vit sur la page Algorithme, par plan et par type de pari.
+
+    `fichier_disponible` : seules les dernières versions gardent leur pickle sur
+    le volume ; « Déployer » une version purgée finissait en 404.
+    """
+    from pathlib import Path
+    from api.config import get_settings
+
     rows = (await db.execute(
         select(ModelVersion).order_by(desc(ModelVersion.version_num)).limit(20)
     )).scalars().all()
 
-    def _roi(m: ModelVersion) -> float | None:
-        # Modèle ACTIF → ROI RÉEL observé (pronos réglés) = le seul honnête. Pour les
-        # archivés, la sim de train est masquée si hors plage plausible (in-sample).
-        if m.est_actif and active_real.get("roi_reel") is not None:
-            return round(float(active_real["roi_reel"]), 4)
-        roi = plausible_roi(m.roi_simule)
-        return round(roi, 4) if roi is not None else None
+    en_course: dict[str, dict] = {}
+    try:
+        res = await db.execute(text("""
+            SELECT d.model_version_id AS vid,
+                   count(*) AS n,
+                   avg(CASE WHEN r.gagnant_rang_predit <= 3 THEN 1.0 ELSE 0.0 END) AS top3,
+                   avg(CASE WHEN r.gagnant_rang_predit = 1 THEN 1.0 ELSE 0.0 END) AS top1,
+                   avg(r.brier_score) AS brier,
+                   min(c.date_heure) AS debut,
+                   max(c.date_heure) AS fin
+            FROM race_learning_log r
+            JOIN courses c ON c.course_id = r.course_id
+            CROSS JOIN LATERAL (
+                SELECT ps.model_version_id
+                FROM prediction_snapshots ps
+                WHERE ps.course_id = r.course_id
+                  AND ps.is_pre_course = true
+                  AND ps.is_replayable = true
+                  AND ps.observed_at < c.date_heure
+                ORDER BY ps.observed_at DESC
+                LIMIT 1
+            ) d
+            WHERE r.gagnant_rang_predit IS NOT NULL
+              AND d.model_version_id = ANY(:ids)
+            GROUP BY d.model_version_id
+        """), {"ids": [m.version_id for m in rows]})
+        for r in res:
+            en_course[r.vid] = {
+                "n_courses": int(r.n),
+                "top3": round(float(r.top3), 4) if r.top3 is not None else None,
+                "top1": round(float(r.top1), 4) if r.top1 is not None else None,
+                "brier": round(float(r.brier), 4) if r.brier is not None else None,
+                "debut": r.debut,
+                "fin": r.fin,
+            }
+    except Exception as e:  # noqa: BLE001
+        # SQLite (tests) ne connaît ni LATERAL ni ANY : on publie le hold-out
+        # seul plutôt que de casser l'écran.
+        from db.database import desempoisonner
+        await desempoisonner(db)
+        log.warning("admin.models.en_course_indisponible", err=str(e)[:200])
 
-    # Top-3 RÉEL observé (race_learning_log) pour le modèle ACTIF : les métadonnées de
-    # train stockent souvent 0 (top-3 non calculé sur le holdout avant le fix). L'observé
-    # n'est attribuable qu'au modèle actif (race_learning_log n'a pas de version_id) → pour
-    # les versions archivées on renvoie la valeur stockée si >0, sinon null (affiché « — »,
-    # jamais un « 0.0% » trompeur).
-    active_mv = next((m for m in rows if m.est_actif), None)
-    active_real = await real_model_metrics(db, active_mv) if active_mv else {}
+    dossier = Path(get_settings().models_path)
 
-    def _top3(m: ModelVersion) -> float | None:
-        if m.est_actif and active_real.get("precision_top3") is not None:
-            return round(float(active_real["precision_top3"]), 4)
-        return round(m.precision_top3, 4) if (m.precision_top3 or 0) > 0 else None
+    def _r(x, n=4):
+        return round(float(x), n) if x is not None else None
 
     return [
         {
             "version_id": m.version_id,
             "version_num": m.version_num,
-            "auc_roc": round(m.auc_roc, 4),
-            "brier_score": round(m.brier_score, 4),
-            "precision_top3": _top3(m),
-            "roi_simule": _roi(m),
-            "walk_forward_auc": round(m.walk_forward_auc, 4) if m.walk_forward_auc else None,
-            "walk_forward_variance": round(m.walk_forward_variance, 6) if m.walk_forward_variance else None,
+            "created_at": m.created_at,
+            "train_fin": m.train_fin,
             "nb_courses_train": m.nb_courses_train,
             "est_actif": m.est_actif,
             "est_rollback": m.est_rollback,
-            "created_at": m.created_at,
+            "fichier_disponible": (dossier / f"model_v{m.version_num:04d}.pkl").exists(),
+            "auc_roc": _r(m.auc_roc),
+            "brier_score": _r(m.brier_score),
+            # 0 = top-3 non calculé (anciens entraînements), jamais « 0 % ».
+            "precision_top3": _r(m.precision_top3) if (m.precision_top3 or 0) > 0 else None,
+            "walk_forward_auc": _r(m.walk_forward_auc) if m.walk_forward_auc else None,
+            "walk_forward_variance": _r(m.walk_forward_variance, 6) if m.walk_forward_variance else None,
+            "rank_auc": _r(m.rank_auc),
+            "market_rank_auc": _r(m.market_rank_auc),
+            "rank_delta_market": _r(m.rank_delta_market),
+            "en_course": en_course.get(m.version_id),
         }
         for m in rows
     ]
@@ -782,15 +837,90 @@ async def scraper_logs(
     ]
 
 
+# Cadence attendue par source (minutes) : au-delà, la source est EN RETARD.
+# Tirée des intervalles de `scraper/orchestrator.py` (× SCRAPER_INTERVAL_MULTIPLIER
+# en prod) et de ce qu'on observe sur 24 h (04/10). `None` = pas de cadence
+# régulière : `associations` relance à chaque redémarrage du conteneur.
+_SOURCES_SCRAPER = {
+    "pmu":          {"libelle": "PMU — programme et cotes", "retard_min": 30,
+                     "role": "Programme, partants et cotes PMU. Source critique."},
+    "resultats":    {"libelle": "Arrivées PMU", "retard_min": 30,
+                     "role": "Arrivées et rapports officiels, pour régler pronostics et plans."},
+    "pool_pmu":     {"libelle": "Masses d'enjeux PMU", "retard_min": 45,
+                     "role": "Enjeux par cheval (argent placé), signal « smart money »."},
+    "letrot":       {"libelle": "LeTrot", "retard_min": 120,
+                     "role": "Fiches des trotteurs (gains, records, déferrage)."},
+    "paris_turf":   {"libelle": "Paris-Turf", "retard_min": 180,
+                     "role": "Pronostics de la presse."},
+    "associations": {"libelle": "Associations jockey × entraîneur", "retard_min": None,
+                     "role": "Calcul interne, sans site extérieur. Relancé au démarrage du conteneur."},
+}
+# Producteurs de cotes qui tournent HORS Docker (services systemd du serveur) et
+# n'écrivent jamais dans `scrape_log` : leur seul témoin est la date de la
+# dernière cote qu'ils ont posée dans `cotes_bookmakers`.
+_SOURCES_COTES = {
+    "unibet":           {"libelle": "Cotes Unibet (démon ZEturf)",
+                         "role": "Cote Unibet/ZEturf, lue sur zeturf.fr."},
+    "geny":             {"libelle": "Cotes Genybet (démon)",
+                         "role": "Cote Genybet. Source jugée peu fiable pour le modèle."},
+    "bet365":           {"libelle": "Cotes bet365 (oddschecker)",
+                         "role": "Cote bet365, via oddschecker."},
+    "ladbrokes":        {"libelle": "Cotes Ladbrokes (oddschecker)",
+                         "role": "Cote Ladbrokes, via oddschecker."},
+    "betfair_exchange": {"libelle": "Cotes Betfair Exchange (oddschecker)",
+                         "role": "Cote de bourse Betfair, via oddschecker."},
+}
+_RETARD_COTES_MIN = 30
+# Pourquoi une source historique ne tourne plus (cf. orchestrator.py, 18/08).
+_RAISONS_ARRET = {
+    "geny": "geny.com refuse l'accès (403). Les cotes Genybet arrivent par le démon dédié.",
+    "betclic": "Le site répond 403 « Accès refusé ».",
+    "winamax": "La rubrique courses hippiques a disparu de la page.",
+    "unibet": "unibet.fr/turf redirige vers ZEturf : couvert par le démon ZEturf.",
+    "zeturf": "Remplacé par le démon ZEturf (cotes rangées sous « unibet »).",
+    "turfoo": "Écrasait de bonnes statistiques par des zéros.",
+    "france_galop": "Arrêté avec les sources protégées (18/08).",
+    "racing_post": "Arrêté avec les sources protégées (18/08).",
+    "betfair": "Scraper supprimé le 06/06 (site bloqué en France). Cotes Betfair via oddschecker.",
+}
+
+
 @router.get("/scraper/status")
 async def scraper_status(
     db: AsyncSession = Depends(get_db),
     _=Depends(require_admin),
 ):
-    """Dernier scrape par source."""
-    from sqlalchemy import text
-    # DISTINCT ON est PostgreSQL uniquement → ROW_NUMBER() OVER PARTITION compatible SQLite + PG
-    rows = await db.execute(text("""
+    """Santé RÉELLE de chaque source de données.
+
+    Le dernier statut de `scrape_log` ne suffisait pas : Betfair, muet depuis le
+    06/06, s'affichait « ok » parce que sa dernière ligne l'était, et l'écran
+    annonçait « 14/14 en service ». Le verdict (`statut`) se calcule ici, une
+    fois, à partir de trois faits :
+
+    - la source est-elle coupée exprès (`SCRAPER_DISABLED_SOURCES`, ou retirée
+      du code) → `desactivee`, jamais une alerte ;
+    - sa dernière exécution est-elle plus vieille que sa cadence attendue →
+      `en_retard`. Sauf s'il n'y a aucune course entre H−1 et H+3 : une source
+      de cotes qui se tait la nuit est `au_repos`, pas en panne ;
+    - sur 24 h, a-t-elle échoué (`erreur`) ou réussi sans rien ramener (`vide`).
+
+    Les producteurs de cotes hors Docker (démons systemd) n'écrivent pas dans
+    `scrape_log` : ils sont lus dans `cotes_bookmakers`, clé `cotes:<source>`.
+    """
+    import os
+    maintenant = datetime.now(timezone.utc)
+    depuis_24h = maintenant - timedelta(hours=24)
+    desactivees = {s.strip().lower() for s in
+                   os.getenv("SCRAPER_DISABLED_SOURCES", "").split(",") if s.strip()}
+
+    courses_proches = (await db.execute(
+        select(func.count(Course.course_id)).where(and_(
+            Course.date_heure >= maintenant - timedelta(hours=1),
+            Course.date_heure <= maintenant + timedelta(hours=3),
+        ))
+    )).scalar() or 0
+
+    derniers = {r.source: r for r in (await db.execute(text("""
         SELECT source, statut, created_at, duree_ms, erreur
         FROM (
             SELECT source, statut, created_at, duree_ms, erreur,
@@ -798,13 +928,115 @@ async def scraper_status(
             FROM scrape_log
         ) sub
         WHERE rn = 1
-    """))
-    return {r.source: {
-        "statut": r.statut,
-        "derniere_maj": r.created_at,
-        "duree_ms": r.duree_ms,
-        "erreur": r.erreur,
-    } for r in rows}
+    """))).all()}
+    jour = {r.source: r for r in (await db.execute(text("""
+        SELECT source,
+               count(*) AS n,
+               SUM(CASE WHEN statut = 'ok' THEN 1 ELSE 0 END) AS n_ok,
+               SUM(CASE WHEN statut = 'ok'
+                         AND (COALESCE(nb_partants, 0) > 0 OR COALESCE(nb_courses, 0) > 0)
+                        THEN 1 ELSE 0 END) AS n_donnees
+        FROM scrape_log
+        WHERE created_at >= :depuis
+        GROUP BY source
+    """), {"depuis": depuis_24h})).all()}
+
+    def _minutes(dt) -> float | None:
+        if dt is None:
+            return None
+        if isinstance(dt, str):
+            dt = datetime.fromisoformat(dt)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return (maintenant - dt).total_seconds() / 60
+
+    out: dict[str, dict] = {}
+
+    for source in sorted(set(derniers) | set(_SOURCES_SCRAPER)):
+        meta = _SOURCES_SCRAPER.get(source)
+        d = derniers.get(source)
+        j = jour.get(source)
+        n = int(j.n) if j else 0
+        n_ok = int(j.n_ok or 0) if j else 0
+        n_donnees = int(j.n_donnees or 0) if j else 0
+        age = _minutes(d.created_at if d else None)
+        retard = meta["retard_min"] if meta else None
+        raison = None
+        if source in desactivees or (meta is None and source in _RAISONS_ARRET):
+            statut = "desactivee"
+            raison = _RAISONS_ARRET.get(source, "Listée dans SCRAPER_DISABLED_SOURCES.")
+        elif meta is None:
+            # Écrit dans scrape_log, ni attendue ni déclarée coupée : à classer.
+            statut = "inconnue" if (age is None or age > 24 * 60) else "ok"
+        elif d is None:
+            statut = "en_retard"
+        elif retard is not None and age is not None and age > retard:
+            statut = "en_retard" if (courses_proches or retard >= 120) else "au_repos"
+        elif n and n_ok == 0:
+            statut = "erreur"
+        elif n_ok and n_donnees == 0:
+            statut = "vide"
+        else:
+            statut = "ok"
+        out[source] = {
+            "type": "scraper",
+            "libelle": meta["libelle"] if meta else source,
+            "role": meta["role"] if meta else None,
+            "statut": statut,
+            "raison_arret": raison,
+            "derniere_maj": d.created_at if d else None,
+            "duree_ms": d.duree_ms if d else None,
+            "erreur": d.erreur if d and d.statut != "ok" else None,
+            "retard_max_min": retard,
+            "n_24h": n,
+            "n_ok_24h": n_ok,
+            "n_avec_donnees_24h": n_donnees,
+        }
+
+    # Cotes posées par les démons, bornées aux courses de J−2 à J+2 : l'index
+    # par course évite de parcourir les 7,6 M lignes de la table.
+    try:
+        cotes = {r.source: r for r in (await db.execute(text("""
+            SELECT cb.source,
+                   max(cb.scraped_at) AS dernier,
+                   SUM(CASE WHEN cb.scraped_at >= :depuis THEN 1 ELSE 0 END) AS n_24h,
+                   count(DISTINCT CASE WHEN cb.scraped_at >= :depuis
+                                       THEN cb.participation_id END) AS partants
+            FROM courses c
+            JOIN cotes_bookmakers cb ON cb.course_id = c.course_id
+            WHERE c.date_heure >= :bas AND c.date_heure <= :haut
+            GROUP BY cb.source
+        """), {"depuis": depuis_24h, "bas": maintenant - timedelta(days=2),
+               "haut": maintenant + timedelta(days=2)})).all()}
+    except Exception as e:  # noqa: BLE001
+        from db.database import desempoisonner
+        await desempoisonner(db)
+        log.warning("admin.scraper_status.cotes_indisponibles", err=str(e)[:200])
+        cotes = {}
+
+    for source, meta in _SOURCES_COTES.items():
+        r = cotes.get(source)
+        age = _minutes(r.dernier if r else None)
+        if age is not None and age <= _RETARD_COTES_MIN:
+            statut = "ok"
+        else:
+            statut = "en_retard" if courses_proches else "au_repos"
+        out[f"cotes:{source}"] = {
+            "type": "cotes",
+            "libelle": meta["libelle"],
+            "role": meta["role"],
+            "statut": statut,
+            "raison_arret": None,
+            "derniere_maj": r.dernier if r else None,
+            "duree_ms": None,
+            "erreur": None,
+            "retard_max_min": _RETARD_COTES_MIN,
+            "n_24h": int(r.n_24h or 0) if r else 0,
+            "n_ok_24h": None,
+            "n_avec_donnees_24h": None,
+            "partants_cotes_24h": int(r.partants or 0) if r else 0,
+        }
+    return out
 
 
 # ─────────────────────────────────────────────

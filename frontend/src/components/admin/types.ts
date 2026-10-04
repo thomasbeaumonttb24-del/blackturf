@@ -13,26 +13,51 @@ export interface DashboardData {
     version: number | null;
     auc_roc: number | null;
     precision_top3: number | null;
+    nb_courses_evaluees?: number;
     trained_at: string | null;
   };
   courses_24h: number;
   alertes_erreur: number;
 }
 
+/** Ce qu'une version a RÉELLEMENT fait pendant qu'elle servait : courses
+ *  analysées attribuées au dernier snapshot pris avant le départ. */
+export interface ModelEnCourse {
+  n_courses: number;
+  /** Part des courses où le gagnant figurait dans le top-3 prédit (0..1). */
+  top3: number | null;
+  top1: number | null;
+  /** Brier top-3 par partant, moyenné par course — même définition qu'à l'entraînement. */
+  brier: number | null;
+  debut: string | null;
+  fin: string | null;
+}
+
 export interface ModelVersion {
+  version_id: string;
   version_num: number;
-  auc_roc: number;
-  brier_score: number;
-  precision_top3: number | null;
-  roi_simule: number | null;
-  walk_forward_auc: number | null;
-  walk_forward_variance: number | null;
+  created_at: string;
+  /** Départ de la dernière course apprise. */
+  train_fin: string | null;
   /** Nombre de PARTANTS d'entraînement (~9,3 par course), pas de courses :
    *  la colonne SQL porte ce nom depuis la migration 0001. */
   nb_courses_train: number;
   est_actif: boolean;
   est_rollback: boolean;
-  created_at: string;
+  /** Le pickle est encore sur le volume : seules les dernières versions le gardent. */
+  fichier_disponible: boolean;
+  // ── hold-out d'entraînement ──
+  auc_roc: number | null;
+  brier_score: number | null;
+  precision_top3: number | null;
+  walk_forward_auc: number | null;
+  walk_forward_variance: number | null;
+  /** AUC intra-course du modèle, et celle du classement par la cote sur les mêmes courses. */
+  rank_auc: number | null;
+  market_rank_auc: number | null;
+  rank_delta_market: number | null;
+  // ── en service ──
+  en_course: ModelEnCourse | null;
 }
 
 export interface SystemError {
@@ -51,14 +76,43 @@ export interface SystemError {
   derniere_occurrence?: string | null;
 }
 
-export interface ScraperStatus {
-  [source: string]: {
-    statut: string;
-    derniere_maj: string | null;
-    duree_ms: number | null;
-    erreur: string | null;
-  };
+/** Verdict calculé par le serveur (`/admin/api/scraper/status`), jamais le
+ *  dernier statut brut de `scrape_log` : une source muette depuis quatre mois
+ *  y restait « ok ». */
+export type StatutSource =
+  | "ok" | "en_retard" | "vide" | "erreur" | "au_repos" | "desactivee" | "inconnue";
+
+export interface SourceDonnees {
+  /** `scraper` écrit dans scrape_log ; `cotes` = démon hors Docker, lu dans cotes_bookmakers. */
+  type: "scraper" | "cotes";
+  libelle: string;
+  role: string | null;
+  statut: StatutSource;
+  raison_arret: string | null;
+  derniere_maj: string | null;
+  duree_ms: number | null;
+  erreur: string | null;
+  /** Au-delà de ce silence (minutes), la source est en retard. null = pas de cadence. */
+  retard_max_min: number | null;
+  n_24h: number;
+  n_ok_24h: number | null;
+  n_avec_donnees_24h: number | null;
+  partants_cotes_24h?: number;
 }
+
+export interface ScraperStatus {
+  [source: string]: SourceDonnees;
+}
+
+export const STATUT_SOURCE_LABELS: Record<string, string> = {
+  ok: "en service",
+  en_retard: "en retard",
+  vide: "tourne à vide",
+  erreur: "en erreur",
+  au_repos: "au repos",
+  desactivee: "désactivée",
+  inconnue: "non déclarée",
+};
 
 export interface AbonneLigne {
   user_id: string;
@@ -488,8 +542,10 @@ export const PROFIL_NET_LABELS: Record<string, string> = {
 /** « ok_avec_echecs » (échecs comptés, sous le seuil d'anomalie) reste sain.
  *  Liste EXPLICITE et jamais un préfixe « ok » : `sante_scrapers()` produit aussi
  *  `ok_but_empty` — que des succès, aucune donnée — et c'est le cas trompeur du
- *  projet (4 scrapers « ok » à zéro donnée pendant des semaines). Il reste rouge. */
-export const SCRAPERS_SAINS = ["ok", "ok_avec_echecs"];
+ *  projet (4 scrapers « ok » à zéro donnée pendant des semaines). Il reste rouge.
+ *  « au_repos » (aucune course proche) et « desactivee » (coupée exprès) ne sont
+ *  pas des pannes. */
+export const SCRAPERS_SAINS = ["ok", "ok_avec_echecs", "au_repos", "desactivee"];
 export const scraperSain = (statut: string) => SCRAPERS_SAINS.includes(statut);
 
 
