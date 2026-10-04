@@ -925,20 +925,49 @@ async def get_adaptive_learning_state(
         pass
 
     # ── Statut calibration longshots (par bucket de cote) ──
-    longshot = {"actif": False, "n_obs": 0, "updated_at": None}
+    #
+    # Une table remplie ne veut pas dire une étape appliquée. Le drapeau
+    # `collapse_longshot` (BT_COLLAPSE_LONGSHOT, actif par défaut) fait SAUTER
+    # cette correction à l'inférence (`predict_course`, juste avant l'isotone) :
+    # la courbe est recalculée chaque nuit mais ne touche aucun pronostic. La
+    # page l'affichait « active » parce que la ligne existait.
+    from ml.algo_flags import FLAGS as _AF
+    longshot = {"actif": False, "calculee": False, "n_obs": 0, "updated_at": None,
+                "raison": None}
     try:
         r = await db.execute(text(
             "SELECT n_obs, updated_at FROM longshot_calibration WHERE id = 1"))
         row = r.fetchone()
         if row:
-            longshot = {"actif": True, "n_obs": int(row[0] or 0),
-                        "updated_at": row[1].isoformat() if row[1] else None}
+            longshot.update({"calculee": True, "n_obs": int(row[0] or 0),
+                             "updated_at": row[1].isoformat() if row[1] else None})
     except Exception:
         pass
+    if _AF.collapse_longshot:
+        longshot["raison"] = "désactivée (BT_COLLAPSE_LONGSHOT) : l'isotone + le blend marché la remplacent"
+    elif longshot["calculee"]:
+        longshot["actif"] = True
+
+    # ── Correction contextuelle réellement appliquée ──
+    # `predict_course` n'applique QU'UNE correction de contexte : le méta-apprenant
+    # s'il est chargé (il n'est conservé que s'il a passé son gate log-loss), la
+    # matrice de biais sinon. `get_meta_learner()` suit le fichier pickle comme le
+    # fait le scraper qui sert les pronostics : même vue que l'inférence.
+    meta = {"actif": False, "entraine_le": None, "n_echantillons": None}
+    try:
+        from ml.meta_learner import get_meta_learner
+        _m = get_meta_learner()
+        meta["actif"] = bool(_m.is_trained)
+        _ta = getattr(_m, "_trained_at", None)
+        meta["entraine_le"] = _ta.isoformat() if _ta else None
+        meta["n_echantillons"] = (getattr(_m, "_metrics", None) or {}).get("n_samples")
+    except Exception as e:
+        log.warning("admin.al_state.meta_illisible", err=str(e)[:160])
 
     return {
         **al.get_state_summary(),
         "drift_detector": dd.get_drift_report(),
+        "meta_apprenant": meta,
         "calibration": {
             "isotonique": isotonic,
             "longshots": longshot,
@@ -946,6 +975,9 @@ async def get_adaptive_learning_state(
                 "actif": al.n_races_processed >= TILT_MIN_RACES,
                 "courses_requises": TILT_MIN_RACES,
                 "courses_apprises": al.n_races_processed,
+                # Appliqué à chaque pronostic, mais aucun banc avec/sans n'a
+                # jamais mesuré qu'il améliore quoi que ce soit.
+                "gain_mesure": False,
             },
         },
     }
@@ -957,9 +989,29 @@ async def get_calibration_quality(
     _=Depends(require_admin),
 ):
     """Qualité de calibration de la proba de victoire (reliability + ECE + Brier),
-    mesurée sur les courses terminées. Preuve honnête de la qualité des probas."""
+    mesurée sur les courses terminées. Preuve honnête de la qualité des probas.
+
+    Mise en cache 15 min par process : le calcul balaie toute
+    `prediction_evaluation` (≈ 17 s mesurés en prod le 2026-10-04) et la page le
+    redemandait toutes les 5 min, onglet ouvert ou non. Les bins ne bougent qu'à
+    la marge d'une course à l'autre ; la date du calcul est renvoyée."""
+    import time
     from ml.calibration_eval import compute_calibration_quality
-    return await compute_calibration_quality(db)
+    global _CALIB_CACHE
+    async with _CALIB_LOCK:
+        if _CALIB_CACHE and time.monotonic() - _CALIB_CACHE[0] < _CALIB_TTL_S:
+            return _CALIB_CACHE[1]
+        res = await compute_calibration_quality(db)
+        res = {**res, "calcule_le": datetime.now(timezone.utc).isoformat()}
+        _CALIB_CACHE = (time.monotonic(), res)
+        return res
+
+
+import asyncio as _asyncio
+
+_CALIB_TTL_S = 900
+_CALIB_CACHE: Optional[tuple[float, dict]] = None
+_CALIB_LOCK = _asyncio.Lock()
 
 
 @router.get("/learning-signals")
@@ -993,6 +1045,10 @@ async def get_learning_signals(
         ]
         rows.sort(key=lambda x: (x["roi"] if x["roi"] is not None else 0), reverse=True)
         out["signaux"] = rows
+        # Le ROI brut d'une mise plate est négatif pour presque tout (prélèvement
+        # ~20 %) : un signal à −13 % est MEILLEUR que la moyenne. Le multiplicateur
+        # est mesuré contre cette référence ; la page doit la montrer.
+        out["signaux_reference"] = (perf or {}).get("roi_reference")
     except Exception as e:
         log.warning("admin.learning_signals.signal_skip", err=str(e)[:120])
 
@@ -1015,6 +1071,12 @@ async def get_learning_signals(
     except Exception as e:
         await db.rollback()
         log.warning("admin.learning_signals.edge_skip", err=str(e)[:120])
+
+    # 4. Le pronostic SERVI contre le marché (calcul nocturne, ml.servi_vs_marche).
+    #    C'est la question que la page pose ; `edge` ci-dessus ne mesure qu'un
+    #    filtre de signaux qui ne retient plus que quelques paris.
+    from ml.servi_vs_marche import load_dernier
+    out["servi_vs_marche"] = await load_dernier(db)
 
     return out
 
@@ -1223,6 +1285,16 @@ async def get_adaptive_learning_history(
     """), {"lim": limit})
     rows = result.fetchall()
 
+    # Référence : le Brier top 3 du MARCHÉ sur les mêmes partants (cote figée au
+    # dernier pronostic, Harville). Sans elle, 0,18 ne dit ni bien ni mal.
+    marche: dict = {}
+    try:
+        from ml.servi_vs_marche import brier_top3_marche
+        marche = await brier_top3_marche(db, [r[1] for r in rows if r[1]])
+    except Exception as e:
+        await db.rollback()
+        log.warning("admin.al_history.marche_skip", err=str(e)[:160])
+
     return [
         {
             "log_id": r[0],
@@ -1230,6 +1302,7 @@ async def get_adaptive_learning_history(
             "hippodrome": r[2],
             "discipline": r[3],
             "brier_score": round(float(r[4]), 4) if r[4] else None,
+            "brier_marche": marche.get(r[1]),
             "was_surprise": r[5],
             "gagnant_proba_ia": round(float(r[6]), 3) if r[6] else None,
             "gagnant_rang_predit": r[7],
@@ -1277,6 +1350,17 @@ async def get_bias_matrix(
     """))
     rows = result.fetchall()
 
+    # La matrice n'est lue à l'inférence QUE dans la branche de repli, quand le
+    # méta-apprenant n'est pas chargé (`predict_course`, Layer 3 : « une seule
+    # correction de contexte, jamais deux »). Méta-apprenant actif → aucune de ces
+    # corrections ne pèse sur un pronostic, quel que soit nb_courses.
+    meta_actif = False
+    try:
+        from ml.meta_learner import get_meta_learner
+        meta_actif = bool(get_meta_learner().is_trained)
+    except Exception as e:
+        log.warning("admin.bias_matrix.meta_illisible", err=str(e)[:160])
+
     return [
         {
             "contexte": r[0],
@@ -1290,7 +1374,8 @@ async def get_bias_matrix(
             "correction_factor": round(float(r[7]), 4) if r[7] else 0.0,
             # Seuil de lecture à l'inférence (get_bias_correction) : sous 8
             # courses, la correction est stockée mais jamais appliquée.
-            "correction_appliquee": bool(r[7]) and (r[4] or 0) >= 8,
+            "correction_appliquee": bool(r[7]) and (r[4] or 0) >= 8 and not meta_actif,
+            "meta_actif": meta_actif,
             "seuil_courses": 8,
             "favori_win_rate": round(float(r[8]), 3) if r[8] else None,
             "updated_at": r[9],

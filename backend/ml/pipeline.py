@@ -1904,6 +1904,17 @@ async def _run_nightly_retraining_unlocked() -> None:
             await persist_edge_monitor(em_session, _em)
             log.info("pipeline.edge_monitor_done", edge_ok=_em.get("edge_ok"),
                      win_filt=_em.get("win_filt"), roi_cap=_em.get("roi_cap"))
+    # Le pronostic SERVI (dernier figé avant le départ) contre le marché au même
+    # instant et à la clôture. C'est la mesure que la supervision affiche ;
+    # `edge_monitor` ci-dessus ne mesure qu'un filtre de signaux, gardé pour la
+    # gate de déploiement. Lecture seule hors son propre INSERT (≈ 8 s / 90 j).
+    async with etape(AsyncSessionLocal, "servi_vs_marche"):
+        from ml.servi_vs_marche import compute_servi_vs_marche, persist_servi_vs_marche
+        async with AsyncSessionLocal() as svm_session:
+            _svm = await compute_servi_vs_marche(svm_session)
+            await persist_servi_vs_marche(svm_session, _svm)
+            log.info("pipeline.servi_vs_marche_done",
+                     n_courses=(_svm.get("fenetres", {}).get("30j") or {}).get("n_courses"))
     # Santé des FEATURES : détecte les features mortes/constantes (scraper cassé →
     # valeur défaut figée). Le drift_detector ne surveille que la perf, pas la
     # distribution des features. On LOGGE + persiste (pas d'exclusion auto = pas de
