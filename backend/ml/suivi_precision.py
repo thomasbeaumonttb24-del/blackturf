@@ -644,16 +644,22 @@ async def lire_suivi(session: AsyncSession, jours: int = 60, segment: str = "tou
             serie.append({"jour": j.isoformat(), "courses": l1["n_courses"],
                           "courses_7j": l7["n_courses"]})
             continue
+        # Le modèle technique n'est mesuré que sur une partie des courses (celles
+        # courues après son entraînement) : le seuil s'applique à SES courses, sinon
+        # son premier jour trace un n°1 à 0 % et un écart de +0,24 sur une poignée.
+        t7 = l7["technique"]
+        tech_mesure = t7["n_courses"] >= MIN_COURSES_GLISSANT
         serie.append({
             "jour": j.isoformat(), "courses": l1["n_courses"],
             "n1_gagne_7j": l7["n1_gagne_servi"], "favori_gagne_7j": l7["favori_gagne_marche"],
-            "n1_gagne_technique_7j": l7["technique"]["n1_gagne"],
+            "n1_gagne_technique_7j": t7["n1_gagne"] if tech_mesure else None,
             "cote_juste_vs_marche_7j": l7["cote_juste_vs_marche"]["moyenne"],
             "classement_vs_marche_7j": l7["classement_vs_marche"]["moyenne"],
-            "technique_vs_servi_7j": l7["technique"]["cote_juste_vs_servi"]["moyenne"],
+            "technique_vs_servi_7j": t7["cote_juste_vs_servi"]["moyenne"] if tech_mesure else None,
             "placement_logloss_7j": l7["placement_logloss_servi"],
-            "placement_logloss_technique_7j": l7["technique"]["placement_logloss"],
+            "placement_logloss_technique_7j": t7["placement_logloss"] if tech_mesure else None,
             "courses_7j": l7["n_courses"],
+            "courses_technique_7j": t7["n_courses"],
         })
     semaines: dict[str, list] = {}
     for j, cumul in par_jour:

@@ -145,3 +145,34 @@ def test_les_paris_du_modele_technique_restent_figes():
     fige = sp.figer_technique(nouveau, avant)
     assert fige["pt_sg_tech_r"] == avant["pt_sg_tech_r"] == 2.0
     assert fige["sum_d_pt_sg_tech"] == avant["sum_d_pt_sg_tech"]
+
+
+class _Lignes:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def all(self):
+        return self._rows
+
+
+class _Session:
+    def __init__(self, rows):
+        self._rows = rows
+
+    async def execute(self, *_a, **_k):
+        return _Lignes(self._rows)
+
+
+async def test_le_technique_n_est_trace_que_sur_assez_de_ses_courses():
+    """Premier jour du modèle technique (16/09) : 120 courses servies, 2 techniques.
+    La courbe servie s'affiche, la technique non (sinon n°1 à 0 %, écart à +0,24)."""
+    servies = [_course(gagnant=1 + i % 5) for i in range(118)]
+    tech = [_course(gagnant=2, tech1=[0.5, 0.2, 0.1, 0.1, 0.1]) for _ in range(2)]
+    rows = [("2026-09-16", sp.cumuler(servies + tech))]
+    out = await sp.lire_suivi(_Session(rows), jours=7)
+    point = out["par_jour"][0]
+    assert point["n1_gagne_7j"] is not None
+    assert point["courses_technique_7j"] == 2
+    assert point["n1_gagne_technique_7j"] is None
+    assert point["technique_vs_servi_7j"] is None
+    assert point["placement_logloss_technique_7j"] is None
