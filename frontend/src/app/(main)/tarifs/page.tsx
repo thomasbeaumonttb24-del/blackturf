@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { PlansTarifs } from "@/components/billing/PlansTarifs";
 import { PassesTarifs } from "@/components/billing/PassesTarifs";
+import { GuideFormule } from "@/components/billing/GuideFormule";
 
 export const metadata: Metadata = {
   // Le corps de la page employait déjà trente et une fois le vocabulaire de l'IA sans
@@ -61,7 +62,7 @@ const offersJsonLd = {
 const FAQ = [
   {
     q: "Comment fonctionne le parrainage ?",
-    a: "Partagez votre lien personnel (Profil → Parrainage). Votre ami a 5 € de remise sur son premier abonnement, et dès qu'il a payé, 5 € sont déduits de votre prochaine mensualité. 4 amis abonnés dans le mois suffisent pour un mois Expert offert, 3 pour un mois Standard ; au-delà, vos crédits sont reportés au mois suivant.",
+    a: "Partagez votre lien personnel (Profil → Parrainage). Votre ami a 5 € de remise sur son premier abonnement ou son premier Pass Semaine/Mois (pas sur le Pass Jour), et dès qu'il a payé, 5 € sont déduits de votre prochaine mensualité. 4 amis abonnés dans le mois suffisent pour un mois Expert offert, 3 pour un mois Standard ; au-delà, vos crédits sont reportés au mois suivant.",
   },
   {
     q: "Puis-je annuler à tout moment ?",
@@ -171,6 +172,9 @@ export default function TarifsPage() {
 
       {/* Pass sans renouvellement : paiement unique, accès coupé à l'échéance. */}
       <PassesTarifs />
+
+      {/* Orientation selon la façon de jouer : le calcul pousse Expert dès 2 semaines/mois. */}
+      <GuideFormule />
 
       {/* Parrainage : l'argument « abonnement gratuit » dit là où l'on regarde le prix. */}
       <section className="relative mb-12 overflow-hidden rounded-3xl bg-gradient-to-br from-stone-900 via-stone-900 to-stone-800 p-6 text-white shadow-[0_30px_60px_-30px_rgba(28,25,23,.7)] ring-1 ring-white/10 sm:p-8">

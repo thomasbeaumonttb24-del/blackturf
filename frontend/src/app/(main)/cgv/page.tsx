@@ -164,11 +164,13 @@ export default function CGVPage() {
           <li>
             <strong>Avantage du filleul</strong> : une remise de 5 € TTC sur sa première facture payante
             (formule Standard ou Expert, mensuelle ou annuelle), appliquée automatiquement lors du paiement.
-            Elle ne s&apos;applique pas aux pass sans abonnement.
+            Elle s&apos;applique aussi au premier Pass Semaine ou Pass Mois (soit 7&nbsp;€ ou 19&nbsp;€), mais jamais au
+            Pass Jour. Elle ne vaut qu&apos;une seule fois, quel que soit le premier achat.
           </li>
           <li>
             <strong>Avantage du parrain</strong> : un crédit de 5 € TTC par filleul, acquis uniquement lorsque le
-            premier paiement du filleul a été effectivement encaissé. Ce crédit est imputé automatiquement sur
+            premier paiement du filleul (abonnement, Pass Semaine ou Pass Mois — jamais un Pass Jour) a été
+            effectivement encaissé. Ce crédit est imputé automatiquement sur
             les prochaines factures d&apos;abonnement du parrain ; il n&apos;est ni remboursable, ni cessible, ni
             convertible en espèces.
           </li>

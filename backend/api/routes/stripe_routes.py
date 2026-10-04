@@ -647,6 +647,25 @@ async def creer_checkout_pass(
         "type": "pass", "duree": body.duree, "user_id": user.user_id,
         "renonciation_version": passes.RENONCIATION_VERSION,
     }
+    # Remise de parrainage (−5 €) : Pass Semaine et Mois seulement — jamais le
+    # Pass Jour, que la remise rendrait gratuit. Mêmes garde-fous que pour un
+    # abonnement : une seule fois par filleul, refusée si sa carte enregistrée
+    # appartient déjà à un autre compte (ancien client qui rouvre un compte).
+    remise: dict = {}
+    if body.duree in parrainage.DUREES_PASS_PARRAINAGE:
+        lien_filleul = await parrainage.remise_filleul_due(user, db)
+        if lien_filleul is not None and await _empreintes_deja_prises(user, db):
+            log.warning("stripe.remise_pass_refusee_carte_connue", user_id=user.user_id)
+            lien_filleul = None
+        if lien_filleul is not None:
+            try:
+                remise = {"discounts": [{"coupon": parrainage.coupon_filleul()}]}
+            except Exception as e:  # noqa: BLE001
+                log.error("stripe.coupon_parrainage_indisponible", error=str(e)[:150])
+                raise HTTPException(status_code=503, detail="La remise de parrainage est momentanément "
+                                                            "indisponible. Réessayez dans quelques minutes.")
+            metadata["remise_parrainage"] = "1"
+            metadata["parrainage_id"] = lien_filleul.parrainage_id
     price_id = passes.prix_stripe(body.duree) if _stripe_joignable() else None
     ligne = ({"price": price_id, "quantity": 1} if price_id else {
         "quantity": 1,
@@ -682,9 +701,11 @@ async def creer_checkout_pass(
         success_url=f"{settings.frontend_url}/abonnement/succes?pass={body.duree}&session_id={{CHECKOUT_SESSION_ID}}",
         cancel_url=f"{settings.frontend_url}/tarifs",
         locale="fr",
+        **remise,
     )
-    log.info("stripe.checkout_pass_cree", user_id=user.user_id, duree=body.duree)
-    return {"url": session.url}
+    log.info("stripe.checkout_pass_cree", user_id=user.user_id, duree=body.duree,
+             remise_parrainage=bool(remise))
+    return {"url": session.url, "remise_parrainage": bool(remise)}
 
 
 @router.post("/stripe/pass/confirmer")

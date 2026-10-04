@@ -24,7 +24,7 @@ const PASSES: {
   { duree: "semaine", nom: "Pass Semaine", prix: "12", parJour: "1,71 € par jour", acces: "7 jours d'accès Expert",
     pour: "Une semaine de courses complète", icone: CalendarDays },
   { duree: "mois", nom: "Pass Mois", prix: "24", parJour: "0,80 € par jour", acces: "30 jours d'accès Expert",
-    pour: "Un mois entier, sans prélèvement suivant", icone: CalendarRange, vedette: "Meilleur prix par jour" },
+    pour: "Un mois entier, sans prélèvement suivant", icone: CalendarRange, vedette: "Meilleur prix sans abonnement" },
 ];
 
 // Ce que débloque un pass = la formule Expert (contrôles d'accès réels du backend).
@@ -53,6 +53,7 @@ export function PassesTarifs() {
   const [enCours, setEnCours] = useState<Duree | null>(null);
   // Abonné Expert : accès déjà illimité, le serveur refuserait (409).
   const expertAbonne = Boolean(user?.abonnement_gerable) && user?.plan === "expert" && !user?.pass_fin;
+  const remiseFilleul = Boolean(user?.remise_parrainage);
 
   async function acheter(duree: Duree) {
     if (!user) {
@@ -132,10 +133,26 @@ export function PassesTarifs() {
                   </div>
                 </div>
 
-                <div className="mt-5 flex items-baseline gap-1.5">
-                  <span className={cn("font-display text-5xl font-extrabold tracking-tight", vedette && "text-amber-300")}>{p.prix}&nbsp;€</span>
+                {/* Filleul : −5 € sur Semaine et Mois (appliqués par le serveur au
+                    paiement). Jamais sur le Pass Jour, que la remise rendrait gratuit. */}
+                <div className="mt-5 flex flex-wrap items-baseline gap-1.5">
+                  {remiseFilleul && p.duree !== "jour" ? (
+                    <>
+                      <span className={cn("font-display text-5xl font-extrabold tracking-tight", vedette && "text-amber-300")}>
+                        {Number(p.prix) - 5}&nbsp;€
+                      </span>
+                      <span className={cn("text-lg font-semibold line-through", vedette ? "text-stone-400" : "text-stone-400")}>{p.prix}&nbsp;€</span>
+                    </>
+                  ) : (
+                    <span className={cn("font-display text-5xl font-extrabold tracking-tight", vedette && "text-amber-300")}>{p.prix}&nbsp;€</span>
+                  )}
                   <span className={cn("text-xs", vedette ? "text-stone-300" : "text-muted-foreground")}>une seule fois</span>
                 </div>
+                {remiseFilleul && (
+                  <p className={cn("mt-1 text-xs font-semibold", vedette ? "text-amber-200" : "text-amber-700")}>
+                    {p.duree === "jour" ? "Remise de parrainage non valable sur le Pass Jour" : "−5 € grâce à votre parrain"}
+                  </p>
+                )}
                 <p className={cn("mt-1 text-xs font-semibold", vedette ? "text-emerald-300" : "text-emerald-700")}>{p.parJour}</p>
                 <p className={cn("mt-3 text-sm", vedette ? "text-stone-200" : "text-stone-700")}>{p.pour}</p>
                 {p.duree === "mois" && (
@@ -225,7 +242,7 @@ export function PassesTarifs() {
               </ul>
             </div>
             <div className="md:w-64">
-              <CheckoutButton plan="expert" periodicite="monthly" label="Choisir Expert — 19 €/mois" variant="brand" size="lg" className="h-12 w-full text-base" />
+              <CheckoutButton plan="expert" periodicite="monthly" label="Choisir Expert" variant="brand" size="lg" className="h-12 w-full text-base" />
               <p className="mt-2 text-center text-[11px] text-stone-300">Renouvellement mensuel, sans engagement.</p>
             </div>
           </div>

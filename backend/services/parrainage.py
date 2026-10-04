@@ -329,6 +329,128 @@ async def _sur_paiement(filleul: User, invoice: dict, db: AsyncSession) -> None:
     await _prevenir_parrain(parrain, filleul, db, reporte)
 
 
+# ── Passes sans abonnement (2026-10-04) ──────────────────────────────────────
+# Le parrainage vaut pour les Pass Semaine et Mois, PAS pour le Pass Jour :
+# 5 € − 5 € de remise = un pass gratuit, et deux comptes qui se renverraient la
+# balle obtiendraient l'accès gratuit en boucle. Un Pass Jour n'applique donc
+# aucune remise, ne valide aucun parrainage et ne consomme pas la remise du
+# filleul (elle reste pour un Pass Semaine, Mois ou un abonnement).
+DUREES_PASS_PARRAINAGE = ("semaine", "mois")
+
+
+def cartes_du_paiement(payment_intent_id: Optional[str]) -> list[dict]:
+    """Carte qui a réellement payé (empreinte Stripe), lue sur le paiement.
+
+    Un pass est un paiement unique : la carte n'est PAS enregistrée sur le
+    client Stripe, `_cartes_du_client` ne la verrait pas — et le contrôle
+    « carte du parrain / d'un autre compte » serait aveugle. Liste vide si
+    Stripe ne répond pas (on ne tranche pas alors)."""
+    if not payment_intent_id or not settings.stripe_secret_key:
+        return []
+    try:
+        pi = stripe.PaymentIntent.retrieve(payment_intent_id, expand=["latest_charge"])
+        charge = pi.get("latest_charge") or {}
+        carte = ((charge.get("payment_method_details") or {}).get("card") or {})
+        if not carte.get("fingerprint"):
+            return []
+        return [{"empreinte": carte["fingerprint"], "pm": charge.get("payment_method"),
+                 "marque": carte.get("brand"), "dernier4": carte.get("last4"),
+                 "financement": carte.get("funding")}]
+    except Exception as e:  # noqa: BLE001
+        log.warning("parrainage.carte_paiement_illisible", pi=payment_intent_id, error=str(e)[:150])
+        return []
+
+
+async def sur_paiement_pass(filleul: User, duree: str, montant_paye: int, remise_appliquee: bool,
+                            session_id: str, cartes: list[dict], db: AsyncSession) -> None:
+    """Pass payé par `filleul` (déjà accordé). N'appelle pas `commit`. Ne lève jamais."""
+    try:
+        await _sur_paiement_pass(filleul, duree, montant_paye, remise_appliquee, session_id, cartes, db)
+    except Exception as e:  # noqa: BLE001
+        log.error("parrainage.pass_erreur", filleul=filleul.user_id, error=str(e)[:200])
+
+
+async def _sur_paiement_pass(filleul: User, duree: str, montant_paye: int, remise_appliquee: bool,
+                             session_id: str, cartes: list[dict], db: AsyncSession) -> None:
+    from services.abonnements import journaliser
+
+    if not filleul.parraine_par_id:
+        return
+    lien = await _lien_du_filleul(filleul.user_id, db)
+    if lien is None:
+        return
+
+    if remise_appliquee:
+        if lien.remise_filleul_at is not None:
+            # Deux paiements avec remise ouverts en parallèle (deux onglets) : la
+            # remise ne vaut qu'une fois — la seconde est refacturée (solde positif,
+            # prélevé sur sa prochaine facture d'abonnement).
+            if filleul.stripe_customer_id and settings.stripe_secret_key:
+                try:
+                    _crediter(filleul, REMISE_CENTS, f"parrainage-remise-double-{session_id}",
+                              "Remise de parrainage déjà utilisée sur un autre paiement",
+                              {"parrainage_id": lien.parrainage_id, "session": session_id})
+                except Exception as e:  # noqa: BLE001
+                    log.error("parrainage.remise_double_reprise_echouee", filleul=filleul.user_id, error=str(e)[:200])
+            log.warning("parrainage.remise_double", filleul=filleul.user_id, session=session_id)
+        else:
+            lien.remise_filleul_at = datetime.now(timezone.utc)
+
+    # Pass Jour, ou paiement trop faible pour financer 5 € : ne valide rien.
+    if duree not in DUREES_PASS_PARRAINAGE or montant_paye < REMISE_CENTS or lien.statut != "en_attente":
+        return
+    if lien.remise_filleul_at is None:
+        lien.remise_filleul_at = datetime.now(timezone.utc)
+
+    parrain = await db.get(User, lien.parrain_id) if lien.parrain_id else None
+    motif: Optional[str] = None
+    if not _peut_parrainer(parrain):
+        motif = "parrain_inactif"
+    else:
+        if not cartes:
+            lien.motif = "cartes_indisponibles"
+            log.warning("parrainage.cartes_indisponibles", filleul=filleul.user_id, pass_session=session_id)
+            return
+        from api.routes.stripe_routes import _memoriser_cartes
+        await _memoriser_cartes(filleul, cartes, db)
+        for carte in cartes:
+            connue = await db.get(CarteConnue, carte["empreinte"])
+            if connue is not None and connue.user_id and connue.user_id != filleul.user_id:
+                motif = "carte_du_parrain" if connue.user_id == lien.parrain_id else "carte_autre_compte"
+                break
+
+    if motif:
+        lien.statut = "refuse"
+        lien.motif = motif
+        if remise_appliquee and motif != "parrain_inactif" and filleul.stripe_customer_id and settings.stripe_secret_key:
+            try:
+                _crediter(filleul, REMISE_CENTS, f"parrainage-remise-reprise-{lien.parrainage_id}",
+                          "Remise de parrainage non applicable : carte déjà utilisée sur un autre compte",
+                          {"parrainage_id": lien.parrainage_id})
+            except Exception as e:  # noqa: BLE001
+                log.error("parrainage.reprise_remise_echouee", filleul=filleul.user_id, error=str(e)[:200])
+        await journaliser(db, "parrainage_refuse", parrain, None,
+                          detail={"filleul": filleul.email, "motif": motif, "pass": duree})
+        log.warning("parrainage.refuse", parrain=lien.parrain_id, filleul=filleul.user_id, motif=motif, pass_=duree)
+        return
+
+    if not settings.stripe_secret_key:
+        return
+    maintenant = datetime.now(timezone.utc)
+    lien.statut = "valide"
+    lien.motif = None
+    lien.valide_at = maintenant
+    lien.credit_cents = REMISE_CENTS
+    await db.flush()
+    await liberer_credits(parrain, db)
+    reporte = lien.credit_pose_at is None
+    await journaliser(db, "parrainage_valide", parrain, None, montant_cents=REMISE_CENTS,
+                      detail={"filleul": filleul.email, "pass": duree, "session": session_id,
+                              "reporte": reporte, "motif_report": lien.motif})
+    log.info("parrainage.valide_par_pass", parrain=parrain.user_id, filleul=filleul.user_id, pass_=duree)
+    await _prevenir_parrain(parrain, filleul, db, reporte)
+
+
 async def periode_du_parrain(parrain: User, db: AsyncSession) -> dict:
     """Mois de facturation en cours du parrain et son plafond de crédits.
 

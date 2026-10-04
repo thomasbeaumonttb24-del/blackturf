@@ -65,7 +65,7 @@ export function ParrainageSection() {
 
   async function partager() {
     if (!data) return;
-    const texte = `Je t'invite sur BlackTurf, les pronostics PMU par IA : ${euros(data.remise_cents)} offerts sur ton premier abonnement avec mon lien.`;
+    const texte = `Je t'invite sur BlackTurf, les pronostics PMU par IA : ${euros(data.remise_cents)} offerts sur ton premier abonnement ou Pass Semaine/Mois avec mon lien.`;
     if (typeof navigator !== "undefined" && navigator.share) {
       try {
         await navigator.share({ title: "BlackTurf", text: texte, url: data.lien });
@@ -113,7 +113,7 @@ export function ParrainageSection() {
                 </span>
               </h3>
               <p className="mt-2.5 max-w-md text-sm leading-relaxed text-stone-300">
-                Votre ami paie {remise} de moins sur son premier abonnement. Dès que son paiement est
+                Votre ami paie {remise} de moins sur son premier abonnement ou Pass Semaine/Mois. Dès que son paiement est
                 encaissé, {remise} de crédit s&apos;ajoutent à votre compte, déduits automatiquement de
                 vos factures. Sans limite d&apos;amis.
               </p>
@@ -180,7 +180,7 @@ export function ParrainageSection() {
           <Etape n={1} delai={0} icone={UserPlus} titre="Votre ami s'inscrit"
                  texte="Avec votre lien ou votre code. La remise s'applique toute seule, rien à saisir." />
           <Etape n={2} delai={100} icone={CreditCard} titre={`Il paie ${remise} de moins`}
-                 texte="Sur son premier abonnement, Standard ou Expert, au mois ou à l'année." />
+                 texte="Sur son premier abonnement (Standard ou Expert), ou son premier Pass Semaine ou Mois. Pas sur le Pass Jour." />
           <Etape n={3} delai={200} icone={Sparkles} titre={`Vous gagnez ${remise}`}
                  texte="Dès que son paiement est encaissé, déduits de votre prochaine mensualité ou de l'abonnement que vous prendrez." />
         </ol>
@@ -193,7 +193,7 @@ export function ParrainageSection() {
           <Reveal className="rounded-2xl border border-dashed border-stone-300 bg-stone-50/60 px-4 py-8 text-center">
             <Gift className="mx-auto h-8 w-8 text-amber-500 tr-medal" aria-hidden />
             <p className="mt-3 text-sm font-medium text-stone-800">Aucun filleul pour l&apos;instant</p>
-            <p className="mt-1 text-xs text-stone-500">Envoyez votre lien : chaque ami abonné vous rapporte {remise}.</p>
+            <p className="mt-1 text-xs text-stone-500">Envoyez votre lien : chaque ami qui s'abonne ou prend un Pass Semaine/Mois vous rapporte {remise}.</p>
           </Reveal>
         ) : (
           <ul className="space-y-2.5">

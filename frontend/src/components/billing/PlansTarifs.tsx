@@ -12,8 +12,10 @@ type Periodicite = "monthly" | "annual";
 // Prix affichés = prix Stripe (stripe_routes.py). L'annuel est payé en une fois ;
 // on affiche son équivalent mensuel, avec le montant réellement prélevé dessous.
 const PRIX = {
-  standard: { monthly: "12€", annual: "9,60€", annuelTotal: "115,20 €" },
-  expert: { monthly: "19€", annual: "15,20€", annuelTotal: "182,40 €" },
+  // parJour : prix ramené au jour (mois de 30 j, année de 365 j) — même échelle
+  // que les pass, pour que l'écart saute aux yeux.
+  standard: { monthly: "12€", annual: "9,60€", annuelTotal: "115,20 €", parJour: { monthly: "0,40 €", annual: "0,32 €" } },
+  expert: { monthly: "19€", annual: "15,20€", annuelTotal: "182,40 €", parJour: { monthly: "0,63 €", annual: "0,50 €" } },
 };
 
 const DECOUVERTE = [
@@ -110,9 +112,10 @@ export function PlansTarifs() {
             <span className="text-3xl font-extrabold">{PRIX.standard[periodicite]}</span>
             <span className="text-muted-foreground">/mois</span>
           </div>
-          <p className="mb-5 h-4 text-xs text-muted-foreground">
+          <p className="h-4 text-xs text-muted-foreground">
             {annuel ? `${PRIX.standard.annuelTotal} payés en une fois` : "Sans engagement"}
           </p>
+          <p className="mb-5 mt-1 text-xs font-semibold text-emerald-700">{PRIX.standard.parJour[periodicite]} par jour</p>
           <ul className="mb-6 space-y-2.5">
             {STANDARD.map((f) => (
               <li key={f} className="flex items-start gap-2 text-sm">
@@ -144,10 +147,13 @@ export function PlansTarifs() {
             <span className="text-5xl font-extrabold text-amber-300">{PRIX.expert[periodicite]}</span>
             <span className="text-stone-300">/mois</span>
           </div>
-          <p className="mb-5 h-4 text-xs text-stone-300">
+          <p className="h-4 text-xs text-stone-300">
             {annuel
               ? `${PRIX.expert.annuelTotal} payés en une fois`
               : "5 € de moins que le Pass Mois · résiliable à tout moment"}
+          </p>
+          <p className="mb-5 mt-1 text-xs font-semibold text-emerald-300">
+            {PRIX.expert.parJour[periodicite]} par jour — le meilleur prix de l&apos;accès illimité
           </p>
           <ul className="mb-7 space-y-2.5">
             {EXPERT.map((f, i) => (

@@ -108,7 +108,17 @@ def valider_session(session) -> dict:
     if duree not in PASSES:
         raise PassInvalide("durée inconnue")
     prix = PASSES[duree][0]
-    if session.get("amount_total") != prix or (session.get("currency") or "").lower() != DEVISE:
+    # Remise de parrainage (−5 €) : posée par le SERVEUR seulement (coupon à la
+    # création de la session), jamais sur le Pass Jour. Le montant payé doit
+    # alors valoir exactement prix − 5 €, remise comprise dans le détail Stripe.
+    from services.parrainage import DUREES_PASS_PARRAINAGE, REMISE_CENTS
+    remise = meta.get("remise_parrainage") == "1"
+    if remise:
+        remise_lue = int(((session.get("total_details") or {}).get("amount_discount")) or 0)
+        if duree not in DUREES_PASS_PARRAINAGE or remise_lue != REMISE_CENTS:
+            raise PassInvalide("remise de parrainage non conforme")
+    attendu = prix - REMISE_CENTS if remise else prix
+    if session.get("amount_total") != attendu or (session.get("currency") or "").lower() != DEVISE:
         raise PassInvalide("montant ou devise différents du tarif")
     user_id = meta.get("user_id")
     if not user_id:
@@ -136,7 +146,8 @@ def valider_session(session) -> dict:
         "user_id": user_id,
         "customer": session.get("customer"),
         "duree": duree,
-        "montant_cents": prix,
+        "montant_cents": attendu,
+        "remise_parrainage": remise,
         "payment_intent": pi,
         "renonciation_at": renonciation_at,
     }
@@ -233,7 +244,27 @@ async def accorder(db: AsyncSession, session) -> tuple[PassAcces, bool]:
     await journaliser(db, "pass_achete", user, None, plan=PLAN_PASS, plan_precedent=precedent,
                       montant_cents=v["montant_cents"], periode_fin=fin,
                       detail={"duree": v["duree"], "debut": debut.isoformat(),
-                              "session": v["session_id"]})
+                              "session": v["session_id"], "remise_parrainage": v["remise_parrainage"]})
+
+    # Carte qui a payé : mémorisée comme pour un abonnement (un ancien client qui
+    # rouvre un compte est ainsi reconnu), puis parrainage éventuel. Rien ici ne
+    # peut retirer le pass, déjà payé : erreurs consignées seulement.
+    from services import parrainage
+    await db.flush()
+    try:
+        cartes = parrainage.cartes_du_paiement(v["payment_intent"])
+        # Point de sauvegarde : une erreur ici n'annule QUE ce bloc, jamais le pass.
+        async with db.begin_nested():
+            if user.parraine_par_id:
+                # Version qui LÈVE : l'erreur annule le point de sauvegarde au
+                # lieu de laisser une transaction en échec derrière elle.
+                await parrainage._sur_paiement_pass(user, v["duree"], v["montant_cents"], v["remise_parrainage"],
+                                                    v["session_id"], cartes, db)
+            elif cartes:
+                from api.routes.stripe_routes import _memoriser_cartes
+                await _memoriser_cartes(user, cartes, db)
+    except Exception as e:  # noqa: BLE001
+        log.error("passes.parrainage_ou_carte_erreur", user_id=user.user_id, error=str(e)[:200])
     await db.commit()
     log.info("passes.accorde", user_id=user.user_id, duree=v["duree"], debut=debut, fin=fin)
     try:
