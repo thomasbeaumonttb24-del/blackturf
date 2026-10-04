@@ -39,9 +39,8 @@ def _action(label: str, url: str, note: str) -> str:
     s'afficherait pas) et une note."""
     return D.rangee_nuit(
         D.bouton(label, url)
-        + f'<div style="margin-top:16px;font-size:11.5px;line-height:17px;color:{C["gris"]}">Le bouton ne s’affiche pas ? Copiez ce lien :<br>'
-        f'<a href="{e(url)}" style="color:{C["orNuit"]};text-decoration:underline;word-break:break-all">{e(url)}</a></div>'
-        + (f'<div style="margin-top:12px;font-size:12.5px;line-height:19px;color:{C["douxNuit"]}">{note}</div>' if note else ""),
+        + D.petite_note(f"Le bouton ne s’affiche pas ? Copiez ce lien :<br>{D.lien_or(e(url), url)}", 11.5, "16px 0 0")
+        + (D.petite_note(note, 12.5, "12px 0 0") if note else ""),
         padding="0 28px 28px", centre=True,
     )
 

@@ -2,8 +2,9 @@
 
 Un seul gabarit pour tous les mails envoyés aux visiteurs et aux abonnés
 (pronostic gratuit, valeurs du jour, bilan hebdomadaire, confirmations,
-compte) : fond nuit, bandeau logo, photo fondue, bande de titre, fenêtre du
-site, bouton or en relief, bloc Instagram, pied légal. Chaque mail ne décrit
+compte) : bandeau logo, photo en carte, bande de titre, fenêtre du site,
+bouton orange, bloc Instagram, pied légal — en clair ET en sombre (voir
+« Clair / sombre » plus bas). Chaque mail ne décrit
 que son contenu propre ; l'enveloppe, elle, ne peut plus diverger d'un mail à
 l'autre.
 
@@ -162,27 +163,94 @@ def surtitre(t: str, couleur: str = C["or"]) -> str:
     )
 
 
+# ─── Clair / sombre ─────────────────────────────────────────────────────────
+#
+# Les téléphones affichent les mails en clair OU en sombre, et chaque client
+# s'y prend à sa façon :
+# - Gmail (Android, iOS) et Outlook ignorent nos styles sombres et INVERSENT
+#   eux-mêmes : fonds clairs → sombres, textes sombres → clairs. Ils ne touchent
+#   ni aux images ni aux `background-image`. Un mail sombre « en dur » en sort
+#   cassé (texte inversé posé sur un dégradé resté sombre) ; un mail CLAIR, lui,
+#   se convertit proprement.
+# - Apple Mail / iOS Mail et Outlook macOS lisent `prefers-color-scheme` :
+#   ils reçoivent la palette sombre ci-dessous (classes bt-*).
+# - Outlook.com marque ses éléments [data-ogsc] (couleur) / [data-ogsb] (fond).
+#
+# D'où trois règles pour tout ce qui suit :
+# 1. base claire (crème du site), version sombre par classe ;
+# 2. jamais de texte sur un `background-image` (dégradé) : couleur pleine ;
+# 3. les « îlots » de contenu (carte, fenêtre du site, tuiles, podium) restent
+#    clairs dans les deux modes : leurs couleurs en ligne restent lisibles.
+
+SOMBRE = {
+    "pg": ("background", "#0B0A07"), "fd": ("background", "#14110C"), "lg": ("background", "#1A160F"),
+    "ca": ("background", "#1D1810"),
+    "te": ("color", "#F5EFE3"), "tt": ("color", "#D9D2C3"), "td": ("color", "#A8A08F"),
+    "to": ("color", "#E9C46A"), "tv": ("color", "#34D399"), "tr": ("color", "#FB7185"),
+    "bd": ("border-color", "#2E271B"),
+}
+CLAIR = {
+    "pg": "#F3EDE1", "fd": "#FFFDF8", "lg": "#FFFFFF", "ca": "#FCF8EF", "bord": "#E9E1D0",
+    "te": "#1C1917", "tt": "#44403C", "td": "#78716C", "to": "#B45309", "tv": "#047857", "tr": "#BE123C",
+    "bouton": "#C2410C", "boutonTranche": "#7C2D12",
+}
+
+
+def _css_sombre() -> str:
+    regles = [f".bt-{k}{{{p}:{v}!important}}" for k, (p, v) in SOMBRE.items()]
+    regles.append(".bt-pg,.bt-fd,.bt-lg,.bt-ca{background-image:none!important}")
+    regles.append(".bt-pi{background:#2A2215!important;border-color:#5B4A2A!important;color:#E9C46A!important}")
+    regles.append(".bt-ca,.bt-lg{border-color:#3A2F1C!important}")
+    ogsb = [f"[data-ogsb] .bt-{k}{{background:{v}!important}}" for k, (p, v) in SOMBRE.items() if p == "background"]
+    ogsc = [f"[data-ogsc] .bt-{k}{{color:{v}!important}}" for k, (p, v) in SOMBRE.items() if p == "color"]
+    return ("@media (prefers-color-scheme:dark){" + "".join(regles) + "}\n" + "".join(ogsb) + "\n" + "".join(ogsc))
+
+
+def _ligne(contenu: str, padding: str, classe: str = "px", centre: bool = False, extra: str = "") -> str:
+    align = "text-align:center;" if centre else ""
+    return (f'<tr><td bgcolor="{CLAIR["fd"]}" class="bt-fd {classe}" style="background:{CLAIR["fd"]};padding:{padding};'
+            f'{align}color:{CLAIR["tt"]};{extra}">{contenu}</td></tr>')
+
+
+def petite_note(t: str, taille: float = 12.5, marge: str = "12px 0 0") -> str:
+    """Petit texte discret sur le fond de page (note sous un bouton, précision)."""
+    return (f'<div class="bt-td" style="margin:{marge};font-size:{taille}px;line-height:{round(taille * 1.5)}px;'
+            f'color:{CLAIR["td"]}">{t}</div>')
+
+
+def lien_or(label: str, url: str, souligne: bool = True) -> str:
+    deco = "underline" if souligne else "none"
+    return (f'<a class="bt-to" href="{e(url)}" style="color:{CLAIR["to"]};text-decoration:{deco};font-weight:700;'
+            f'word-break:break-all">{label}</a>')
+
+
+def vert(t: str) -> str:
+    return f'<span class="bt-tv" style="color:{CLAIR["tv"]};font-weight:700">{t}</span>'
+
+
+def rouge(t: str) -> str:
+    return f'<span class="bt-tr" style="color:{CLAIR["tr"]};font-weight:700">{t}</span>'
+
+
 # ─── Blocs de page (chacun est une rangée <tr> du gabarit) ───────────────────
 
 def rangee_nuit(contenu: str, padding: str = "0 28px 28px", classe: str = "px", centre: bool = False) -> str:
-    align = "text-align:center;" if centre else ""
-    return (
-        f'<tr><td bgcolor="{C["nuit"]}" class="{classe}" style="background:{C["nuit"]};padding:{padding};{align}'
-        f'color:#ffffff">{contenu}</td></tr>'
-    )
+    """Rangée du corps du mail. Le nom date du fond nuit d'origine : c'est
+    désormais le fond de page, crème en clair et nuit en sombre."""
+    return _ligne(contenu, padding, classe, centre)
 
 
 def barre_logo(mention: str) -> str:
     return f"""
   <tr><td style="padding:0 0 12px">
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" bgcolor="#1A160F" style="width:100%;border-collapse:separate;background:#1A160F;border:1px solid #33291A;border-radius:18px;border-top:3px solid #C99A3C;box-shadow:0 10px 30px -12px rgba(0,0,0,.6)">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" bgcolor="{CLAIR['lg']}" class="bt-lg" style="width:100%;border-collapse:separate;background:{CLAIR['lg']};border:1px solid {CLAIR['bord']};border-radius:18px;border-top:3px solid #C99A3C">
       <tr>
         <td class="logo" style="padding:10px 18px" valign="middle"><a href="{SITE}" style="text-decoration:none"><table role="presentation" cellpadding="0" cellspacing="0"><tr>
-          <td valign="middle"><img class="logoimg" src="{IMG}/logo-medaillon.png" width="88" height="88" alt="BlackTurf" style="display:block;width:88px;height:88px;border:0"></td>
-          <td valign="middle" class="marque" style="padding-left:10px;font-size:24px;line-height:28px;font-weight:700;letter-spacing:-.02em;color:#ffffff;font-family:{POLICE};white-space:nowrap">Black<span style="color:#C99A3C">Turf</span></td>
+          <td valign="middle"><img class="logoimg" src="{IMG}/logo-medaillon.png" width="72" height="72" alt="BlackTurf" style="display:block;width:72px;height:72px;border:0"></td>
+          <td valign="middle" class="marque bt-te" style="padding-left:10px;font-size:24px;line-height:28px;font-weight:700;letter-spacing:-.02em;color:{CLAIR['te']};font-family:{POLICE};white-space:nowrap">Black<span class="bt-to" style="color:{CLAIR['to']}">Turf</span></td>
         </tr></table></a></td>
         <td align="right" valign="middle" style="padding:10px 18px">
-          <span class="mention" style="display:inline-block;padding:6px 12px;border-radius:999px;background:#2A2215;border:1px solid #5B4A2A;color:{C['orNuit']};font-size:11px;line-height:14px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;white-space:nowrap">{mention}</span>
+          <span class="mention bt-pi" style="display:inline-block;padding:6px 12px;border-radius:999px;background:{C['orClair']};border:1px solid {C['orBord']};color:{C['orFonce']};font-size:11px;line-height:14px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;white-space:nowrap">{mention}</span>
         </td>
       </tr>
     </table>
@@ -191,50 +259,48 @@ def barre_logo(mention: str) -> str:
 
 def entete(photo: Optional[str], surtitre_: str, titre: str, intro: str, lien: str = SITE,
            suite: str = "", legende_photo: str = "", icone: Optional[str] = None) -> str:
-    """Photo fondue (ou simple bande sombre si `photo` est None), puis surtitre
-    or, grand titre, chapeau et contenu libre (`suite`) sur fond nuit."""
+    """Photo en carte arrondie (si `photo`), puis surtitre or, grand titre,
+    chapeau et contenu libre (`suite`). Ouvre la carte du corps (coins hauts)."""
+    haut = ""
     if photo:
         haut = (
-            f'<tr><td style="border-radius:22px 22px 0 0;overflow:hidden;background:{C["nuit"]}">'
-            f'<a href="{e(lien)}"><img src="{IMG}/hero-{photo}.jpg" width="640" alt="Chevaux en course — photo d’illustration" '
-            f'style="display:block;width:100%;max-width:640px;height:auto;border:0;border-radius:22px 22px 0 0;color:#ffffff;font-size:13px"></a></td></tr>'
+            f'<tr><td bgcolor="{CLAIR["fd"]}" class="bt-fd pxi" style="background:{CLAIR["fd"]};padding:16px 16px 0;border-radius:22px 22px 0 0">'
+            f'<a href="{e(lien)}"><img src="{IMG}/hero-{photo}.jpg" width="608" alt="Chevaux en course — photo d’illustration" '
+            f'style="display:block;width:100%;max-width:608px;height:auto;border:0;border-radius:16px;background:#14110C;'
+            f'color:#8C8272;font-size:13px"></a></td></tr>'
         )
-        pad = "4px 28px 26px"
-    else:
-        haut = ""
-        pad = "30px 28px 26px"
-    legende = (
-        f'<div style="margin-top:14px;font-size:10.5px;line-height:15px;color:#6F6656">{legende_photo}</div>' if legende_photo else ""
-    )
+    pad = "22px 28px 26px" if photo else "30px 28px 26px"
     arrondi = "" if photo else "border-radius:22px 22px 0 0;"
+    legende = petite_note(legende_photo, 10.5, "14px 0 0") if legende_photo else ""
     picto = (
         f'<img src="{IMG}/tuile-{icone}.png" width="56" height="56" alt="" style="display:block;width:56px;height:56px;border:0;margin:0 0 14px">'
         if icone else ""
     )
-    return haut + f"""
-  <tr><td bgcolor="{C['nuit']}" class="px" style="background:{C['nuit']};padding:{pad};color:#ffffff;{arrondi}">
-    {picto}    <div style="font-size:11px;line-height:16px;font-weight:800;letter-spacing:.2em;text-transform:uppercase;color:{C['orNuit']}">{surtitre_}</div>
-    <h1 class="h1hero" style="margin:8px 0 10px;font-size:32px;line-height:37px;font-weight:700;letter-spacing:-.02em;color:#ffffff;font-family:{POLICE}">{titre}</h1>
-    <div style="font-size:15px;line-height:23px;color:{C['texteNuit']}">{intro}</div>
-    {suite}{legende}
-  </td></tr>"""
+    return haut + _ligne(
+        f'{picto}<div class="bt-to" style="font-size:11px;line-height:16px;font-weight:800;letter-spacing:.2em;text-transform:uppercase;color:{CLAIR["to"]}">{surtitre_}</div>'
+        f'<h1 class="h1hero bt-te" style="margin:8px 0 10px;font-size:32px;line-height:37px;font-weight:700;letter-spacing:-.02em;color:{CLAIR["te"]};font-family:{POLICE}">{titre}</h1>'
+        f'<div class="bt-tt" style="font-size:15px;line-height:23px;color:{CLAIR["tt"]}">{intro}</div>'
+        f'{suite}{legende}',
+        pad, extra=arrondi,
+    )
 
 
 def fenetre_site(url: str, contenu_rangees: str) -> str:
     """Fenêtre de navigateur autour d'une réplique du site : la barre d'adresse
-    montre l'URL réelle, cliquable. `contenu_rangees` : des <tr>."""
+    montre l'URL réelle, cliquable. `contenu_rangees` : des <tr>. Îlot clair
+    dans les deux modes (barre en couleur pleine, pas de dégradé)."""
     affichee = url.split("?", 1)[0].replace("https://", "")
     return f"""
-  <tr><td bgcolor="{C['nuit']}" style="background:{C['nuit']};padding:0 0 28px">
+  <tr><td bgcolor="{CLAIR['fd']}" class="bt-fd" style="background:{CLAIR['fd']};padding:0 0 28px">
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%"><tr><td class="px" style="padding:0 20px">
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:separate;border:1px solid #2A241A;
-    border-radius:16px;overflow:hidden;background:{C['page']};box-shadow:0 30px 60px -20px rgba(0,0,0,.55),0 12px 24px -12px rgba(0,0,0,.35)">
-    <tr><td bgcolor="#221D15" style="background:#221D15;background-image:linear-gradient(180deg,#2C261C,#1C1811);padding:10px 12px;border-radius:15px 15px 0 0">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:separate;border:1px solid {CLAIR['bord']};
+    border-radius:16px;overflow:hidden;background:{C['page']};box-shadow:0 18px 40px -24px rgba(17,24,39,.35)">
+    <tr><td bgcolor="#EFE8D8" style="background:#EFE8D8;padding:10px 12px;border-radius:15px 15px 0 0;border-bottom:1px solid {CLAIR['bord']}">
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;table-layout:fixed"><tr>
         <td width="52" style="width:52px;font-size:13px;line-height:13px;white-space:nowrap">
           <span style="color:#FF5F57">●</span><span style="color:#FEBC2E">●</span><span style="color:#28C840">●</span>
         </td>
-        <td><a href="{e(url)}" style="display:block;padding:5px 10px;border-radius:8px;background:#0F0C08;color:#D6C7A1;
+        <td><a href="{e(url)}" style="display:block;padding:5px 10px;border-radius:8px;background:#FFFFFF;border:1px solid {CLAIR['bord']};color:#57534E;
           font-size:11.5px;line-height:15px;text-decoration:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">&#128274; {e(affichee)}</a></td>
       </tr></table>
     </td></tr>
@@ -252,60 +318,63 @@ def rangee_site(contenu: str, padding: str = "16px 16px 0") -> str:
 
 
 def bouton(label: str, url: str) -> str:
-    """Bouton en relief : dégradé or, tranche sombre en bas, ombre portée."""
+    """Bouton orange PLEIN (pas de dégradé en image : Gmail inverserait le texte
+    blanc posé dessus sans toucher au dégradé), tranche sombre en bas."""
     return f"""
 <table role="presentation" cellpadding="0" cellspacing="0" align="center" style="margin:0 auto">
-  <tr><td align="center" bgcolor="#B45309" style="border-radius:14px;background:#B45309;background-image:linear-gradient(180deg,#E08A1E 0%,#C2620C 50%,#A14A08 100%);
-    border-top:1px solid #F5B54A;border-bottom:4px solid #6B2F06;box-shadow:0 14px 26px -12px rgba(180,83,9,.75)">
+  <tr><td align="center" bgcolor="{CLAIR['bouton']}" style="border-radius:14px;background-color:{CLAIR['bouton']};border-bottom:3px solid {CLAIR['boutonTranche']}">
     <!--[if mso]><a href="{e(url)}" style="font-size:16px;color:#ffffff;font-weight:bold;text-decoration:none;padding:16px 30px;display:block">{label} &rarr;</a><![endif]-->
-    <!--[if !mso]><!--><a href="{e(url)}" style="display:inline-block;padding:16px 30px;font-size:16px;line-height:20px;font-weight:800;color:#ffffff;text-shadow:0 1px 1px rgba(0,0,0,.35);
-      text-decoration:none;font-family:{POLICE};letter-spacing:-.01em">{label} &rarr;</a><!--<![endif]-->
+    <!--[if !mso]><!--><a href="{e(url)}" style="display:inline-block;padding:16px 30px;font-size:16px;line-height:20px;font-weight:800;color:#ffffff;
+      text-decoration:none;font-family:{POLICE};letter-spacing:-.01em;border-radius:14px">{label} &rarr;</a><!--<![endif]-->
   </td></tr>
 </table>"""
 
 
 def appel(titre: str, texte: str, label: str, url: str, note: str = "") -> str:
-    """Titre, phrase et bouton or, centrés sur fond nuit."""
-    note_html = f'<div style="margin-top:14px;font-size:12px;line-height:18px;color:{C["gris"]}">{note}</div>' if note else ""
-    return rangee_nuit(
-        f'<div style="font-size:19px;line-height:26px;font-weight:700;color:#ffffff;font-family:{POLICE};margin:0 0 6px">{titre}</div>'
-        f'<div style="font-size:14px;line-height:22px;color:{C["douxNuit"]};margin:0 0 20px">{texte}</div>'
+    """Titre, phrase et bouton, centrés."""
+    note_html = petite_note(note, 12, "14px 0 0") if note else ""
+    return _ligne(
+        f'<div class="bt-te" style="font-size:19px;line-height:26px;font-weight:700;color:{CLAIR["te"]};font-family:{POLICE};margin:0 0 6px">{titre}</div>'
+        f'<div class="bt-tt" style="font-size:14px;line-height:22px;color:{CLAIR["tt"]};margin:0 0 20px">{texte}</div>'
         f'{bouton(label, url)}{note_html}',
-        padding="0 28px 30px", centre=True,
+        "0 28px 30px", centre=True,
     )
 
 
 def encart(titre: str, html: str) -> str:
-    """Encadré explicatif sombre (« Comment lire », « À retenir »…)."""
-    return rangee_nuit(
-        f'<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:separate;background:#1D1810;border:1px solid #33291A;border-radius:16px">'
-        f'<tr><td style="padding:16px 18px;font-size:12.5px;line-height:20px;color:{C["douxNuit"]}">'
-        f'<div style="font-size:11px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;color:{C["orNuit"]};margin-bottom:6px">{titre}</div>'
+    """Encadré explicatif (« Comment lire », « À retenir »…)."""
+    return _ligne(
+        f'<table role="presentation" width="100%" cellpadding="0" cellspacing="0" bgcolor="{CLAIR["ca"]}" class="bt-ca" '
+        f'style="width:100%;border-collapse:separate;background:{CLAIR["ca"]};border:1px solid {CLAIR["bord"]};border-radius:16px">'
+        f'<tr><td class="bt-tt" style="padding:16px 18px;font-size:12.5px;line-height:20px;color:{CLAIR["tt"]}">'
+        f'<div class="bt-to" style="font-size:11px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;color:{CLAIR["to"]};margin-bottom:6px">{titre}</div>'
         f'{html}</td></tr></table>',
-        padding="0 20px 24px",
+        "0 20px 24px",
     )
 
 
 def fort(t: str) -> str:
-    """Mot en évidence dans un encart sombre."""
-    return f'<b style="color:#F3EBDA">{t}</b>'
+    """Mot en évidence dans le texte courant."""
+    return f'<b class="bt-te" style="color:{CLAIR["te"]}">{t}</b>'
 
 
 def bloc_instagram(accroche: str = "Les infos du jour, les coups de cœur et les arrivées, en story.") -> str:
+    """Carte claire : le dégradé de la marque reste dans le pictogramme, jamais
+    sous du texte. Ferme la carte du corps (coins bas)."""
     return f"""
-  <tr><td bgcolor="{C['nuit']}" class="px" style="background:{C['nuit']};padding:0 20px 28px;border-radius:0 0 22px 22px">
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" bgcolor="#2A1B3D" style="width:100%;border-collapse:separate;border-radius:18px;
-      background:#2A1B3D;background-image:linear-gradient(120deg,#F58529 0%,#DD2A7B 45%,#8134AF 75%,#515BD4 100%);border-bottom:3px solid #3B1E5A;box-shadow:0 18px 34px -18px rgba(221,42,123,.7)">
+  <tr><td bgcolor="{CLAIR['fd']}" class="bt-fd px" style="background:{CLAIR['fd']};padding:0 20px 28px;border-radius:0 0 22px 22px">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" bgcolor="{CLAIR['ca']}" class="bt-ca" style="width:100%;border-collapse:separate;border-radius:18px;
+      background:{CLAIR['ca']};border:1px solid {CLAIR['bord']}">
       <tr>
-        <td width="76" valign="middle" style="width:76px;padding:16px 0 16px 18px">
-          <a href="{INSTAGRAM}"><img src="{IMG}/instagram-glyph.png" width="52" height="52" alt="Instagram" style="display:block;width:52px;height:52px;border:0;border-radius:14px;background:#ffffff"></a>
+        <td width="72" valign="middle" style="width:72px;padding:14px 0 14px 16px">
+          <a href="{INSTAGRAM}"><img src="{IMG}/instagram-glyph.png" width="50" height="50" alt="Instagram" style="display:block;width:50px;height:50px;border:0;border-radius:14px"></a>
         </td>
-        <td valign="middle" style="padding:16px 12px">
-          <div style="font-size:17px;line-height:22px;font-weight:800;color:#ffffff;font-family:{POLICE}">@blackturf.fr</div>
-          <div style="font-size:13px;line-height:19px;color:#FDE7F3">{accroche}</div>
+        <td valign="middle" style="padding:14px 10px">
+          <div class="bt-te" style="font-size:16px;line-height:21px;font-weight:800;color:{CLAIR['te']};font-family:{POLICE}">@blackturf.fr</div>
+          <div class="bt-td" style="font-size:13px;line-height:19px;color:{CLAIR['td']}">{accroche}</div>
         </td>
-        <td align="right" valign="middle" style="padding:16px 18px 16px 0">
-          <a href="{INSTAGRAM}" style="display:inline-block;padding:10px 14px;border-radius:12px;background:#ffffff;color:#9B1B6B;font-size:13px;font-weight:800;text-decoration:none;white-space:nowrap;box-shadow:0 6px 14px -6px rgba(0,0,0,.45)">Suivre</a>
+        <td align="right" valign="middle" style="padding:14px 16px 14px 0">
+          <a href="{INSTAGRAM}" style="display:inline-block;padding:10px 14px;border-radius:12px;background-color:#C13584;color:#ffffff;font-size:13px;font-weight:800;text-decoration:none;white-space:nowrap">Suivre</a>
         </td>
       </tr>
     </table>
@@ -313,40 +382,36 @@ def bloc_instagram(accroche: str = "Les infos du jour, les coups de cœur et les
 
 
 def fermeture() -> str:
-    """Arrondi bas de la carte nuit, pour les mails sans bloc Instagram."""
+    """Arrondi bas de la carte du corps, pour les mails sans bloc Instagram."""
     return (
-        f'<tr><td bgcolor="{C["nuit"]}" style="background:{C["nuit"]};height:8px;line-height:8px;font-size:0;'
+        f'<tr><td bgcolor="{CLAIR["fd"]}" class="bt-fd" style="background:{CLAIR["fd"]};height:8px;line-height:8px;font-size:0;'
         f'border-radius:0 0 22px 22px">&nbsp;</td></tr>'
     )
 
 
 def pied(mention: str, responsable: str = RESPONSABLE) -> str:
+    liens = '<span class="bt-td" style="color:#A8A08F">&nbsp;·&nbsp;</span>'.join(
+        lien_or(t, u, souligne=False) for t, u in [
+            ("Courses du jour", f"{SITE}/programme"), ("Value bets", f"{SITE}/value-bets"),
+            ("Palmarès", f"{SITE}/track-record"), ("Instagram", INSTAGRAM)])
     return f"""
   <tr><td style="padding:26px 20px 0;text-align:center">
     <a href="{SITE}"><img src="{IMG}/logo-medaillon.png" width="60" height="60" alt="BlackTurf" style="display:inline-block;width:60px;height:60px;border:0"></a>
-    <div style="margin:10px 0 14px;font-size:12px;line-height:18px">
-      <a href="{SITE}/programme" style="color:{C['orNuit']};text-decoration:none;font-weight:700">Courses du jour</a>
-      <span style="color:#5B5140">&nbsp;·&nbsp;</span>
-      <a href="{SITE}/value-bets" style="color:{C['orNuit']};text-decoration:none;font-weight:700">Value bets</a>
-      <span style="color:#5B5140">&nbsp;·&nbsp;</span>
-      <a href="{SITE}/palmares" style="color:{C['orNuit']};text-decoration:none;font-weight:700">Palmarès</a>
-      <span style="color:#5B5140">&nbsp;·&nbsp;</span>
-      <a href="{INSTAGRAM}" style="color:{C['orNuit']};text-decoration:none;font-weight:700">Instagram</a>
-    </div>
-    <div style="font-size:11.5px;line-height:18px;color:{C['gris']};max-width:520px;margin:0 auto">{e(responsable)}</div>
-    <div style="font-size:11.5px;line-height:18px;color:{C['gris']};max-width:520px;margin:12px auto 0">{mention}</div>
+    <div style="margin:10px 0 14px;font-size:12px;line-height:18px">{liens}</div>
+    <div class="bt-td" style="font-size:11.5px;line-height:18px;color:{CLAIR['td']};max-width:520px;margin:0 auto">{e(responsable)}</div>
+    <div class="bt-td" style="font-size:11.5px;line-height:18px;color:{CLAIR['td']};max-width:520px;margin:12px auto 0">{mention}</div>
   </td></tr>"""
 
 
 def lien_pied(label: str, url: str) -> str:
-    return f'<a href="{e(url)}" style="color:{C["douxNuit"]};text-decoration:underline">{label}</a>'
+    return f'<a class="bt-td" href="{e(url)}" style="color:{CLAIR["td"]};text-decoration:underline">{label}</a>'
 
 
 def document(titre: str, preheader: str, rangees: str, lien_web: Optional[str] = None) -> str:
-    """Page complète : <head>, fond nuit, colonne de 640 px, `rangees` (des <tr>)."""
+    """Page complète : <head>, fond de page, colonne de 640 px, `rangees` (des <tr>)."""
     web = (
         f'<tr><td style="padding:0 0 10px;text-align:center;font-size:11px;line-height:16px">'
-        f'<a href="{e(lien_web)}" style="color:{C["gris"]};text-decoration:underline">Lire et partager sur le web</a></td></tr>'
+        f'<a class="bt-td" href="{e(lien_web)}" style="color:{CLAIR["td"]};text-decoration:underline">Lire et partager sur le web</a></td></tr>'
         if lien_web else ""
     )
     return f"""<!doctype html>
@@ -355,18 +420,20 @@ def document(titre: str, preheader: str, rangees: str, lien_web: Optional[str] =
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="x-apple-disable-message-reformatting">
-<meta name="color-scheme" content="light">
-<meta name="supported-color-schemes" content="light">
+<meta name="color-scheme" content="light dark">
+<meta name="supported-color-schemes" content="light dark">
 <title>{e(titre)} — BlackTurf</title>
 <!--[if mso]><noscript><xml><o:OfficeDocumentSettings><o:PixelsPerInch>96</o:PixelsPerInch></o:OfficeDocumentSettings></xml></noscript><![endif]-->
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&display=swap');
+  :root{{color-scheme:light dark;supported-color-schemes:light dark}}
   body{{margin:0;padding:0;-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%}}
   a{{text-decoration:none}}
   @media only screen and (max-width:620px){{
     .wrap{{width:100%!important}}
     .outer{{padding:12px 4px 24px!important}}
-    .px{{padding-left:10px!important;padding-right:10px!important}}
+    .px{{padding-left:14px!important;padding-right:14px!important}}
+    .pxi{{padding-left:10px!important;padding-right:10px!important}}
     .col2{{display:block!important;width:100%!important;padding:0 0 10px 0!important}}
     .stat{{padding:0 2px!important}}
     .h1hero{{font-size:28px!important;line-height:33px!important}}
@@ -388,7 +455,7 @@ def document(titre: str, preheader: str, rangees: str, lien_web: Optional[str] =
     .mention{{font-size:9.5px!important;letter-spacing:.04em!important;padding:5px 8px!important;white-space:normal!important}}
     .logo{{padding:8px 10px!important}}
     .marque{{font-size:19px!important;padding-left:6px!important}}
-    .logoimg{{width:64px!important;height:64px!important}}
+    .logoimg{{width:56px!important;height:56px!important}}
     .recap{{font-size:17px!important;line-height:22px!important}}
     .recap span{{font-size:12px!important;letter-spacing:0!important}}
     .pf{{padding:8px 3px!important;font-size:12px!important}}
@@ -396,21 +463,22 @@ def document(titre: str, preheader: str, rangees: str, lien_web: Optional[str] =
   }}
   @media only screen and (max-width:360px){{
     .marque{{font-size:16px!important}}
-    .logoimg{{width:54px!important;height:54px!important}}
+    .logoimg{{width:48px!important;height:48px!important}}
     .rk{{width:30px!important}}
     .cas{{width:44px!important}}
     .vic{{width:58px!important}}
     .vicpct{{font-size:18px!important;line-height:22px!important}}
     .nom{{font-size:13px!important}}
   }}
+  {_css_sombre()}
 </style>
 </head>
-<body style="margin:0;padding:0;background:{C['fond']};font-family:{TEXTE};color:{C['encre2']}">
-<div style="display:none;max-height:0;overflow:hidden;mso-hide:all;font-size:1px;line-height:1px;color:{C['fond']}">{e(preheader)}&#8203;&zwnj;&nbsp;&#8203;&zwnj;&nbsp;&#8203;&zwnj;&nbsp;&#8203;&zwnj;&nbsp;&#8203;&zwnj;&nbsp;</div>
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" bgcolor="{C['fond']}" style="width:100%;table-layout:fixed;background:{C['fond']};background-image:radial-gradient(ellipse at 50% 0%,#3A2E17 0%,#15110B 45%,#0F0D09 100%)">
+<body class="bt-pg" style="margin:0;padding:0;background:{CLAIR['pg']};font-family:{TEXTE};color:{CLAIR['tt']}">
+<div style="display:none;max-height:0;overflow:hidden;mso-hide:all;font-size:1px;line-height:1px;color:{CLAIR['pg']}">{e(preheader)}&#8203;&zwnj;&nbsp;&#8203;&zwnj;&nbsp;&#8203;&zwnj;&nbsp;&#8203;&zwnj;&nbsp;&#8203;&zwnj;&nbsp;</div>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" bgcolor="{CLAIR['pg']}" class="bt-pg" style="width:100%;table-layout:fixed;background:{CLAIR['pg']}">
 <tr><td align="center" class="outer" style="padding:20px 8px 32px">
 <!--[if mso]><table role="presentation" width="640" align="center"><tr><td><![endif]-->
-<table role="presentation" class="wrap" width="640" cellpadding="0" cellspacing="0" style="width:640px;max-width:640px">
+<table role="presentation" class="wrap" width="640" cellpadding="0" cellspacing="0" style="width:640px;max-width:640px;border-collapse:separate">
 {web}{rangees}
 </table>
 <!--[if mso]></td></tr></table><![endif]-->

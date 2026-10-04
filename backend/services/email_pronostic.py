@@ -346,7 +346,7 @@ def _ligne_cheval(c: dict, meilleur: Optional[int]) -> str:
         niveau = max(1, min(4, int(c["niveau_value_bet"])))
         badges.append(
             f'<span style="display:inline-block;margin:0 4px 4px 0;padding:3px 7px;border-radius:7px;background:{C["vertPlein"]};'
-            f'background-image:linear-gradient(180deg,#10B981,#047857);border-bottom:2px solid #065F46;'
+            f'border-bottom:2px solid #065F46;'
             f'color:#ffffff;font-size:10.5px;line-height:14px;font-weight:800;letter-spacing:.02em">'
             f'VALEUR {"+" if ev > 0 else ""}{ev} % <span style="color:#FDE68A">{"★" * niveau}</span></span>'
         )
@@ -571,8 +571,8 @@ def rendu_html(course: dict, chevaux: list[dict], lien_course: str, lien_desinsc
         f"{D.fort('Cote juste')} = 1 / probabilité de victoire, sans marge — le prix à partir duquel le pari "
         "devient rentable si la probabilité est exacte. "
         f"{D.fort('Lecture du prix')} = écart entre la cote payée par le marché et cette cote juste : "
-        '<span style="color:#34D399">vert</span> quand le marché paie au-dessus, '
-        '<span style="color:#FB7185">rouge</span> en dessous. '
+        f"{D.vert('vert')} quand le marché paie au-dessus, "
+        f"{D.rouge('rouge')} en dessous. "
         "Chiffres figés à l’envoi : les cotes continuent d’évoluer jusqu’au départ."
     )
     mention = (
@@ -584,7 +584,7 @@ def rendu_html(course: dict, chevaux: list[dict], lien_course: str, lien_desinsc
         D.barre_logo("&#9733; Pronostic IA offert")
         + D.entete(
             hero, f"Votre pronostic · {e(jour)}", e(nom),
-            f"{e(hippodrome)} · départ <b style=\"color:#ffffff\">{e(heure)}</b>. Voici la fiche de la course telle "
+            f"{e(hippodrome)} · départ {D.fort(e(heure))}. Voici la fiche de la course telle "
             "qu’elle apparaît sur BlackTurf, avec le classement complet de l’algorithme.",
             lien=lien_course, suite=_podium_express(chevaux),
         )
@@ -602,37 +602,38 @@ def rendu_html(course: dict, chevaux: list[dict], lien_course: str, lien_desinsc
 
 
 def _podium_express(chevaux: list[dict]) -> str:
-    """Les trois premiers du modèle en un coup d'œil, sur le fond sombre de
-    l'en-tête — médaille, casaque, numéro, nom, chance de victoire et cote."""
+    """Les trois premiers du modèle en un coup d'œil, sous le titre — médaille,
+    casaque, numéro, nom, chance de victoire et cote. Îlot clair dans les deux
+    modes (cf. « Clair / sombre » dans email_design)."""
     if not chevaux:
         return ""
     cellules = ""
     for c in chevaux[:3]:
         rang = c["rang_predit"]
-        teinte = {1: "#F5C451", 2: "#CBD5E1", 3: "#F59E6B"}.get(rang, "#E3C27A")
+        teinte = {1: "#D97706", 2: "#94A3B8", 3: "#C2410C"}.get(rang, "#B45309")
         cote_txt = f'cote {cote(c["cote"])}' if c.get("cote") else "cote —"
         cellules += f"""
       <td class="pod" width="33%" valign="top" style="width:33%;padding:0 4px">
-        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:separate;background:#221C12;
-          background-image:linear-gradient(180deg,#30271A,#1A150D);border:1px solid #3A2F1D;border-top:2px solid {teinte};border-bottom:3px solid #0A0805;
-          border-radius:16px;box-shadow:0 16px 28px -16px rgba(0,0,0,.9)">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" bgcolor="#ffffff" style="width:100%;border-collapse:separate;background:#ffffff;
+          border:1px solid {C['bord']};border-top:3px solid {teinte};border-bottom:3px solid #E3DCCB;
+          border-radius:16px;box-shadow:0 14px 26px -18px rgba(17,24,39,.35)">
           <tr><td class="cellpod" align="center" style="padding:14px 10px 12px;text-align:center">
             <table role="presentation" cellpadding="0" cellspacing="0" align="center" style="margin:0 auto"><tr>
               <td valign="middle"><img src="{IMG}/medaille-{rang}.png" width="30" height="30" alt="{rang}" style="display:block;width:30px;height:30px;border:0"></td>
               <td valign="middle" style="padding-left:6px">
-                <img src="{e(_url_casaque(c.get('casaque_url')))}" width="40" height="40" alt="Casaque du n°{e(c['numero'])}" style="display:block;width:40px;height:40px;border:0;border-radius:10px;background:#ffffff;padding:3px">
+                <img src="{e(_url_casaque(c.get('casaque_url')))}" width="40" height="40" alt="Casaque du n°{e(c['numero'])}" style="display:block;width:40px;height:40px;border:0;border-radius:10px;background:#ffffff;border:1px solid {C['bord']};padding:3px">
               </td>
             </tr></table>
-            <div class="podpct" style="margin-top:8px;font-size:26px;line-height:30px;font-weight:700;color:#ffffff;font-family:{POLICE};letter-spacing:-.03em">{pct(c['p1'])}</div>
-            <div style="font-size:9.5px;line-height:12px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:#8C8272">de victoire</div>
-            <div style="margin-top:8px"><span style="display:inline-block;padding:2px 7px;border-radius:6px;background:#F3EBDA;color:#14110C;font-size:12px;line-height:16px;font-weight:800;font-family:{POLICE}">{e(c['numero'])}</span></div>
-            <div class="podnom" style="margin-top:5px;font-size:12.5px;line-height:16px;color:#F3EBDA;font-weight:700;word-break:break-word">{e(c['nom'])}</div>
-            <div style="margin-top:3px;font-size:11px;line-height:15px;color:{teinte}">{cote_txt}</div>
+            <div class="podpct" style="margin-top:8px;font-size:26px;line-height:30px;font-weight:700;color:{C['encre']};font-family:{POLICE};letter-spacing:-.03em">{pct(c['p1'])}</div>
+            <div style="font-size:9.5px;line-height:12px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:{C['stone5']}">de victoire</div>
+            <div style="margin-top:8px"><span style="display:inline-block;padding:2px 7px;border-radius:6px;background:{C['numero']};color:#ffffff;font-size:12px;line-height:16px;font-weight:800;font-family:{POLICE}">{e(c['numero'])}</span></div>
+            <div class="podnom" style="margin-top:5px;font-size:12.5px;line-height:16px;color:{C['encre2']};font-weight:700;word-break:break-word">{e(c['nom'])}</div>
+            <div style="margin-top:3px;font-size:11px;line-height:15px;font-weight:700;color:{C['stone6']}">{cote_txt}</div>
           </td></tr>
         </table>
       </td>"""
     return f"""
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;margin-top:22px">
-      <tr><td style="padding:0 4px 10px;font-size:11px;font-weight:800;letter-spacing:.16em;text-transform:uppercase;color:#8C8272">Le podium de l’algorithme</td></tr>
+      <tr><td style="padding:0 4px 10px;font-size:11px;font-weight:800;letter-spacing:.16em;text-transform:uppercase;color:{C['or']}">Le podium de l’algorithme</td></tr>
     </table>
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;table-layout:fixed"><tr>{cellules}</tr></table>"""

@@ -2,7 +2,7 @@
 `layout` utilisée par les mails de confirmation.
 
 Même habillage que le mail « pronostic gratuit » (services/email_design.py) :
-fond nuit, photo fondue, fenêtre du site, bouton or en relief, bloc Instagram.
+photo en carte, fenêtre du site, bouton orange, bloc Instagram, en clair et en sombre.
 Tables et styles en ligne uniquement ; une seule colonne lisible sur téléphone.
 """
 from html import escape
@@ -301,12 +301,12 @@ def weekly(data, unsubscribe=None, archive=None):
     apercu = f"+{euro(winners[0]['net'])} net sur le meilleur plan — {intro}" if winners else intro
     rangees = (
         D.barre_logo("La lettre hebdomadaire")
-        + D.entete("bilan", "La lettre hebdomadaire", e(title), e(intro), lien=archive or SITE + "/palmares",
+        + D.entete("bilan", "La lettre hebdomadaire", e(title), e(intro), lien=archive or SITE + "/track-record",
                    legende_photo="Photo d’illustration, sans lien avec les courses présentées.")
-        + D.fenetre_site(SITE + "/palmares", rangees_site)
+        + D.fenetre_site(SITE + "/track-record", rangees_site)
         + D.appel("Tous les résultats, course par course",
                   "Le palmarès détaille chaque plan publié, figé avant le départ puis réglé aux rapports officiels.",
-                  "Lire et partager le bilan", archive or SITE + "/palmares")
+                  "Lire et partager le bilan", archive or SITE + "/track-record")
         + D.encart("À retenir",
                    f"Le {D.fort('retour')} inclut la mise. Le {D.fort('bénéfice net')} est ce qu’il reste une fois toutes "
                    "les mises du plan déduites. Les meilleurs résultats ne représentent pas à eux seuls la performance "
@@ -314,7 +314,7 @@ def weekly(data, unsubscribe=None, archive=None):
         + D.bloc_instagram()
         + D.pied(_mention(unsubscribe))
     )
-    text.extend([archive or SITE + "/palmares", INSTAGRAM, RESPONSABLE])
+    text.extend([archive or SITE + "/track-record", INSTAGRAM, RESPONSABLE])
     if unsubscribe:
         text.append("Désabonnement : " + unsubscribe)
     return D.document(title, apercu, rangees, lien_web=archive), "\n\n".join(text)
