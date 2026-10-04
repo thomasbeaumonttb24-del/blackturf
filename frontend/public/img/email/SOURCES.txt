@@ -1,2 +1,3 @@
 logo-medaillon.png : logo officiel du site (frontend/public/logo-transparent.png), non retouché, sur médaillon blanc. Utilisé par tous les mails.
 logo-nuit.png, cheval-or.png : anciennes versions recolorées du logo (septembre 2026). Plus générées ni utilisées par les nouveaux mails ; conservées car les mails déjà envoyés les chargent depuis blackturf.fr.
+formules-1004/*.jpg : visuels du mail « nouvelles formules » du 4 octobre 2026 (rendus HTML/CSS -> JPEG 2x, sources dans mail_formules_2026-10-04/sources/visuels.html). Photo de fond du hero : img/hero.jpg du site. Ne pas supprimer : les mails envoyés les chargent depuis blackturf.fr.
