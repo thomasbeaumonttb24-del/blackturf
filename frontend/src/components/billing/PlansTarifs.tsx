@@ -112,7 +112,7 @@ export function PlansTarifs() {
             <span className="text-3xl font-extrabold">{PRIX.standard[periodicite]}</span>
             <span className="text-muted-foreground">/mois</span>
           </div>
-          <p className="h-4 text-xs text-muted-foreground">
+          <p className="min-h-4 text-xs leading-4 text-muted-foreground">
             {annuel ? `${PRIX.standard.annuelTotal} payés en une fois` : "Sans engagement"}
           </p>
           <p className="mb-5 mt-1 text-xs font-semibold text-emerald-700">{PRIX.standard.parJour[periodicite]} par jour</p>
@@ -144,10 +144,10 @@ export function PlansTarifs() {
           <h2 className="text-xl font-bold">Expert</h2>
           <p className="text-xs text-stone-300">Tout BlackTurf, sans aucune limite</p>
           <div className="mt-4 flex items-baseline gap-1">
-            <span className="text-5xl font-extrabold text-amber-300">{PRIX.expert[periodicite]}</span>
+            <span className="text-5xl font-extrabold leading-[1.15] text-amber-300">{PRIX.expert[periodicite]}</span>
             <span className="text-stone-300">/mois</span>
           </div>
-          <p className="h-4 text-xs text-stone-300">
+          <p className="min-h-4 text-xs leading-4 text-stone-300">
             {annuel
               ? `${PRIX.expert.annuelTotal} payés en une fois`
               : "5 € de moins que le Pass Mois · résiliable à tout moment"}

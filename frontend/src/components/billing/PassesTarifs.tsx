@@ -136,7 +136,7 @@ export function PassesTarifs() {
                 {/* Filleul : 5 € REMBOURSÉS après paiement sur Semaine et Mois, une fois
                     sa carte vérifiée. Jamais sur le Pass Jour, que la remise rendrait gratuit. */}
                 <div className="mt-5 flex flex-wrap items-baseline gap-1.5">
-                  <span className={cn("font-display text-5xl font-extrabold tracking-tight", vedette && "text-amber-300")}>{p.prix}&nbsp;€</span>
+                  <span className={cn("font-display text-5xl font-extrabold leading-[1.25] tracking-tight", vedette && "text-amber-300")}>{p.prix}&nbsp;€</span>
                   <span className={cn("text-xs", vedette ? "text-stone-300" : "text-muted-foreground")}>une seule fois</span>
                 </div>
                 {remiseFilleul && (

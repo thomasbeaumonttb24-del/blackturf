@@ -955,7 +955,7 @@ export default async function HomePage() {
                     <h3 className="font-display text-xl font-bold text-gray-900 mb-0.5">{plan.name}</h3>
                     <p className="text-xs text-gray-600 mb-4">{plan.desc}</p>
                     <div className="flex items-baseline gap-1">
-                      <span className={`num-display text-4xl font-extrabold ${plan.popular ? "text-brand-gold-dark" : "text-gray-900"}`}>{plan.price}</span>
+                      <span className={`num-display text-4xl font-extrabold !leading-[1.2] ${plan.popular ? "text-brand-gold-dark" : "text-gray-900"}`}>{plan.price}</span>
                       <span className="text-gray-600 text-sm">{plan.period}</span>
                     </div>
                   </div>
