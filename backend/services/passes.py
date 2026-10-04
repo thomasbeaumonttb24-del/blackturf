@@ -69,7 +69,12 @@ def prix_stripe(duree: str) -> str | None:
     return prix["id"]
 
 
-RENONCIATION_VERSION = "v1"
+# v2 : case cochée SUR la page de paiement Stripe (consent_collection), attestée
+# par Stripe dans `session.consent`. v1 : case sur la page /tarifs (version du
+# premier déploiement du 2026-10-04) — encore acceptée pour les sessions créées
+# avant la bascule.
+RENONCIATION_VERSION = "v2"
+VERSIONS_RENONCIATION = ("v1", "v2")
 RENONCIATION_TEXTE = (
     "Je demande l'accès immédiat au service et je renonce expressément à mon "
     "droit de rétractation. Paiement unique, sans renouvellement, non remboursable."
@@ -108,16 +113,25 @@ def valider_session(session) -> dict:
     user_id = meta.get("user_id")
     if not user_id:
         raise PassInvalide("compte absent")
-    if meta.get("renonciation_version") != RENONCIATION_VERSION or not meta.get("renonciation_at"):
+    version = meta.get("renonciation_version")
+    if version not in VERSIONS_RENONCIATION:
         raise PassInvalide("renonciation absente")
-    try:
-        renonciation_at = _aware(datetime.fromisoformat(meta["renonciation_at"]))
-    except ValueError:
-        raise PassInvalide("renonciation illisible")
+    if version == "v2":
+        # La case est sur la page Stripe : Stripe refuse le paiement sans elle et
+        # l'atteste ici. Horodatage = encaissement (la case précède le paiement).
+        if ((session.get("consent") or {}).get("terms_of_service")) != "accepted":
+            raise PassInvalide("renonciation non attestée par Stripe")
+        renonciation_at = _maintenant()
+    else:
+        try:
+            renonciation_at = _aware(datetime.fromisoformat(meta.get("renonciation_at") or ""))
+        except ValueError:
+            raise PassInvalide("renonciation illisible")
     pi = session.get("payment_intent")
     if isinstance(pi, dict):
         pi = pi.get("id")
     return {
+        "renonciation_version": version,
         "session_id": session.get("id"),
         "user_id": user_id,
         "customer": session.get("customer"),
@@ -200,7 +214,7 @@ async def accorder(db: AsyncSession, session) -> tuple[PassAcces, bool]:
         user_id=user.user_id, duree=v["duree"], plan=PLAN_PASS,
         montant_cents=v["montant_cents"], stripe_session_id=v["session_id"],
         stripe_payment_intent=v["payment_intent"], debut=debut, fin=fin, statut="actif",
-        renonciation_at=v["renonciation_at"], renonciation_version=RENONCIATION_VERSION,
+        renonciation_at=v["renonciation_at"], renonciation_version=v["renonciation_version"],
     )
     db.add(p)
     try:
@@ -275,16 +289,31 @@ async def expirer_passes(db: AsyncSession, user_id: Optional[str] = None) -> int
     if not echus:
         return 0
     await db.flush()
+    a_relancer: list[User] = []
     for uid in {p.user_id for p in echus}:
         user = await db.get(User, uid)
         if user is None:
             continue
         precedent = user.plan
         user.plan = await _plan_effectif(uid, db)
+        # Relance « continuez avec Expert » : seulement si le compte retombe
+        # vraiment en gratuit (ni abonnement, ni pass suivant, ni accès offert)
+        # et n'a pas refusé les e-mails commerciaux. Une seule fois par échéance :
+        # `expire_traite_at` empêche de repasser ici pour le même pass.
+        relance = user.plan == "free" and user.marketing_opt_out_at is None
         await journaliser(db, "pass_termine", user, None, plan=user.plan,
-                          plan_precedent=precedent, notifier=False)
+                          plan_precedent=precedent, notifier=False,
+                          detail={"relance_expert": relance})
+        if relance:
+            a_relancer.append(user)
     await db.commit()
-    log.info("passes.echus", n=len(echus))
+    log.info("passes.echus", n=len(echus), relances=len(a_relancer))
+    for user in a_relancer:
+        try:
+            from services.email_compte import envoyer_fin_pass
+            await envoyer_fin_pass(user)
+        except Exception as e:  # noqa: BLE001 — l'échéance est appliquée, l'e-mail n'est qu'une relance
+            log.warning("passes.email_fin_echoue", user_id=user.user_id, error=str(e)[:150])
     return len(echus)
 
 

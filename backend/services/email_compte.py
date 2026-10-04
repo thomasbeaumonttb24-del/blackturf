@@ -319,3 +319,41 @@ async def envoyer_confirmation_pass(user, p) -> None:
                                     RENONCIATION_TEXTE, p.renonciation_at)
     await send_email(to=user.email, subject=f"BlackTurf — {libelle} confirmé",
                      html=html, text=texte)
+
+def fin_pass(prenom: Optional[str]) -> tuple[str, str]:
+    """Fin d'un pass sans renouvellement : on propose la suite, l'abonnement Expert."""
+    detail = ("Votre pass BlackTurf vient de se terminer : comme prévu, rien n’a été prélevé et "
+              "votre compte est revenu à la formule gratuite (1 classement complet par jour).")
+    offre = ("Vous jouez chaque semaine ? L’abonnement Expert à 19 € par mois vous donne exactement le "
+             "même accès, sans coupure, pour 5 € de moins que le Pass Mois. Il se résilie à tout moment, "
+             "en deux clics depuis votre profil.")
+    carte = (
+        D.surtitre("Et maintenant ?")
+        + f'<div style="font-size:14px;line-height:22px;color:{C["slate7"]}">{e(detail)}</div>'
+        + f'<div style="margin-top:14px;font-size:14px;line-height:22px;color:{C["slate7"]}">{e(offre)}</div>'
+        + f'<div style="margin-top:14px;font-size:13px;line-height:20px;color:{C["slate7"]}">Juste pour une journée ? '
+          f'Le Pass Jour reste à 5 €, sans abonnement.</div>'
+    )
+    rangees = (
+        D.barre_logo("Votre pass")
+        + D.entete(None, "Pass terminé", "Continuez avec Expert", "19 € par mois, résiliable à tout moment.",
+                   icone="valide")
+        + _carte_claire(carte)
+        + _action("Passer à Expert — 19 €/mois", SITE + "/tarifs#formules", "")
+        + D.pied("Message lié à votre achat sur blackturf.fr.")
+    )
+    saut = chr(10)
+    texte = saut.join([
+        f"Bonjour {prenom or ''},", "", detail.replace(chr(8217), chr(39)), "",
+        offre.replace(chr(8217), chr(39)), "",
+        f"Passer à Expert : {SITE}/tarifs#formules",
+        f"Ou un Pass Jour à 5 € : {SITE}/tarifs#passes", "", D.RESPONSABLE,
+    ])
+    return D.document("Votre pass est terminé", detail, rangees), texte
+
+
+async def envoyer_fin_pass(user) -> None:
+    from services.alerts import send_email
+
+    html, texte = fin_pass(user.prenom)
+    await send_email(to=user.email, subject="BlackTurf — Votre pass est terminé", html=html, text=texte)

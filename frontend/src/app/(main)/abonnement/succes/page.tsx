@@ -87,6 +87,21 @@ function PassSucces({ duree, sessionId }: { duree: string; sessionId: string }) 
                 <Link href="/value-bets">Paris de valeur</Link>
               </Button>
             </div>
+
+            {/* Le pass est une porte d'entrée : l'abonnement Expert mensuel est la suite. */}
+            <div className="rounded-2xl bg-gradient-to-br from-stone-900 via-stone-900 to-emerald-950 p-5 text-left text-white ring-1 ring-amber-400/60 shadow-[0_24px_50px_-28px_rgba(6,78,59,.7)]">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-amber-300">Pour la suite</p>
+              <p className="mt-1 font-semibold">
+                Vous jouez chaque semaine ? <span className="text-amber-300">Expert à 19&nbsp;€/mois</span> : 5&nbsp;€ de
+                moins que le Pass Mois, jamais coupé, résiliable en deux clics.
+              </p>
+              <p className="mt-1 text-xs text-stone-300">
+                Rien ne presse : profitez de votre pass, on vous le rappellera à son échéance.
+              </p>
+              <Link href="/tarifs#formules" className="mt-3 inline-flex items-center gap-1.5 text-sm font-semibold text-amber-300 underline underline-offset-2">
+                Voir l&apos;abonnement Expert <ArrowRight className="h-4 w-4" />
+              </Link>
+            </div>
           </div>
         )}
       </div>

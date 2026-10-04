@@ -45,6 +45,17 @@ export function CheckoutButton({ plan, periodicite, label, variant = "brand", si
       return;
     }
 
+    // Pass en cours : l'abonnement démarre (et se paie) aujourd'hui, le pass ne
+    // se met pas en pause. On le dit avant le paiement plutôt qu'après.
+    if (user.pass_fin && !abonne) {
+      const fin = new Date(user.pass_fin).toLocaleString("fr-FR", {
+        day: "numeric", month: "long", hour: "2-digit", minute: "2-digit", timeZone: "Europe/Paris",
+      });
+      if (!window.confirm(`Votre pass court jusqu'au ${fin}. L'abonnement ${nomPlan} démarre dès aujourd'hui (premier paiement maintenant). Continuer ?`)) {
+        return;
+      }
+    }
+
     setLoading(true);
     try {
       let response = await api.post("/stripe/checkout", { plan, periodicite });

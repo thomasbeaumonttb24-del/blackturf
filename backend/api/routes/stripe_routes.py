@@ -587,8 +587,9 @@ PASS_CUMUL_MAX = timedelta(days=31)
 
 class PassRequest(BaseModel):
     duree: str  # jour / semaine / mois
-    # Case « accès immédiat + renonciation au droit de rétractation » cochée.
-    # Exigée ICI, côté serveur : un appel direct à l'API sans la case est refusé.
+    # Ignoré depuis la v2 : la case de renonciation est sur la page de paiement
+    # Stripe (consent_collection), qui refuse de payer sans elle. Gardé pour les
+    # pages encore en cache qui l'envoient.
     renonciation: bool = False
 
 
@@ -612,12 +613,6 @@ async def creer_checkout_pass(
 
     if body.duree not in passes.PASSES:
         raise HTTPException(status_code=400, detail="Durée invalide")
-    if body.renonciation is not True:
-        raise HTTPException(
-            status_code=400,
-            detail="Cochez la case de demande d'accès immédiat et de renonciation au "
-                   "droit de rétractation pour continuer.",
-        )
     if user.is_admin:
         raise HTTPException(status_code=409, detail="Un compte administrateur a déjà accès à tout.")
     vivants = [s for s in await _subs_vivantes(user.user_id, db) if s.statut in STATUTS_ACCES]
@@ -650,7 +645,6 @@ async def creer_checkout_pass(
 
     metadata = {
         "type": "pass", "duree": body.duree, "user_id": user.user_id,
-        "renonciation_at": datetime.now(timezone.utc).isoformat(),
         "renonciation_version": passes.RENONCIATION_VERSION,
     }
     price_id = passes.prix_stripe(body.duree) if _stripe_joignable() else None
@@ -672,7 +666,16 @@ async def creer_checkout_pass(
         # Le paiement porte aussi les métadonnées : un remboursement ou une
         # contestation (événements de charge) retrouve ainsi le pass.
         payment_intent_data={"metadata": metadata, "description": f"BlackTurf — {libelle}"},
-        custom_text={"submit": {"message": passes.RENONCIATION_TEXTE}},
+        # Case OBLIGATOIRE sur la page Stripe : accès immédiat + renonciation au
+        # droit de rétractation. Stripe bloque le paiement tant qu'elle n'est pas
+        # cochée et l'atteste dans `session.consent` (vérifié à l'octroi).
+        consent_collection={"terms_of_service": "required"},
+        custom_text={
+            "terms_of_service_acceptance": {
+                "message": passes.RENONCIATION_TEXTE + f" [Conditions]({settings.frontend_url}/cgv#passes)",
+            },
+            "submit": {"message": "Paiement unique : aucun abonnement, aucun prélèvement suivant."},
+        },
         # Session courte (minimum Stripe : 30 min) : pas de vieil onglet payé
         # après un changement de tarif ou un autre achat.
         expires_at=int((datetime.now(timezone.utc) + timedelta(minutes=30)).timestamp()),

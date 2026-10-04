@@ -93,7 +93,7 @@ export default function CGVPage() {
             rétractation). Remboursement sous 14 jours par le moyen de paiement d&apos;origine.
           </p>
           <p className="mt-2">
-            <strong>Pass sans abonnement :</strong> l&apos;accès est ouvert dès le paiement. Avant de payer, vous
+            <strong>Pass sans abonnement :</strong> l&apos;accès est ouvert dès le paiement. Sur la page de paiement, avant de payer, vous
             cochez une case par laquelle vous demandez l&apos;exécution immédiate du service et renoncez
             expressément à votre droit de rétractation (art. L221-28, 13°). Cette renonciation vous est
             confirmée par e-mail. Le pass n&apos;ouvre donc pas de droit de rétractation.

@@ -499,7 +499,16 @@ export default function ProfilPage() {
                       href="/tarifs#passes"
                       className="inline-flex items-center gap-2 text-sm font-semibold text-emerald-900 underline"
                     >
-                      Prolonger ou passer à un abonnement <ChevronRight className="h-4 w-4" />
+                      Prolonger mon pass <ChevronRight className="h-4 w-4" />
+                    </Link>
+                    <Link
+                      href="/tarifs#formules"
+                      className="flex items-center justify-between gap-2 rounded-xl bg-stone-900 px-4 py-3 text-sm text-white"
+                    >
+                      <span>
+                        <b className="text-amber-300">Expert 19 €/mois</b> · 5 € de moins que le Pass Mois, résiliable
+                      </span>
+                      <ChevronRight className="h-4 w-4 flex-shrink-0" />
                     </Link>
                   </div>
                 ) : isFree && !abonnementGerable ? (

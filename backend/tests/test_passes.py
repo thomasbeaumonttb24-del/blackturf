@@ -22,6 +22,8 @@ def _session(user, duree="jour", sid="cs_test_1", **surcharges) -> dict:
         "status": "complete", "payment_status": "paid",
         "amount_total": P.PASSES[duree][0], "currency": "eur",
         "customer": user.stripe_customer_id, "payment_intent": f"pi_{sid}",
+        # Case de renonciation cochée sur la page Stripe (v2), attestée par Stripe.
+        "consent": {"terms_of_service": "accepted"},
         "metadata": {
             "type": "pass", "duree": duree, "user_id": user.user_id,
             "renonciation_at": datetime.now(timezone.utc).isoformat(),
@@ -54,7 +56,7 @@ async def _nb_passes(db) -> int:
     {"metadata": {"type": "autre"}},
     {"metadata": {"duree": "annee"}},
     {"metadata": {"renonciation_version": None}},
-    {"metadata": {"renonciation_at": ""}},
+    {"consent": {"terms_of_service": None}},   # case non cochée sur Stripe
     {"metadata": {"user_id": ""}},
 ])
 async def test_session_douteuse_naccorde_rien(db, surcharge):
@@ -251,11 +253,15 @@ async def test_checkout_pass_prix_serveur_et_renonciation(db, monkeypatch):
     assert captured["payment_intent_data"]["metadata"]["duree"] == "mois"
     assert "allow_promotion_codes" not in captured and "discounts" not in captured
     assert "subscription_data" not in captured
+    # Case de renonciation OBLIGATOIRE sur la page Stripe (v2).
+    assert captured["consent_collection"] == {"terms_of_service": "required"}
+    assert "renonce" in captured["custom_text"]["terms_of_service_acceptance"]["message"]
+    assert captured["metadata"]["renonciation_version"] == "v2"
 
 
 @pytest.mark.parametrize("body,code", [
-    ({"duree": "jour", "renonciation": False}, 400),
-    ({"duree": "an", "renonciation": True}, 400),
+    ({"duree": "an"}, 400),
+    ({"duree": ""}, 400),
 ])
 async def test_checkout_pass_refus(db, monkeypatch, body, code):
     _capture_pass(monkeypatch)
@@ -319,3 +325,59 @@ async def test_confirmation_identifiant_invalide(db):
     with pytest.raises(HTTPException) as exc:
         await sr.confirmer_pass(sr.PassConfirmation(session_id="pi_123"), db, user)
     assert exc.value.status_code == 400
+
+
+# ── v2 : case cochée sur la page Stripe, attestée par session.consent ────────
+def _session_v2(user, sid="cs_v2", consent="accepted", **kw):
+    s = _session(user, sid=sid, **kw)
+    s["metadata"] = {k: v for k, v in s["metadata"].items() if k != "renonciation_at"}
+    s["metadata"]["renonciation_version"] = "v2"
+    if consent is None:
+        s.pop("consent", None)
+    else:
+        s["consent"] = {"terms_of_service": consent}
+    return s
+
+
+async def test_v2_case_attestee_par_stripe_accorde(db):
+    user = await _user(db)
+    p, cree = await P.accorder(db, _session_v2(user))
+    assert cree and p.renonciation_version == "v2" and p.renonciation_at is not None
+
+
+@pytest.mark.parametrize("consent", [None, "declined", ""])
+async def test_v2_sans_case_attestee_rien_n_est_accorde(db, consent):
+    user = await _user(db)
+    with pytest.raises(P.PassInvalide):
+        await P.accorder(db, _session_v2(user, consent=consent))
+    assert await _nb_passes(db) == 0
+
+
+async def test_version_de_renonciation_inconnue_refusee(db):
+    user = await _user(db)
+    with pytest.raises(P.PassInvalide):
+        await P.accorder(db, _session(user, metadata={"renonciation_version": "v9"}))
+
+
+# ── Fin de pass : relance « continuez avec Expert » ──────────────────────────
+async def test_fin_de_pass_relance_une_seule_fois_les_comptes_retombes_en_gratuit(db, monkeypatch):
+    from datetime import datetime as _dt
+    import services.email_compte as EC
+    envoyes = []
+
+    async def _faux(user):
+        envoyes.append(user.email)
+
+    monkeypatch.setattr(EC, "envoyer_fin_pass", _faux)
+    gratuit = await _user(db, email="fin@x.fr", stripe_customer_id="cus_fin")
+    refus = await _user(db, email="refus@x.fr", stripe_customer_id="cus_refus",
+                        marketing_opt_out_at=_dt.now(timezone.utc))
+    abonne = await _user(db, email="abo@x.fr", plan="standard", stripe_customer_id="cus_abo")
+    await _abo(db, abonne, plan="standard", statut="active")
+    for u, sid in ((gratuit, "cs_f1"), (refus, "cs_f2"), (abonne, "cs_f3")):
+        p, _ = await P.accorder(db, _session(u, sid=sid, customer=u.stripe_customer_id))
+        await _antidater(db, p)
+    await P.expirer_passes(db)
+    assert envoyes == ["fin@x.fr"]          # ni le refus marketing, ni l'abonné Standard
+    await P.expirer_passes(db)
+    assert envoyes == ["fin@x.fr"]          # jamais deux fois

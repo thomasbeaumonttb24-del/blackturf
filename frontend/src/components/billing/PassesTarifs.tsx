@@ -3,9 +3,10 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { CalendarDays, CalendarRange, Check, CreditCard, Loader2, ShieldCheck, Sun, Timer, Zap } from "lucide-react";
+import { CalendarDays, CalendarRange, Check, CreditCard, Crown, Loader2, ShieldCheck, Sun, Timer, Zap } from "lucide-react";
 import { toast } from "sonner";
 import { Tilt } from "@/components/track-record/effets";
+import { CheckoutButton } from "@/components/billing/CheckoutButton";
 import { useAuth } from "@/hooks/useAuth";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -34,14 +35,9 @@ const INCLUS = [
   "Assistant IA et créateur de stratégies",
 ];
 
-// Texte identique à celui enregistré comme preuve côté serveur (RENONCIATION_TEXTE).
-const RENONCIATION =
-  "Je demande l'accès immédiat au service et je renonce expressément à mon droit de rétractation. " +
-  "Paiement unique, sans renouvellement, non remboursable.";
-
 const ETAPES = [
-  { icone: ShieldCheck, titre: "Vous choisissez", texte: "Cochez la case d'accès immédiat puis votre durée." },
-  { icone: CreditCard, titre: "Vous payez une fois", texte: "Paiement sécurisé par Stripe. Aucun abonnement créé." },
+  { icone: ShieldCheck, titre: "Vous choisissez", texte: "Jour, semaine ou mois : la durée qui vous convient." },
+  { icone: CreditCard, titre: "Vous payez une fois", texte: "Page sécurisée Stripe : cochez l'accès immédiat, payez. Aucun abonnement." },
   { icone: Zap, titre: "Tout est ouvert", texte: "Accès Expert immédiat, coupé seul à la fin. Rien à résilier." },
 ];
 
@@ -54,7 +50,6 @@ function dateFin(iso: string): string {
 export function PassesTarifs() {
   const { user, loading: authLoading } = useAuth();
   const router = useRouter();
-  const [accepte, setAccepte] = useState(false);
   const [enCours, setEnCours] = useState<Duree | null>(null);
   // Abonné Expert : accès déjà illimité, le serveur refuserait (409).
   const expertAbonne = Boolean(user?.abonnement_gerable) && user?.plan === "expert" && !user?.pass_fin;
@@ -64,14 +59,9 @@ export function PassesTarifs() {
       router.push(`/inscription?suite=${encodeURIComponent("/tarifs#passes")}`);
       return;
     }
-    if (!accepte) {
-      toast.error("Cochez d'abord la case d'accès immédiat ci-dessous.");
-      document.getElementById("renonciation-pass")?.focus();
-      return;
-    }
     setEnCours(duree);
     try {
-      const r = await api.post("/stripe/pass", { duree, renonciation: true });
+      const r = await api.post("/stripe/pass", { duree });
       window.location.assign(r.data.url);
     } catch (error: unknown) {
       const response = (error as { response?: { data?: { detail?: string }; status?: number } })?.response;
@@ -148,6 +138,14 @@ export function PassesTarifs() {
                 </div>
                 <p className={cn("mt-1 text-xs font-semibold", vedette ? "text-emerald-300" : "text-emerald-700")}>{p.parJour}</p>
                 <p className={cn("mt-3 text-sm", vedette ? "text-stone-200" : "text-stone-700")}>{p.pour}</p>
+                {p.duree === "mois" && (
+                  <Link
+                    href="#formules"
+                    className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-white/10 px-2.5 py-1.5 text-xs font-semibold text-amber-200 ring-1 ring-white/15 hover:bg-white/15"
+                  >
+                    <Crown className="h-3.5 w-3.5" aria-hidden /> Ou Expert 19 €/mois : 5 € de moins, résiliable
+                  </Link>
+                )}
 
                 <ul className="mb-6 mt-4 space-y-2">
                   {INCLUS.map((f) => (
@@ -161,14 +159,12 @@ export function PassesTarifs() {
                 <button
                   type="button"
                   disabled={bloque}
-                  aria-disabled={bloque || (Boolean(user) && !accepte)}
                   onClick={() => acheter(p.duree)}
                   className={cn(
                     "mt-auto inline-flex h-12 w-full items-center justify-center gap-2 rounded-xl text-sm font-semibold transition-all hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0",
                     vedette
                       ? "bg-gradient-to-b from-amber-300 to-amber-500 text-stone-900 shadow-[0_10px_24px_-10px_rgba(245,158,11,.9),inset_0_1px_0_rgba(255,255,255,.5)]"
                       : "bg-stone-900 text-white shadow-[0_10px_24px_-12px_rgba(17,24,39,.9),inset_0_1px_0_rgba(255,255,255,.15)] hover:bg-stone-800",
-                    Boolean(user) && !accepte && "opacity-60",
                   )}
                 >
                   {enCours === p.duree ? <Loader2 className="h-4 w-4 animate-spin" /> : `Prendre le ${p.nom}`}
@@ -179,31 +175,16 @@ export function PassesTarifs() {
         })}
       </div>
 
-      {/* Renonciation : obligatoire avant tout paiement (vérifiée aussi côté serveur). */}
       {expertAbonne ? (
         <p className="mt-5 text-center text-sm text-muted-foreground">
           Votre abonnement Expert vous donne déjà un accès illimité : un pass ne vous apporterait rien.
         </p>
       ) : (
-        <label
-          htmlFor="renonciation-pass"
-          className={cn(
-            "mx-auto mt-6 flex max-w-2xl cursor-pointer items-start gap-3 rounded-2xl border p-4 text-xs leading-snug transition-colors",
-            accepte ? "border-emerald-300 bg-emerald-50/70" : "border-amber-300 bg-amber-50/70",
-          )}
-        >
-          <input
-            id="renonciation-pass"
-            type="checkbox"
-            className="mt-0.5 h-4 w-4 flex-shrink-0 accent-emerald-600"
-            checked={accepte}
-            onChange={(e) => setAccepte(e.target.checked)}
-          />
-          <span>
-            <b className="font-semibold">À cocher avant de payer.</b> {RENONCIATION}{" "}
-            <Link href="/cgv#passes" className="underline">Conditions</Link>
-          </span>
-        </label>
+        <p className="mx-auto mt-5 max-w-2xl text-center text-xs text-muted-foreground">
+          Paiement unique, sans renouvellement ni remboursement : l&apos;accès étant immédiat, la page de paiement
+          sécurisée vous demande de renoncer au droit de rétractation.{" "}
+          <Link href="/cgv#passes" className="underline">Conditions</Link>
+        </p>
       )}
 
       {/* Comment ça marche */}
@@ -223,11 +204,33 @@ export function PassesTarifs() {
         ))}
       </ol>
 
-      <p className="mt-5 text-center text-xs text-muted-foreground">
-        Vous jouez toutes les semaines ? L&apos;abonnement{" "}
-        <Link href="#formules" className="font-semibold text-foreground underline">Expert à 19 €/mois</Link>{" "}
-        revient moins cher qu&apos;un Pass Mois, et reste résiliable à tout moment.
-      </p>
+      {/* L'offre que l'on recommande : l'abonnement Expert mensuel. Le pass est
+          une porte d'entrée ; dès qu'on joue chaque semaine, Expert coûte moins. */}
+      {!expertAbonne && (
+        <div className="relative mt-8 overflow-hidden rounded-3xl bg-gradient-to-br from-stone-900 via-stone-900 to-emerald-950 p-6 text-white ring-2 ring-amber-400/70 shadow-[0_30px_60px_-25px_rgba(6,78,59,.7)] sm:p-8">
+          <div className="absolute -right-16 -top-16 h-56 w-56 rounded-full bg-amber-400/20 blur-3xl" aria-hidden />
+          <div className="relative grid gap-5 md:grid-cols-[1fr_auto] md:items-center">
+            <div>
+              <p className="inline-flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.18em] text-amber-300">
+                <Crown className="h-3.5 w-3.5" aria-hidden /> Notre recommandation
+              </p>
+              <h3 className="mt-2 font-display text-2xl font-semibold leading-tight tracking-tight sm:text-3xl">
+                Vous jouez chaque semaine ? <span className="text-amber-300">Expert à 19&nbsp;€/mois</span>
+              </h3>
+              <ul className="mt-3 grid gap-1.5 text-sm text-stone-200 sm:grid-cols-2">
+                <li className="flex items-center gap-2"><Check className="h-4 w-4 text-emerald-300" aria-hidden /> 5 € de moins que le Pass Mois</li>
+                <li className="flex items-center gap-2"><Check className="h-4 w-4 text-emerald-300" aria-hidden /> Jamais coupé en pleine semaine de courses</li>
+                <li className="flex items-center gap-2"><Check className="h-4 w-4 text-emerald-300" aria-hidden /> Résiliable à tout moment, en deux clics</li>
+                <li className="flex items-center gap-2"><Check className="h-4 w-4 text-emerald-300" aria-hidden /> Exactement le même accès Expert</li>
+              </ul>
+            </div>
+            <div className="md:w-64">
+              <CheckoutButton plan="expert" periodicite="monthly" label="Choisir Expert — 19 €/mois" variant="brand" size="lg" className="h-12 w-full text-base" />
+              <p className="mt-2 text-center text-[11px] text-stone-300">Renouvellement mensuel, sans engagement.</p>
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   );
 }

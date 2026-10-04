@@ -147,7 +147,7 @@ export function PlansTarifs() {
           <p className="mb-5 h-4 text-xs text-stone-300">
             {annuel
               ? `${PRIX.expert.annuelTotal} payés en une fois`
-              : "Seulement 7 € de plus que Standard"}
+              : "5 € de moins que le Pass Mois · résiliable à tout moment"}
           </p>
           <ul className="mb-7 space-y-2.5">
             {EXPERT.map((f, i) => (
