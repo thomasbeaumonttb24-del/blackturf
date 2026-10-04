@@ -188,23 +188,29 @@ def ajuster_alpha(courses: Sequence[tuple], frac_ajustement: float = 0.8,
 
 
 async def _charger_courses(session: AsyncSession) -> list[tuple]:
-    """(proba modèle brute normalisée, cotes, index du gagnant) par course.
+    """(proba ENTRANT dans le blend, cotes, index du gagnant) par course.
 
     Source : les prédictions FIGÉES avant le départ (`prediction_evaluation`, mêmes
-    gardes anti-fuite que les isotones). La proba est la BRUTE — celle d'avant le
-    blend — puisque c'est elle que le blend prend en entrée. La cote retenue est
-    celle FIGÉE au moment du conseil quand elle existe : celle qui a réellement
-    servi à mélanger, pas celle d'aujourd'hui.
+    gardes anti-fuite que les isotones). La cote retenue est celle FIGÉE au moment
+    du conseil quand elle existe : celle qui a réellement servi à mélanger.
+
+    La proba est celle que le blend reçoit EN PRODUCTION : la brute passée par la
+    courbe isotone top1 en vigueur (même segment discipline × partants que
+    `ml.pipeline.predict_course`). Ajuster alpha sur la brute seule, comme avant le
+    2026-10-04, réglait le mélange d'une grandeur qu'il ne voit jamais.
     """
+    from ml.isotonic_calibration import apply_calibration as _iso_apply, load_curve, seg_key
+
     rows = (await session.execute(text(f"""
         SELECT pe.course_id, pa.numero, pe.proba_top1_raw,
-               COALESCE(pe.cote_figee, pa.cote_pmu) AS cote, r.classement
+               COALESCE(pe.cote_figee, pa.cote_pmu) AS cote, r.classement, c.discipline
         FROM prediction_evaluation pe
         JOIN participations pa ON pa.participation_id = pe.participation_id
         JOIN courses c         ON c.course_id         = pe.course_id
         JOIN resultats r       ON r.course_id         = pe.course_id
         WHERE pe.is_replayable = true{sans_modeles_retires('pe')}
           AND pe.proba_top1_raw IS NOT NULL
+          AND COALESCE(pa.non_partant, false) = false
           AND COALESCE(pe.cote_figee, pa.cote_pmu) > 1
           AND r.classement IS NOT NULL
           AND c.date_heure IS NOT NULL
@@ -212,13 +218,16 @@ async def _charger_courses(session: AsyncSession) -> list[tuple]:
           AND pe.created_at < c.date_heure
         ORDER BY c.date_heure ASC, pe.course_id ASC
     """))).all()
+    courbe = await load_curve(session)
 
     par_course: dict[str, list] = {}
     arrivees: dict[str, object] = {}
-    for course_id, numero, proba, cote, classement in rows:
+    disciplines: dict[str, object] = {}
+    for course_id, numero, proba, cote, classement, discipline in rows:
         par_course.setdefault(course_id, []).append(
             (int(numero), float(proba), float(cote)))
         arrivees.setdefault(course_id, classement)
+        disciplines.setdefault(course_id, discipline)
 
     out: list[tuple] = []
     for course_id, partants in par_course.items():
@@ -245,8 +254,11 @@ async def _charger_courses(session: AsyncSession) -> list[tuple]:
         somme = p.sum()
         if somme <= 0:
             continue
+        p = p / somme
+        if courbe:
+            p = _iso_apply(p, courbe, seg=seg_key(disciplines.get(course_id), len(partants)))
         cotes = np.array([c for _, _, c in partants], dtype=float)
-        out.append((p / somme, cotes, index[gagnant_num]))
+        out.append((p, cotes, index[gagnant_num]))
     return out
 
 

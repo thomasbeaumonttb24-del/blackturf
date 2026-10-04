@@ -59,12 +59,16 @@ tient HORS ÉCHANTILLON, sur des courses qui n'ont pas servi à le choisir :
   2. l'écart de calibration de la queue (p ≥ 0,40) — celui de l'alerte — ne se
      dégrade pas, quand il y a assez d'observations pour en juger.
 
-BOUCLE FERMÉE, ÉVITÉE PAR CONSTRUCTION. L'ajustement se fait sur la proba SERVIE,
-donc sur une grandeur qui porte déjà l'exposant en vigueur. Deux précautions :
-l'ajustement ne lit que les prédictions POSTÉRIEURES à la mise en service de cet
-exposant, et le nouvel exposant est le PRODUIT de l'ancien et du résiduel mesuré —
-composition exacte, puisque (p^a)^b = p^(ab) et que la renormalisation commute avec
-la puissance. La correction converge donc au lieu de chasser son propre résidu.
+BOUCLE FERMÉE, ÉVITÉE PAR CONSTRUCTION. L'ajustement se fait sur la chaîne
+reconstruite (brute → isotone → blend → exposant en place, cf. `_charger_courses`),
+donc sur une grandeur qui porte déjà l'exposant en vigueur. Le nouvel exposant est
+le PRODUIT de l'ancien et du résiduel mesuré — composition exacte, puisque
+(p^a)^b = p^(ab) et que la renormalisation commute avec la puissance. La correction
+converge donc au lieu de chasser son propre résidu.
+
+PORTÉE RÉELLE (2026-10-04). Depuis que `melange_arrivees` reconstruit la proba
+servie à partir de la brute, cet exposant n'agit plus que sur la proba de
+DÉTECTION des paris de valeur et sur le repli quand le mélange ne s'applique pas.
 """
 from __future__ import annotations
 
@@ -76,7 +80,6 @@ import numpy as np
 import structlog
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
-from ml.prediction_evaluation import sans_modeles_retires
 
 log = structlog.get_logger(module="sharpness_calibration")
 
@@ -238,100 +241,27 @@ def ajuster_exposant(courses: Sequence[tuple], frac_ajustement: float = 0.8,
     return {"retenu": True, "exposant": compose, **commun}
 
 
-def _depuis_en_datetime(depuis) -> Optional[datetime]:
-    """`applique_depuis` (ISO, tel que stocké dans le JSON) en datetime UTC.
+async def _charger_courses(session: AsyncSession, exposant_en_place: float) -> list[tuple]:
+    """[(probas de la chaîne, index du gagnant)] par course, en ordre chronologique.
 
-    asyncpg REFUSE de lier une chaîne à une colonne horodatée : « expected a
-    datetime.date or datetime.datetime instance, got 'str' ». SQLite, lui,
-    compare des chaînes sans broncher. La panne ne se voyait donc qu'en
-    production, et seulement une fois un exposant retenu (neutre, `depuis` vaut
-    None) : `nettete_probas` a retenu un exposant le 24/09 puis a échoué toutes
-    les nuits suivantes, le correcteur figé sur sa première valeur.
-    Illisible → None : on relit alors tout l'historique plutôt que d'échouer.
+    L'exposant agit sur la sortie du blend marché, et cette sortie ne sert plus
+    qu'à la DÉTECTION des paris de valeur (`_p1_detection_vb`) et au repli quand le
+    mélange appris ne s'applique pas : la proba SERVIE, elle, est reconstruite par
+    `melange_arrivees` à partir de la brute. Avant le 2026-10-04, l'ajustement lisait
+    `pe.proba_top1` — la sortie du mélange — et réglait donc un exposant sur une
+    grandeur qu'il ne touche jamais.
+
+    La chaîne est reconstruite telle qu'elle tourne aujourd'hui : brute → isotone
+    top1 (`blend_calibration._charger_courses`) → blend à l'alpha en service →
+    exposant en place. Les courses portent ainsi l'exposant courant, et la
+    composition résiduelle de `ajuster_exposant` reste exacte sur TOUT l'historique,
+    sans fenêtre « depuis la mise en service ».
     """
-    if depuis is None or isinstance(depuis, datetime):
-        dt = depuis
-    else:
-        try:
-            dt = datetime.fromisoformat(str(depuis).replace("Z", "+00:00"))
-        except ValueError:
-            log.warning("sharpness.depuis_illisible", depuis=str(depuis)[:40])
-            return None
-    if dt is not None and dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    return dt
+    from ml import blend_calibration as bc
 
-
-async def _charger_courses(session: AsyncSession, depuis) -> list[tuple]:
-    """[(probas servies, index du gagnant)] par course, en ordre chronologique.
-
-    Source : les prédictions FIGÉES avant le départ (`prediction_evaluation`, mêmes
-    gardes anti-fuite que les isotones). La proba lue est `proba_top1`, c'est-à-dire
-    CE QUI A ÉTÉ SERVI — l'exposant corrige la sortie de toute la chaîne, blend
-    marché compris, pas la sortie du modèle.
-
-    `depuis` borne la lecture aux prédictions produites APRÈS la mise en service de
-    l'exposant courant : sans ça, l'ajustement mesurerait un mélange de régimes et
-    composerait avec un exposant qui n'a pas produit ces lignes-là.
-    """
-    conditions = ""
-    params: dict = {}
-    depuis = _depuis_en_datetime(depuis)
-    if depuis is not None:
-        conditions = " AND pe.created_at >= :depuis"
-        params["depuis"] = depuis
-    rows = (await session.execute(text(f"""
-        SELECT pe.course_id, pa.numero, pe.proba_top1, r.classement, c.date_heure
-        FROM prediction_evaluation pe
-        JOIN participations pa ON pa.participation_id = pe.participation_id
-        JOIN courses c         ON c.course_id         = pe.course_id
-        JOIN resultats r       ON r.course_id         = pe.course_id
-        WHERE pe.is_replayable = true{sans_modeles_retires('pe')}
-          AND pe.proba_top1 IS NOT NULL
-          AND pa.non_partant = false
-          AND r.classement IS NOT NULL
-          AND c.date_heure IS NOT NULL
-          AND pe.created_at IS NOT NULL
-          AND pe.created_at < c.date_heure{conditions}
-        ORDER BY c.date_heure ASC, pe.course_id ASC
-    """), params)).all()
-
-    par_course: dict[str, list] = {}
-    arrivees: dict[str, object] = {}
-    for course_id, numero, proba, classement, _dh in rows:
-        par_course.setdefault(course_id, []).append((int(numero), float(proba)))
-        arrivees.setdefault(course_id, classement)
-
-    out: list[tuple] = []
-    for course_id, partants in par_course.items():
-        classement = arrivees.get(course_id)
-        if isinstance(classement, str):
-            try:
-                classement = json.loads(classement)
-            except (ValueError, TypeError):
-                continue
-        gagnant_num = None
-        for e in classement or []:
-            # `position == 1`, jamais l'index 0 : le classement n'est pas garanti trié.
-            try:
-                if int(e.get("position")) == 1:
-                    gagnant_num = int(e.get("numero"))
-                    break
-            except (TypeError, ValueError, AttributeError):
-                continue
-        if gagnant_num is None or len(partants) < 4:
-            continue
-        index = {num: i for i, (num, _) in enumerate(partants)}
-        if gagnant_num not in index:
-            continue    # gagnant absent des prédictions : course écartée
-        p = np.array([x for _, x in partants], dtype=float)
-        somme = float(p.sum())
-        if somme <= 0:
-            continue
-        # Renormalisée : la course sert de distribution, pas de collection de valeurs
-        # (des partants peuvent manquer à l'appel des prédictions).
-        out.append((p / somme, index[gagnant_num]))
-    return out
+    alpha = float((await bc.charger_alpha(session)).get("alpha_max") or bc.ALPHA_MAX_DEFAUT)
+    return [(appliquer(bc.melange(p, cotes, alpha_max=alpha), exposant_en_place), gagnant)
+            for p, cotes, gagnant in await bc._charger_courses(session)]
 
 
 async def calculer_et_persister(session: AsyncSession) -> dict:
@@ -350,14 +280,11 @@ async def calculer_et_persister(session: AsyncSession) -> dict:
     """))
     en_place = await charger_exposant(session)
     exposant = float(en_place.get("exposant") or EXPOSANT_NEUTRE)
-    # Fenêtre de lecture : depuis la mise en service de l'exposant courant. Neutre
-    # (jamais rien appliqué) → tout l'historique est exploitable.
-    depuis = en_place.get("applique_depuis") if abs(exposant - EXPOSANT_NEUTRE) > 1e-9 else None
 
-    courses = await _charger_courses(session, depuis)
+    courses = await _charger_courses(session, exposant)
     if len(courses) < MIN_COURSES:
         log.warning("sharpness.cold_start_preserve", n_courses=len(courses),
-                    min_courses=MIN_COURSES, exposant=exposant, depuis=depuis)
+                    min_courses=MIN_COURSES, exposant=exposant)
         await _tracer_examen(session, {
             "status": "skipped_insufficient_data", "retenu": False,
             "exposant_en_place": exposant, "n_courses": len(courses),

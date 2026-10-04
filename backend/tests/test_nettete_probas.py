@@ -205,16 +205,27 @@ async def test_un_examen_sans_conclusion_laisse_quand_meme_une_trace(db):
     sc._cache = None
 
 
-def test_la_date_de_mise_en_service_est_liee_en_datetime():
-    """asyncpg refuse une chaîne pour une colonne horodatée ; SQLite l'accepte.
+@pytest.mark.asyncio
+async def test_l_ajustement_lit_la_chaine_qu_il_corrige(monkeypatch):
+    """L'exposant agit APRÈS le blend marché, sur la proba de détection des paris
+    de valeur. Il doit donc être ajusté sur cette chaîne-là — brute, isotone, blend
+    à l'alpha en service, exposant en place — et non sur `proba_top1`, sortie du
+    mélange des arrivées qu'il ne touche jamais (défaut corrigé le 2026-10-04)."""
+    from ml import blend_calibration as bc
 
-    Une fois un exposant retenu (24/09), `applique_depuis` — une chaîne ISO du
-    JSON — partait telle quelle dans la requête, et l'étape échouait chaque nuit.
-    """
-    from datetime import datetime, timezone
-    dt = sc._depuis_en_datetime("2026-09-24T02:16:07.123456+00:00")
-    assert isinstance(dt, datetime)
-    assert dt == datetime(2026, 9, 24, 2, 16, 7, 123456, tzinfo=timezone.utc)
-    assert sc._depuis_en_datetime("2026-09-24T02:16:07").tzinfo is not None
-    assert sc._depuis_en_datetime(None) is None
-    assert sc._depuis_en_datetime("pas une date") is None
+    p = np.array([0.5, 0.3, 0.15, 0.05])
+    cotes = np.array([2.0, 4.0, 8.0, 30.0])
+
+    async def _courses(_s):
+        return [(p, cotes, 1)]
+
+    async def _alpha(_s):
+        return {"alpha_max": 0.3}
+
+    monkeypatch.setattr(bc, "_charger_courses", _courses)
+    monkeypatch.setattr(bc, "charger_alpha", _alpha)
+    (q, gagnant), = await sc._charger_courses(None, 0.9)
+    attendu = sc.appliquer(bc.melange(p, cotes, alpha_max=0.3), 0.9)
+    assert gagnant == 1
+    assert np.allclose(q, attendu)
+    assert not np.allclose(q, p)
