@@ -491,8 +491,8 @@ export const adminApi = {
   // Suppression définitive : le compte et ce qui n'appartient qu'à lui. L'API
   // refuse le compte de l'admin lui-même, un autre admin, et tout abonnement
   // encore vivant côté Stripe.
-  deleteUser: (id: string) =>
-    api.delete(`/users/${id}`, { baseURL: `${API_URL}/admin/api` }),
+  deleteUser: (id: string, forcerPass = false) =>
+    api.delete(`/users/${id}`, { baseURL: `${API_URL}/admin/api`, params: forcerPass ? { forcer_pass: true } : undefined }),
   exportUsers: () =>
     api.get("/users-export", { baseURL: `${API_URL}/admin/api`, responseType: "blob" }),
   models: () => api.get("/models", { baseURL: `${API_URL}/admin/api` }),

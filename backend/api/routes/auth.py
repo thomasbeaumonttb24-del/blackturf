@@ -15,7 +15,7 @@ from passlib.context import CryptContext
 from pydantic import BaseModel, EmailStr, Field, field_validator
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 import httpx
 
 from api.config import get_settings
@@ -395,6 +395,24 @@ async def register(body: RegisterRequest,
     existant = (await db.execute(
         select(User).where(func.lower(User.email) == email)
     )).scalar_one_or_none()
+
+    if existant is None:
+        # Même boîte mail sous un autre nom : `nom+2@gmail.com`, `n.o.m@gmail.com`,
+        # `nom@googlemail.com` arrivent tous chez `nom@gmail.com`. Sans ce contrôle,
+        # une seule boîte ouvrait des comptes à volonté (parrainages en série,
+        # quotas gratuits multipliés). Seul un compte CONFIRMÉ réserve la boîte.
+        from services.quota_classement import adresse_canonique
+        canonique = adresse_canonique(email)
+        domaine = canonique.rpartition("@")[2]
+        domaines = ("gmail.com", "googlemail.com") if domaine == "gmail.com" else (domaine,)
+        candidats = (await db.execute(
+            select(User).where(or_(*[func.lower(User.email).like(f"%@{d}") for d in domaines]))
+        )).scalars().all()
+        jumeau = next((u for u in candidats
+                       if adresse_canonique(u.email) == canonique and (email_confirme(u) or u.google_id)), None)
+        if jumeau is not None:
+            log.info("auth.register.alias_refuse", domaine=domaine)
+            raise HTTPException(status_code=400, detail="Email déjà utilisé")
 
     try:
         pseudo = normaliser(body.pseudo)

@@ -62,7 +62,7 @@ const offersJsonLd = {
 const FAQ = [
   {
     q: "Comment fonctionne le parrainage ?",
-    a: "Partagez votre lien personnel (Profil → Parrainage). Votre ami a 5 € de remise sur son premier abonnement ou son premier Pass Semaine/Mois (pas sur le Pass Jour), et dès qu'il a payé, 5 € sont déduits de votre prochaine mensualité. 4 amis abonnés dans le mois suffisent pour un mois Expert offert, 3 pour un mois Standard ; au-delà, vos crédits sont reportés au mois suivant.",
+    a: "Partagez votre lien personnel (Profil → Parrainage). Votre ami récupère 5 € sur son premier abonnement ou son premier Pass Semaine/Mois (remboursés dès son paiement, pas sur le Pass Jour), et dès qu'il a payé, 5 € sont déduits de votre prochaine mensualité. 4 amis abonnés dans le mois suffisent pour un mois Expert offert, 3 pour un mois Standard ; au-delà, vos crédits sont reportés au mois suivant.",
   },
   {
     q: "Puis-je annuler à tout moment ?",
@@ -189,7 +189,7 @@ export default function TarifsPage() {
               Invitez vos amis, <span className="text-amber-300">ne payez plus votre abonnement</span>.
             </h2>
             <p className="mt-3 max-w-xl text-sm leading-relaxed text-stone-300">
-              Chaque ami qui s&apos;abonne avec votre lien a 5 € de remise, et vous 5 € de moins sur votre
+              Chaque ami qui s&apos;abonne ou prend un Pass Semaine/Mois avec votre lien récupère 5 €, et vous 5 € de moins sur votre
               prochaine mensualité, automatiquement. Sans limite d&apos;amis : au-delà du mois offert, vos
               crédits passent au mois suivant.
             </p>

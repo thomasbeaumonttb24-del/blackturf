@@ -113,7 +113,7 @@ export function ParrainageSection() {
                 </span>
               </h3>
               <p className="mt-2.5 max-w-md text-sm leading-relaxed text-stone-300">
-                Votre ami paie {remise} de moins sur son premier abonnement ou Pass Semaine/Mois. Dès que son paiement est
+                Votre ami récupère {remise} sur son premier abonnement ou Pass Semaine/Mois (remboursés dès son paiement). Dès que son paiement est
                 encaissé, {remise} de crédit s&apos;ajoutent à votre compte, déduits automatiquement de
                 vos factures. Sans limite d&apos;amis.
               </p>
@@ -179,8 +179,8 @@ export function ParrainageSection() {
         <ol className="grid gap-3 sm:grid-cols-3">
           <Etape n={1} delai={0} icone={UserPlus} titre="Votre ami s'inscrit"
                  texte="Avec votre lien ou votre code. La remise s'applique toute seule, rien à saisir." />
-          <Etape n={2} delai={100} icone={CreditCard} titre={`Il paie ${remise} de moins`}
-                 texte="Sur son premier abonnement (Standard ou Expert), ou son premier Pass Semaine ou Mois. Pas sur le Pass Jour." />
+          <Etape n={2} delai={100} icone={CreditCard} titre={`Il récupère ${remise}`}
+                 texte="Remboursés dès son premier paiement : abonnement Standard ou Expert, Pass Semaine ou Mois. Pas sur le Pass Jour." />
           <Etape n={3} delai={200} icone={Sparkles} titre={`Vous gagnez ${remise}`}
                  texte="Dès que son paiement est encaissé, déduits de votre prochaine mensualité ou de l'abonnement que vous prendrez." />
         </ol>

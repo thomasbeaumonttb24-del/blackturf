@@ -376,9 +376,10 @@ async def job_expirer_passes() -> None:
     ceci couvre le reste : WebSocket, alertes, bot, comptes inactifs."""
     try:
         from db.database import AsyncSessionLocal
-        from services.passes import expirer_passes
+        from services.passes import activer_passes_commences, expirer_passes
         async with AsyncSessionLocal() as session:
             await expirer_passes(session)
+            await activer_passes_commences(session)
     except Exception as e:
         log.error("jobs.expirer_passes.error", error=str(e))
 

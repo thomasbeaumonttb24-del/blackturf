@@ -14,7 +14,7 @@ export function MentionPaiement() {
   if (user?.remise_parrainage) {
     return (
       <p className="mt-2 flex items-center justify-center gap-1.5 text-center text-xs font-medium text-emerald-700">
-        <Gift className="h-3.5 w-3.5" aria-hidden /> Parrainage : 5 € déduits de votre premier paiement
+        <Gift className="h-3.5 w-3.5" aria-hidden /> Parrainage : 5 € remboursés dès votre premier paiement
       </p>
     );
   }

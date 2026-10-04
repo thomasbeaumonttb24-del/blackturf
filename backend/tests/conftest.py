@@ -51,6 +51,23 @@ def _env_ambiant_neutralise(monkeypatch):
         monkeypatch.delenv(nom, raising=False)
 
 
+@pytest.fixture(autouse=True)
+def _remboursements_stripe_factices(monkeypatch):
+    """Remise de parrainage = remboursement Stripe (2026-10-04). Aucun test ne doit
+    appeler le vrai Stripe : par défaut, un remboursement factice qui réussit et
+    une liste vide. Les tests qui espionnent les remboursements re-patchent."""
+    import stripe
+
+    class _Vide:
+        data: list = []
+
+        def auto_paging_iter(self):
+            return iter([])
+
+    monkeypatch.setattr(stripe.Refund, "create", lambda **kw: {"id": "re_factice", "metadata": kw.get("metadata")})
+    monkeypatch.setattr(stripe.Refund, "list", lambda **kw: _Vide())
+
+
 @pytest_asyncio.fixture
 async def engine():
     """

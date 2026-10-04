@@ -106,7 +106,7 @@ async def test_parcours_complet(client, db, stripe_simule):
     assert suivi["filleuls"][0]["etape"] == "paiement_en_cours"
 
     # 4. Facture payée : 12 € − 5 € = 7 € encaissés → le parrain est crédité de 5 €.
-    facture = {"id": "in_1", "object": "invoice", "customer": "cus_filleul", "amount_paid": 700,
+    facture = {"id": "in_1", "object": "invoice", "customer": "cus_filleul", "amount_paid": 700, "charge": "ch_1",
                "subscription": "sub_filleul", "billing_reason": "subscription_create"}
     evt = _evenement("invoice.payment_succeeded", facture, eid="evt_paiement")
     corps, entetes = _signe(evt)

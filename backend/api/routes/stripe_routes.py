@@ -294,7 +294,8 @@ async def _carte_dun_autre_compte(user: User, cartes: list[dict],
     """Première carte de la liste déjà rattachée à un AUTRE compte, sinon None."""
     for carte in cartes:
         connue = await db.get(CarteConnue, carte["empreinte"])
-        if connue is not None and connue.user_id and connue.user_id != user.user_id:
+        # Propriétaire NULL = compte supprimé : carte déjà vue quand même.
+        if connue is not None and connue.user_id != user.user_id:
             return connue
     return None
 
@@ -343,11 +344,12 @@ async def _memoriser_cartes(user: User, cartes: list[dict], db: AsyncSession) ->
             .execution_options(populate_existing=True)
         )).scalar_one()
         connue.derniere_vue = maintenant
-        if connue.user_id in (None, user.user_id):
-            connue.user_id = user.user_id
-            connue.email = user.email
+        if connue.user_id == user.user_id:
             connue.stripe_payment_method_id = carte.get("pm") or connue.stripe_payment_method_id
         else:
+            # Autre compte — ou compte SUPPRIMÉ (propriétaire NULL) : la carte n'est
+            # jamais réattribuée. Supprimer un compte ne « blanchit » pas sa carte
+            # (sinon remise de parrainage et contrôles repartaient à zéro).
             connue.tentatives_autres_comptes = (connue.tentatives_autres_comptes or 0) + 1
 
 
@@ -495,6 +497,9 @@ async def create_checkout(
             email=user.email,
             name=f"{user.prenom or ''} {user.nom or ''}".strip() or user.email,
             metadata={"user_id": user.user_id},
+            # Double clic : la même clé renvoie le MÊME client (pas d'orphelin sur
+            # lequel un abonnement serait payé sans être rattaché au compte).
+            idempotency_key=f"client-{user.user_id}",
         )
         customer_id = customer.id
         user.stripe_customer_id = customer_id
@@ -522,31 +527,12 @@ async def create_checkout(
             droit_a_lessai = False
             log.warning("stripe.essai_refuse_carte_connue", user_id=user.user_id)
 
-    # Filleul : pas d'essai, 5 € de remise sur la première facture payante.
-    # Coupon posé par le serveur uniquement — la saisie d'un code promo est alors
-    # désactivée (Stripe refuse de cumuler les deux, et un second code ne doit pas
-    # s'ajouter à la remise de parrainage).
-    remise: dict = {"allow_promotion_codes": True}
+    # Filleul : 5 € REMBOURSÉS sur son premier paiement, une fois sa carte
+    # vérifiée (services.parrainage._sur_paiement) — plus de coupon avant paiement,
+    # qu'une carte déjà connue rendait gratuit à rattraper. Pas de code promo pour
+    # lui : il ne doit pas cumuler avec la remise.
     parrainage_filleul = await parrainage.remise_filleul_due(user, db)
-    if parrainage_filleul is not None and await _empreintes_deja_prises(user, db):
-        # Carte déjà vue sur un autre compte : c'est un ancien client qui rouvre un
-        # compte pour la remise. Ni remise, ni essai — plein tarif.
-        log.warning("stripe.remise_parrainage_refusee_carte_connue", user_id=user.user_id)
-        parrainage_filleul = None
-        droit_a_lessai = False
-    if parrainage_filleul is not None:
-        droit_a_lessai = False
-        try:
-            remise = {"discounts": [{"coupon": parrainage.coupon_filleul()}]}
-        except Exception as e:  # noqa: BLE001
-            # Jamais de checkout plein tarif en silence : la remise serait perdue
-            # pour de bon au premier paiement.
-            log.error("stripe.coupon_parrainage_indisponible", error=str(e)[:150])
-            raise HTTPException(
-                status_code=503,
-                detail="La remise de parrainage est momentanément indisponible. "
-                       "Réessayez dans quelques minutes.",
-            )
+    remise: dict = {"allow_promotion_codes": parrainage_filleul is None}
 
     subscription_data: dict = {
         "metadata": {"user_id": user.user_id, "plan": plan_cible},
@@ -638,6 +624,9 @@ async def creer_checkout_pass(
             email=user.email,
             name=f"{user.prenom or ''} {user.nom or ''}".strip() or user.email,
             metadata={"user_id": user.user_id},
+            # Double clic : la même clé renvoie le MÊME client (pas d'orphelin sur
+            # lequel un abonnement serait payé sans être rattaché au compte).
+            idempotency_key=f"client-{user.user_id}",
         )
         customer_id = customer.id
         user.stripe_customer_id = customer_id
@@ -647,25 +636,11 @@ async def creer_checkout_pass(
         "type": "pass", "duree": body.duree, "user_id": user.user_id,
         "renonciation_version": passes.RENONCIATION_VERSION,
     }
-    # Remise de parrainage (−5 €) : Pass Semaine et Mois seulement — jamais le
-    # Pass Jour, que la remise rendrait gratuit. Mêmes garde-fous que pour un
-    # abonnement : une seule fois par filleul, refusée si sa carte enregistrée
-    # appartient déjà à un autre compte (ancien client qui rouvre un compte).
-    remise: dict = {}
-    if body.duree in parrainage.DUREES_PASS_PARRAINAGE:
-        lien_filleul = await parrainage.remise_filleul_due(user, db)
-        if lien_filleul is not None and await _empreintes_deja_prises(user, db):
-            log.warning("stripe.remise_pass_refusee_carte_connue", user_id=user.user_id)
-            lien_filleul = None
-        if lien_filleul is not None:
-            try:
-                remise = {"discounts": [{"coupon": parrainage.coupon_filleul()}]}
-            except Exception as e:  # noqa: BLE001
-                log.error("stripe.coupon_parrainage_indisponible", error=str(e)[:150])
-                raise HTTPException(status_code=503, detail="La remise de parrainage est momentanément "
-                                                            "indisponible. Réessayez dans quelques minutes.")
-            metadata["remise_parrainage"] = "1"
-            metadata["parrainage_id"] = lien_filleul.parrainage_id
+    # Remise de parrainage : JAMAIS accordée avant paiement. Le filleul paie le
+    # plein tarif ; 5 € lui sont remboursés une fois sa carte vérifiée
+    # (services.parrainage._sur_paiement_pass). Pass Semaine et Mois seulement.
+    remise_a_venir = (body.duree in parrainage.DUREES_PASS_PARRAINAGE
+                      and await parrainage.remise_filleul_due(user, db) is not None)
     price_id = passes.prix_stripe(body.duree) if _stripe_joignable() else None
     ligne = ({"price": price_id, "quantity": 1} if price_id else {
         "quantity": 1,
@@ -701,11 +676,10 @@ async def creer_checkout_pass(
         success_url=f"{settings.frontend_url}/abonnement/succes?pass={body.duree}&session_id={{CHECKOUT_SESSION_ID}}",
         cancel_url=f"{settings.frontend_url}/tarifs",
         locale="fr",
-        **remise,
     )
     log.info("stripe.checkout_pass_cree", user_id=user.user_id, duree=body.duree,
-             remise_parrainage=bool(remise))
-    return {"url": session.url, "remise_parrainage": bool(remise)}
+             remise_parrainage_a_venir=remise_a_venir)
+    return {"url": session.url, "remise_parrainage": remise_a_venir}
 
 
 @router.post("/stripe/pass/confirmer")

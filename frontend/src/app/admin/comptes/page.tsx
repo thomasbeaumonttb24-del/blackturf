@@ -172,13 +172,30 @@ export default function ComptesPage() {
       toast.error("Adresse non conforme — suppression annulée.");
       return;
     }
-    try {
-      const res = await adminApi.deleteUser(u.user_id);
+    const supprimer = async (forcerPass: boolean) => {
+      const res = await adminApi.deleteUser(u.user_id, forcerPass);
       const n = (res.data?.supprime ?? {}) as Record<string, number>;
       toast.success(`${u.email} supprimé — ${n.defi_paris ?? 0} pari(s) du défi.`);
       mutate();
+    };
+    try {
+      await supprimer(false);
     } catch (e: unknown) {
-      const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      const reponse = (e as { response?: { status?: number; data?: { detail?: string } } })?.response;
+      const detail = reponse?.data?.detail;
+      // Pass payé encore en cours : seconde confirmation explicite.
+      if (reponse?.status === 409 && detail?.includes("forcer_pass")) {
+        if (window.confirm(`${detail.split(" Confirmez")[0]}
+
+Supprimer quand même ?`)) {
+          try {
+            await supprimer(true);
+          } catch {
+            toast.error("Suppression impossible.");
+          }
+        }
+        return;
+      }
       toast.error(detail || "Suppression impossible.");
     }
   }

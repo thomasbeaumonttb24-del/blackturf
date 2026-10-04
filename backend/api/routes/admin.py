@@ -482,6 +482,7 @@ async def update_user(
 @router.delete("/users/{user_id}")
 async def delete_user(
     user_id: str,
+    forcer_pass: bool = Query(False, description="Supprimer malgré un pass payé encore en cours"),
     db: AsyncSession = Depends(get_db),
     admin: User = Depends(require_admin),
 ):
@@ -526,6 +527,21 @@ async def delete_user(
             status_code=409,
             detail=f"Abonnement encore actif ({vivant.statut}) : résiliez-le dans Stripe "
                    "avant de supprimer le compte, sinon la facturation continue.")
+
+    # Pass payé encore en cours : la suppression ferait disparaître un accès
+    # acheté (sans remboursement). Confirmation explicite exigée.
+    from db.models import PassAcces
+    pass_en_cours = (await db.execute(
+        select(func.max(PassAcces.fin)).where(
+            PassAcces.user_id == user_id, PassAcces.statut == "actif",
+            PassAcces.fin > datetime.now(timezone.utc))
+    )).scalar_one_or_none()
+    if pass_en_cours is not None and not forcer_pass:
+        fin_txt = pass_en_cours.strftime("%d/%m/%Y %H:%M") if hasattr(pass_en_cours, "strftime") else str(pass_en_cours)
+        raise HTTPException(
+            status_code=409,
+            detail=f"Pass payé encore en cours (jusqu'au {fin_txt} UTC) : la suppression ferait "
+                   "perdre cet accès acheté. Confirmez avec forcer_pass=true si c'est voulu.")
 
     email = user.email
     supprime: dict[str, int] = {}

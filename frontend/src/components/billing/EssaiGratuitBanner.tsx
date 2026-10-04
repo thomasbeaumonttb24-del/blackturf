@@ -64,7 +64,7 @@ export function EssaiGratuitBanner() {
         {remise ? (
           <p className="min-w-[14rem] flex-1">
             <span className="font-semibold">{user?.prenom ? `${user.prenom}, v` : "V"}os 5 € de parrainage vous attendent</span>
-            {" "}: déduits automatiquement de votre premier abonnement.{" "}
+            {" "}: remboursés dès votre premier abonnement ou Pass Semaine/Mois.{" "}
             <span className="text-slate-600">Sans engagement, résiliable en un clic.</span>
           </p>
         ) : (
@@ -76,7 +76,7 @@ export function EssaiGratuitBanner() {
         )}
         <div className="flex items-center gap-3">
           <Button variant="brand" size="default" className="h-8 px-3 text-[13px]" asChild>
-            <Link href={remise ? "/tarifs#formules" : "/tarifs#passes"}>{remise ? "Choisir ma formule (−5 €)" : "Voir les formules"}</Link>
+            <Link href={remise ? "/tarifs#formules" : "/tarifs#passes"}>{remise ? "Choisir ma formule (5 € remboursés)" : "Voir les formules"}</Link>
           </Button>
           <button onClick={fermer} className="text-slate-500 hover:text-slate-800" aria-label="Masquer ce rappel pendant 3 jours">
             <X className="h-4 w-4" />

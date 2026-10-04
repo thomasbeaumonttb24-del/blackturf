@@ -203,6 +203,7 @@ async def _client_stripe(user: User, db: AsyncSession) -> str:
             email=user.email,
             name=f"{user.prenom or ''} {user.nom or ''}".strip() or user.email,
             metadata={"user_id": user.user_id},
+            idempotency_key=f"client-{user.user_id}",
         )
         user.stripe_customer_id = client["id"]
     return user.stripe_customer_id
@@ -227,6 +228,29 @@ async def _verdict_cartes(filleul: User, lien: Parrainage, db: AsyncSession) -> 
     return None
 
 
+def _paiement_de_facture(filleul: User, invoice: dict) -> Optional[dict]:
+    """Paiement (charge ou payment_intent) qui a réglé cette facture.
+
+    Les versions récentes de l'API ne portent plus le paiement sur la facture :
+    on retombe sur le débit réussi du client, du même montant, à quelques
+    minutes de la facture."""
+    for champ in ("charge", "payment_intent"):
+        v = invoice.get(champ)
+        if isinstance(v, dict):
+            v = v.get("id")
+        if v:
+            return {champ: v}
+    if not filleul.stripe_customer_id:
+        return None
+    montant = int(invoice.get("amount_paid") or 0)
+    cree = int(invoice.get("created") or 0)
+    for ch in stripe.Charge.list(customer=filleul.stripe_customer_id, limit=10).auto_paging_iter():
+        if (ch.get("status") == "succeeded" and ch.get("paid") and int(ch.get("amount") or 0) == montant
+                and not ch.get("refunded") and (not cree or abs(int(ch.get("created") or 0) - cree) <= 3600)):
+            return {"charge": ch["id"]}
+    return None
+
+
 async def sur_facture_reglee_par_credit(filleul: User, invoice: dict, db: AsyncSession) -> None:
     """Facture du filleul soldée par son propre crédit (il est lui-même parrain) :
     aucun argent n'a été encaissé, donc rien pour son parrain — mais sa remise
@@ -234,6 +258,11 @@ async def sur_facture_reglee_par_credit(filleul: User, invoice: dict, db: AsyncS
     Le parrain sera crédité au premier paiement réel suivant. Ne lève jamais."""
     try:
         if not filleul.parraine_par_id or int(invoice.get("total") or 0) <= 0:
+            return
+        # Depuis le 2026-10-04 la remise est un remboursement sur un paiement RÉEL :
+        # une facture soldée par crédit ne la consomme pas (rien à rembourser).
+        # Seule une facture qui portait encore l'ancien coupon de 5 € la consomme.
+        if not (invoice.get("total_discount_amounts") or invoice.get("discount") or invoice.get("discounts")):
             return
         lien = await _lien_du_filleul(filleul.user_id, db)
         if lien is not None and lien.statut == "en_attente" and lien.remise_filleul_at is None:
@@ -273,42 +302,53 @@ async def _sur_paiement(filleul: User, invoice: dict, db: AsyncSession) -> None:
         return
 
     maintenant = datetime.now(timezone.utc)
-    # La remise ne vaut que pour la toute première facture payante, quoi qu'il
-    # advienne ensuite de la récompense du parrain.
-    if lien.remise_filleul_at is None:
-        lien.remise_filleul_at = maintenant
-
     parrain = await db.get(User, lien.parrain_id) if lien.parrain_id else None
-    motif: Optional[str] = None
-    if not _peut_parrainer(parrain):
-        motif = "parrain_inactif"
-    else:
-        try:
-            motif = await _verdict_cartes(filleul, lien, db)
-        except LookupError:
-            lien.motif = "cartes_indisponibles"
-            log.warning("parrainage.cartes_indisponibles", filleul=filleul.user_id)
-            return
+    from api.routes.stripe_routes import _cartes_du_client
+    cartes = _cartes_du_client({"customer": filleul.stripe_customer_id})
+    if not cartes:
+        lien.motif = "cartes_indisponibles"
+        log.warning("parrainage.cartes_indisponibles", filleul=filleul.user_id)
+        return
+    motif = await verdict_cartes(filleul, lien.parrain_id, cartes, db)
 
     if motif:
+        # Carte déjà connue ailleurs (ancien client qui rouvre un compte) : la
+        # remise n'est PAS remboursée — rien n'a été accordé d'avance, donc rien
+        # à reprendre. Elle est consommée : pas de seconde chance au paiement suivant.
         lien.statut = "refuse"
         lien.motif = motif
-        # Carte déjà connue ailleurs : c'est un ancien client qui a rouvert un
-        # compte pour la remise. Elle lui est refacturée sur sa facture suivante
-        # (solde positif), sinon on pourrait l'obtenir en boucle, un compte par mois.
-        if motif != "parrain_inactif" and filleul.stripe_customer_id and settings.stripe_secret_key:
-            try:
-                _crediter(filleul, REMISE_CENTS, f"parrainage-remise-reprise-{lien.parrainage_id}",
-                          "Remise de parrainage non applicable : carte déjà utilisée sur un autre compte",
-                          {"parrainage_id": lien.parrainage_id})
-            except Exception as e:  # noqa: BLE001
-                log.error("parrainage.reprise_remise_echouee", filleul=filleul.user_id, error=str(e)[:200])
+        lien.remise_filleul_at = lien.remise_filleul_at or maintenant
         await journaliser(db, "parrainage_refuse", parrain, None,
                           detail={"filleul": filleul.email, "motif": motif})
         log.warning("parrainage.refuse", parrain=lien.parrain_id, filleul=filleul.user_id, motif=motif)
         return
 
     if not settings.stripe_secret_key:
+        return
+
+    # Carte vérifiée : 5 € remboursés sur ce premier paiement. Exception : un
+    # abonnement souscrit AVANT le passage au remboursement portait encore le
+    # coupon de 5 € — la remise est alors déjà dans la facture, pas de doublon.
+    if lien.remise_filleul_at is None:
+        deja_remisee = bool(invoice.get("total_discount_amounts") or invoice.get("discount")
+                            or invoice.get("discounts"))
+        if not deja_remisee:
+            try:
+                cible = _paiement_de_facture(filleul, invoice)
+                if not cible:
+                    raise LookupError("paiement de la facture introuvable")
+                rembourser_remise(lien, **cible)
+            except Exception as e:  # noqa: BLE001
+                lien.motif = "remise_en_echec"
+                log.error("parrainage.remise_remboursement_echoue", filleul=filleul.user_id, error=str(e)[:200])
+                return  # retenté au paiement suivant
+        lien.remise_filleul_at = maintenant
+
+    if not _peut_parrainer(parrain):
+        lien.statut = "refuse"
+        lien.motif = "parrain_inactif"
+        await journaliser(db, "parrainage_refuse", parrain, None,
+                          detail={"filleul": filleul.email, "motif": "parrain_inactif"})
         return
 
     # Le filleul a payé avec sa carte : les 5 € sont GAGNÉS. Ils sont posés sur
@@ -331,115 +371,161 @@ async def _sur_paiement(filleul: User, invoice: dict, db: AsyncSession) -> None:
 
 # ── Passes sans abonnement (2026-10-04) ──────────────────────────────────────
 # Le parrainage vaut pour les Pass Semaine et Mois, PAS pour le Pass Jour :
-# 5 € − 5 € de remise = un pass gratuit, et deux comptes qui se renverraient la
-# balle obtiendraient l'accès gratuit en boucle. Un Pass Jour n'applique donc
-# aucune remise, ne valide aucun parrainage et ne consomme pas la remise du
-# filleul (elle reste pour un Pass Semaine, Mois ou un abonnement).
+# 5 € − 5 € = un pass gratuit, et deux comptes qui se renverraient la balle
+# obtiendraient l'accès gratuit en boucle. Un Pass Jour n'ouvre aucune remise,
+# ne valide aucun parrainage et ne consomme pas la remise du filleul.
 DUREES_PASS_PARRAINAGE = ("semaine", "mois")
 
+# La remise du filleul n'est JAMAIS accordée avant paiement : il paie le plein
+# tarif, puis 5 € lui sont REMBOURSÉS une fois sa carte vérifiée (la sienne, pas
+# celle de son parrain ni d'un autre compte). Accordée d'avance, une carte déjà
+# connue n'était repérée qu'après coup, et la « reprise » (solde client positif)
+# ne se prélevait que sur une facture d'abonnement — jamais pour qui n'achète que
+# des passes : remise réutilisable à volonté avec des adresses `nom+1@gmail.com`.
+METADATA_REMBOURSEMENT_REMISE = "remise_parrainage"
 
-def cartes_du_paiement(payment_intent_id: Optional[str]) -> list[dict]:
-    """Carte qui a réellement payé (empreinte Stripe), lue sur le paiement.
+
+def infos_paiement(payment_intent_id: Optional[str]) -> dict:
+    """Carte qui a réellement payé + état du paiement, lus chez Stripe.
 
     Un pass est un paiement unique : la carte n'est PAS enregistrée sur le
-    client Stripe, `_cartes_du_client` ne la verrait pas — et le contrôle
-    « carte du parrain / d'un autre compte » serait aveugle. Liste vide si
-    Stripe ne répond pas (on ne tranche pas alors)."""
+    client Stripe (`_cartes_du_client` ne la verrait pas). {cartes, rembourse,
+    conteste, charge}. Cartes vides si Stripe ne répond pas (on ne tranche pas)."""
+    vide = {"cartes": [], "rembourse": False, "conteste": False, "charge": None}
     if not payment_intent_id or not settings.stripe_secret_key:
-        return []
+        return vide
     try:
         pi = stripe.PaymentIntent.retrieve(payment_intent_id, expand=["latest_charge"])
         charge = pi.get("latest_charge") or {}
         carte = ((charge.get("payment_method_details") or {}).get("card") or {})
-        if not carte.get("fingerprint"):
-            return []
-        return [{"empreinte": carte["fingerprint"], "pm": charge.get("payment_method"),
-                 "marque": carte.get("brand"), "dernier4": carte.get("last4"),
-                 "financement": carte.get("funding")}]
+        cartes = [{"empreinte": carte["fingerprint"], "pm": charge.get("payment_method"),
+                   "marque": carte.get("brand"), "dernier4": carte.get("last4"),
+                   "financement": carte.get("funding")}] if carte.get("fingerprint") else []
+        return {"cartes": cartes, "rembourse": bool(charge.get("refunded")),
+                "conteste": bool(charge.get("disputed")), "charge": charge.get("id")}
     except Exception as e:  # noqa: BLE001
-        log.warning("parrainage.carte_paiement_illisible", pi=payment_intent_id, error=str(e)[:150])
-        return []
+        log.warning("parrainage.paiement_illisible", pi=payment_intent_id, error=str(e)[:150])
+        return vide
 
 
-async def sur_paiement_pass(filleul: User, duree: str, montant_paye: int, remise_appliquee: bool,
+def cartes_du_paiement(payment_intent_id: Optional[str]) -> list[dict]:
+    return infos_paiement(payment_intent_id)["cartes"]
+
+
+def rembourser_remise(lien: Parrainage, *, payment_intent: Optional[str] = None,
+                      charge: Optional[str] = None) -> Optional[str]:
+    """Rembourse les 5 € de remise au filleul sur SON paiement. Une seule fois par
+    parrainage : clé d'idempotence + relecture des remboursements du paiement.
+    Lève si Stripe échoue (l'appelant laisse la remise en attente)."""
+    cle = f"parrainage-remise-{lien.parrainage_id}"
+    cible = {"payment_intent": payment_intent} if payment_intent else {"charge": charge}
+    for rf in stripe.Refund.list(limit=20, **cible).auto_paging_iter():
+        if (rf.get("metadata") or {}).get("cle") == cle:
+            return rf["id"]
+    rf = stripe.Refund.create(
+        amount=REMISE_CENTS, reason="requested_by_customer",
+        metadata={"type": METADATA_REMBOURSEMENT_REMISE, "cle": cle, "parrainage_id": lien.parrainage_id},
+        idempotency_key=cle, **cible,
+    )
+    return rf["id"]
+
+
+def seulement_remise_parrainage(charge: dict) -> bool:
+    """Le remboursement porté par cette charge n'est QUE la remise de parrainage
+    (5 €) : ni le pass ni le crédit du parrain ne doivent être repris."""
+    rembourse = int(charge.get("amount_refunded") or 0)
+    if rembourse == 0 or rembourse > REMISE_CENTS or not charge.get("id") or not settings.stripe_secret_key:
+        return False
+    try:
+        rfs = list(stripe.Refund.list(charge=charge["id"], limit=20).auto_paging_iter())
+    except Exception:  # noqa: BLE001
+        return False
+    return bool(rfs) and all((r.get("metadata") or {}).get("type") == METADATA_REMBOURSEMENT_REMISE
+                             for r in rfs if r.get("status") != "failed")
+
+
+async def verdict_cartes(filleul: User, parrain_id: Optional[str], cartes: list[dict],
+                         db: AsyncSession) -> Optional[str]:
+    """None si la carte est bien celle du filleul ; sinon le motif du refus. Une
+    carte dont le compte a été SUPPRIMÉ (propriétaire NULL) compte comme déjà vue :
+    supprimer un compte ne « blanchit » pas sa carte."""
+    from api.routes.stripe_routes import _memoriser_cartes
+    avant = {c["empreinte"]: await db.get(CarteConnue, c["empreinte"]) for c in cartes}
+    await _memoriser_cartes(filleul, cartes, db)
+    for empreinte, connue in avant.items():
+        if connue is None:
+            continue
+        if connue.user_id is None:
+            return "carte_compte_supprime"
+        if connue.user_id != filleul.user_id:
+            return "carte_du_parrain" if connue.user_id == parrain_id else "carte_autre_compte"
+    return None
+
+
+async def sur_paiement_pass(filleul: User, duree: str, montant_paye: int, payment_intent: Optional[str],
                             session_id: str, cartes: list[dict], db: AsyncSession) -> None:
     """Pass payé par `filleul` (déjà accordé). N'appelle pas `commit`. Ne lève jamais."""
     try:
-        await _sur_paiement_pass(filleul, duree, montant_paye, remise_appliquee, session_id, cartes, db)
+        await _sur_paiement_pass(filleul, duree, montant_paye, payment_intent, session_id, cartes, db)
     except Exception as e:  # noqa: BLE001
         log.error("parrainage.pass_erreur", filleul=filleul.user_id, error=str(e)[:200])
 
 
-async def _sur_paiement_pass(filleul: User, duree: str, montant_paye: int, remise_appliquee: bool,
+async def _sur_paiement_pass(filleul: User, duree: str, montant_paye: int, payment_intent: Optional[str],
                              session_id: str, cartes: list[dict], db: AsyncSession) -> None:
     from services.abonnements import journaliser
 
     if not filleul.parraine_par_id:
         return
     lien = await _lien_du_filleul(filleul.user_id, db)
-    if lien is None:
+    # Pass Jour, parrainage déjà tranché, ou paiement trop faible : rien.
+    if (lien is None or lien.statut != "en_attente" or duree not in DUREES_PASS_PARRAINAGE
+            or montant_paye < REMISE_CENTS):
         return
-
-    if remise_appliquee:
-        if lien.remise_filleul_at is not None:
-            # Deux paiements avec remise ouverts en parallèle (deux onglets) : la
-            # remise ne vaut qu'une fois — la seconde est refacturée (solde positif,
-            # prélevé sur sa prochaine facture d'abonnement).
-            if filleul.stripe_customer_id and settings.stripe_secret_key:
-                try:
-                    _crediter(filleul, REMISE_CENTS, f"parrainage-remise-double-{session_id}",
-                              "Remise de parrainage déjà utilisée sur un autre paiement",
-                              {"parrainage_id": lien.parrainage_id, "session": session_id})
-                except Exception as e:  # noqa: BLE001
-                    log.error("parrainage.remise_double_reprise_echouee", filleul=filleul.user_id, error=str(e)[:200])
-            log.warning("parrainage.remise_double", filleul=filleul.user_id, session=session_id)
-        else:
-            lien.remise_filleul_at = datetime.now(timezone.utc)
-
-    # Pass Jour, ou paiement trop faible pour financer 5 € : ne valide rien.
-    if duree not in DUREES_PASS_PARRAINAGE or montant_paye < REMISE_CENTS or lien.statut != "en_attente":
-        return
-    if lien.remise_filleul_at is None:
-        lien.remise_filleul_at = datetime.now(timezone.utc)
 
     parrain = await db.get(User, lien.parrain_id) if lien.parrain_id else None
-    motif: Optional[str] = None
-    if not _peut_parrainer(parrain):
-        motif = "parrain_inactif"
-    else:
-        if not cartes:
-            lien.motif = "cartes_indisponibles"
-            log.warning("parrainage.cartes_indisponibles", filleul=filleul.user_id, pass_session=session_id)
-            return
-        from api.routes.stripe_routes import _memoriser_cartes
-        await _memoriser_cartes(filleul, cartes, db)
-        for carte in cartes:
-            connue = await db.get(CarteConnue, carte["empreinte"])
-            if connue is not None and connue.user_id and connue.user_id != filleul.user_id:
-                motif = "carte_du_parrain" if connue.user_id == lien.parrain_id else "carte_autre_compte"
-                break
+    if not cartes:
+        lien.motif = "cartes_indisponibles"
+        log.warning("parrainage.cartes_indisponibles", filleul=filleul.user_id, pass_session=session_id)
+        return
+    motif = await verdict_cartes(filleul, lien.parrain_id, cartes, db)
 
     if motif:
+        # Carte déjà connue : aucune remise n'a été donnée (paiement au plein
+        # tarif), donc rien à reprendre. Parrainage refusé.
         lien.statut = "refuse"
         lien.motif = motif
-        if remise_appliquee and motif != "parrain_inactif" and filleul.stripe_customer_id and settings.stripe_secret_key:
-            try:
-                _crediter(filleul, REMISE_CENTS, f"parrainage-remise-reprise-{lien.parrainage_id}",
-                          "Remise de parrainage non applicable : carte déjà utilisée sur un autre compte",
-                          {"parrainage_id": lien.parrainage_id})
-            except Exception as e:  # noqa: BLE001
-                log.error("parrainage.reprise_remise_echouee", filleul=filleul.user_id, error=str(e)[:200])
+        lien.remise_filleul_at = datetime.now(timezone.utc)
         await journaliser(db, "parrainage_refuse", parrain, None,
                           detail={"filleul": filleul.email, "motif": motif, "pass": duree})
         log.warning("parrainage.refuse", parrain=lien.parrain_id, filleul=filleul.user_id, motif=motif, pass_=duree)
         return
-
     if not settings.stripe_secret_key:
         return
+
+    # Carte vérifiée : le filleul récupère ses 5 € (remboursement sur ce paiement).
+    if lien.remise_filleul_at is None:
+        try:
+            rembourser_remise(lien, payment_intent=payment_intent)
+        except Exception as e:  # noqa: BLE001
+            lien.motif = "remise_en_echec"
+            log.error("parrainage.remise_remboursement_echoue", filleul=filleul.user_id, error=str(e)[:200])
+            return  # rien de validé : retenté au prochain paiement
+        lien.remise_filleul_at = datetime.now(timezone.utc)
+
+    if not _peut_parrainer(parrain):
+        lien.statut = "refuse"
+        lien.motif = "parrain_inactif"
+        return
+
     maintenant = datetime.now(timezone.utc)
     lien.statut = "valide"
     lien.motif = None
     lien.valide_at = maintenant
+    # Paiement qui a validé : sert à reprendre le crédit sur un remboursement ou
+    # une contestation, même au-delà de la fenêtre de 60 jours (un pass n'a pas
+    # de facture). Champ partagé avec l'identifiant de facture des abonnements.
+    lien.stripe_invoice_id = payment_intent
     lien.credit_cents = REMISE_CENTS
     await db.flush()
     await liberer_credits(parrain, db)
@@ -449,7 +535,6 @@ async def _sur_paiement_pass(filleul: User, duree: str, montant_paye: int, remis
                               "reporte": reporte, "motif_report": lien.motif})
     log.info("parrainage.valide_par_pass", parrain=parrain.user_id, filleul=filleul.user_id, pass_=duree)
     await _prevenir_parrain(parrain, filleul, db, reporte)
-
 
 async def periode_du_parrain(parrain: User, db: AsyncSession) -> dict:
     """Mois de facturation en cours du parrain et son plafond de crédits.
@@ -579,6 +664,10 @@ async def sur_remboursement(charge: dict, db: AsyncSession, motif: str) -> None:
     """Le paiement qui a validé un parrainage est remboursé ou contesté : le
     crédit du parrain est repris. N'appelle pas `commit`. Ne lève jamais."""
     try:
+        if motif == "paiement_rembourse" and seulement_remise_parrainage(charge):
+            # Remboursement des 5 € de remise du filleul : c'est le parrainage qui
+            # fonctionne, pas un remboursement client — on ne reprend rien.
+            return
         await _sur_remboursement(charge, db, motif)
     except Exception as e:  # noqa: BLE001
         log.error("parrainage.reprise_erreur", charge=charge.get("id"), error=str(e)[:200])
@@ -603,6 +692,15 @@ async def _sur_remboursement(charge: dict, db: AsyncSession, motif: str) -> None
     if facture:
         lien = (await db.execute(
             select(Parrainage).where(Parrainage.stripe_invoice_id == facture)
+        )).scalar_one_or_none()
+    pi = charge.get("payment_intent")
+    if isinstance(pi, dict):
+        pi = pi.get("id")
+    if lien is None and pi:
+        # Parrainage validé par un pass : le paiement est mémorisé à la place de
+        # la facture — retrouvé sans limite de délai (contestation à 120 jours).
+        lien = (await db.execute(
+            select(Parrainage).where(Parrainage.stripe_invoice_id == pi)
         )).scalar_one_or_none()
     if lien is None and charge.get("customer"):
         # Versions récentes de l'API : la facture n'est plus portée par le

@@ -80,7 +80,7 @@ async def _filleuls_qui_paient(db, parrain: User, n: int) -> list:
         liens.append(await P.rattacher_filleul(f, code, db))
         await db.commit()
         await sr._handle_payment_succeeded(
-            {"id": f"in_{i}_{f.user_id[:4]}", "customer": f.stripe_customer_id, "amount_paid": 1400, "total": 1400}, db)
+            {"id": f"in_{i}_{f.user_id[:4]}", "customer": f.stripe_customer_id, "amount_paid": 1400, "total": 1400, "charge": f"ch_{i}"}, db)
     return liens
 
 

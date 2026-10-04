@@ -82,7 +82,7 @@ async def _abo(db, user: User, statut="active", plan="expert", **kw) -> Subscrip
 
 
 def _facture(customer: str, paye=700, total=None, fid=None) -> dict:
-    return {"id": fid or f"in_{uuid.uuid4().hex[:6]}", "customer": customer, "amount_paid": paye,
+    return {"id": fid or f"in_{uuid.uuid4().hex[:6]}", "customer": customer, "amount_paid": paye, "charge": "ch_test",
             "total": paye if total is None else total}
 
 
@@ -199,8 +199,8 @@ async def test_parrain_gratuit_credite_puis_sabonne(db, monkeypatch):
 @pytest.mark.asyncio
 async def test_filleul_lui_meme_parrain_facture_soldee_par_son_credit(db, monkeypatch):
     """Sa première facture est payée par son propre crédit (0 € encaissé) :
-    rien pour son parrain tant qu'il n'a pas réellement payé, mais sa remise
-    est consommée."""
+    rien pour son parrain tant qu'il n'a pas réellement payé, et sa remise reste
+    due — elle lui est remboursée sur son premier VRAI paiement (2026-10-04)."""
     stripe_ = Stripe(monkeypatch)
     paul = await _compte(db, "Paul", stripe_customer_id="cus_paul")
     marc = await _compte(db, "Marc", stripe_customer_id="cus_marc")
@@ -209,14 +209,15 @@ async def test_filleul_lui_meme_parrain_facture_soldee_par_son_credit(db, monkey
 
     await sr._handle_payment_succeeded(_facture("cus_marc", paye=0, total=700), db)
     await db.refresh(lien)
-    assert lien.statut == "en_attente" and lien.remise_filleul_at is not None
+    assert lien.statut == "en_attente" and lien.remise_filleul_at is None
     assert stripe_.soldes == []
-    assert await P.remise_filleul_due(marc, db) is None
+    assert await P.remise_filleul_due(marc, db) is not None
 
     # Premier vrai paiement le mois suivant → Paul est crédité.
     await sr._handle_payment_succeeded(_facture("cus_marc", paye=1200), db)
     await db.refresh(lien)
     assert lien.statut == "valide" and stripe_.solde("cus_paul") == -500
+    assert lien.remise_filleul_at is not None  # remboursée sur ce paiement réel
 
 
 @pytest.mark.asyncio

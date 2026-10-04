@@ -65,13 +65,33 @@ class _Stripe:
         monkeypatch.setattr(P.stripe.Customer, "create_balance_transaction", _balance)
         monkeypatch.setattr(P.stripe.Customer, "list_balance_transactions", _lister)
         monkeypatch.setattr(P.stripe.Customer, "create", _client)
+
+        # Remise du filleul = remboursement de 5 € sur SON paiement (2026-10-04).
+        self.remboursements: list[dict] = []
+
+        def _rembourser(**kw):
+            self.remboursements.append(kw)
+            return {"id": f"re_{len(self.remboursements)}", "metadata": kw.get("metadata")}
+
+        def _lister_remb(**kw):
+            return _Liste([{"id": f"re_{i + 1}", "metadata": r.get("metadata"), "status": "succeeded"}
+                           for i, r in enumerate(self.remboursements)
+                           if (r.get("charge") or r.get("payment_intent")) in (kw.get("charge"), kw.get("payment_intent"))])
+
+        def _charges(customer=None, **kw):
+            return _Liste([{"id": f"ch_{customer}", "status": "succeeded", "paid": True, "amount": 700,
+                            "refunded": False, "created": 0}])
+
+        monkeypatch.setattr(P.stripe.Refund, "create", _rembourser)
+        monkeypatch.setattr(P.stripe.Refund, "list", _lister_remb)
+        monkeypatch.setattr(P.stripe.Charge, "list", _charges)
         monkeypatch.setattr(sr, "_cartes_du_client", lambda sub: [
             {"empreinte": e, "pm": "pm_x", "marque": "visa", "dernier4": "4242",
              "financement": "debit"} for e in cartes])
 
 
 def _facture(montant=700, fid="in_1"):
-    return {"id": fid, "amount_paid": montant, "customer": "cus_filleul"}
+    return {"id": fid, "amount_paid": montant, "customer": "cus_filleul", "charge": f"ch_{fid}"}
 
 
 # ─── Rattachement ────────────────────────────────────────────────────────────
@@ -158,9 +178,10 @@ async def test_filleul_sans_essai_avec_remise(db, monkeypatch, plan, periodicite
 
     assert res["essai"] is False and res["remise_parrainage"] is True
     assert "trial_period_days" not in captured["subscription_data"]
-    assert captured["discounts"] == [{"coupon": P.COUPON_FILLEUL_ID}]
-    # Pas de code promo cumulable avec la remise.
-    assert "allow_promotion_codes" not in captured
+    # 2026-10-04 : plus de coupon avant paiement — 5 € remboursés après
+    # vérification de la carte. Pas de code promo cumulable pour un filleul.
+    assert "discounts" not in captured
+    assert captured["allow_promotion_codes"] is False
 
 
 @pytest.mark.asyncio
@@ -185,22 +206,23 @@ async def test_carte_connue_ailleurs_pas_de_remise(db, monkeypatch):
     monkeypatch.setattr(sr, "_cartes_du_client", lambda sub: [{"empreinte": "fp_ancien"}])
 
     res = await sr.create_checkout(sr.CheckoutRequest(plan="standard", periodicite="monthly"), db, filleul)
-    assert res["remise_parrainage"] is False and res["essai"] is False
+    # Aucune remise accordée d'avance : la carte est jugée APRÈS paiement, et une
+    # carte connue ailleurs n'obtient alors aucun remboursement.
+    assert res["essai"] is False
     assert "discounts" not in captured
 
 
 @pytest.mark.asyncio
-async def test_coupon_indisponible_bloque_le_checkout(db, monkeypatch):
-    _capture(monkeypatch)
+async def test_le_checkout_filleul_ne_depend_plus_d_aucun_coupon(db, monkeypatch):
+    captured = _capture(monkeypatch)
 
     def _panne():
         raise RuntimeError("stripe down")
 
     monkeypatch.setattr(P, "coupon_filleul", _panne)
     _, filleul, _ = await _couple(db)
-    with pytest.raises(HTTPException) as exc:
-        await sr.create_checkout(sr.CheckoutRequest(plan="standard", periodicite="monthly"), db, filleul)
-    assert exc.value.status_code == 503
+    res = await sr.create_checkout(sr.CheckoutRequest(plan="standard", periodicite="monthly"), db, filleul)
+    assert res["url"] and "discounts" not in captured
 
 
 @pytest.mark.asyncio
@@ -265,8 +287,9 @@ async def test_carte_du_parrain_refusee(db, monkeypatch):
 
     await P.sur_paiement(filleul, _facture(), db)
 
-    # Auto-parrainage : aucun crédit au parrain, et la remise est refacturée.
-    assert [(s["customer"], s["amount"]) for s in spy.soldes] == [("cus_filleul", 500)]
+    # Auto-parrainage : aucun crédit au parrain, AUCUN remboursement au filleul
+    # (rien n'avait été accordé d'avance, donc rien à rattraper).
+    assert spy.soldes == [] and spy.remboursements == []
     assert lien.statut == "refuse" and lien.motif == "carte_du_parrain"
 
 
@@ -276,8 +299,9 @@ async def test_cartes_illisibles_la_recompense_attend(db, monkeypatch):
     _, filleul, lien = await _couple(db)
     await P.sur_paiement(filleul, _facture(), db)
     assert spy.soldes == [] and lien.statut == "en_attente"
-    # La remise du filleul, elle, est bien consommée.
-    assert lien.remise_filleul_at is not None
+    # Rien n'est tranché : ni remboursement, ni remise consommée (elle sera
+    # remboursée au paiement suivant si la carte est la sienne).
+    assert spy.remboursements == [] and lien.remise_filleul_at is None
 
 
 @pytest.mark.asyncio
@@ -418,7 +442,7 @@ async def test_filleul_ne_cumule_jamais_remise_et_essai(db, monkeypatch):
 @pytest.mark.asyncio
 async def test_carte_deja_connue_remise_refacturee_au_filleul(db, monkeypatch):
     """Ancien client qui rouvre un compte pour la remise : parrain non crédité,
-    et les 5 € sont remis sur la facture suivante du filleul."""
+    et aucun remboursement — il a payé plein tarif, rien à rattraper."""
     spy = _Stripe(monkeypatch, cartes=("fp_ancien",))
     _, filleul, lien = await _couple(db)
     ancien = await _user(db)
@@ -428,7 +452,7 @@ async def test_carte_deja_connue_remise_refacturee_au_filleul(db, monkeypatch):
     await P.sur_paiement(filleul, _facture(), db)
 
     assert lien.statut == "refuse" and lien.motif == "carte_autre_compte"
-    assert [(s["customer"], s["amount"]) for s in spy.soldes] == [("cus_filleul", 500)]
+    assert spy.soldes == [] and spy.remboursements == []
 
 
 @pytest.mark.asyncio

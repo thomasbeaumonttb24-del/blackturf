@@ -175,10 +175,24 @@ async def test_parcours_gratuit_complet(client, db, redis, inscrire):
 
 
 async def test_alias_d_inscription_ne_donnent_pas_un_second_classement(client, db, redis, inscrire):
+    """Deux verrous : (1) depuis le 2026-10-04 l'inscription d'un alias d'une boîte
+    déjà inscrite est refusée ; (2) un alias créé AVANT cette règle partage
+    toujours le quota de la boîte d'origine."""
+    import uuid
+    from api.routes.auth import _hash
     await _course(db, "QC1")
     await _course(db, "QC2")
     h1 = await inscrire(email="malin@gmail.com")
-    h2 = await inscrire(email="malin+bis@gmail.com")
+    r = await client.post("/api/v1/auth/register", json={
+        "email": "malin+bis@gmail.com", "password": "TestPassword123!", "pseudo": "malinbis"})
+    assert r.status_code == 400
+    # Alias hérité (créé avant la règle) : on le pose en base et on s'y connecte.
+    db.add(User(user_id=str(uuid.uuid4()), email="malin+bis@gmail.com", hashed_password=_hash("TestPassword123!"),
+                plan="free", email_verified=True, pseudo="malinbis"))
+    await db.commit()
+    login = await client.post("/api/v1/auth/login", data={"username": "malin+bis@gmail.com",
+                                                          "password": "TestPassword123!"})
+    h2 = {"Authorization": f"Bearer {login.json()['access_token']}"}
     assert _ouvert(await client.get("/api/v1/courses/QC1/predictions", headers=h1, params={"reveler": True}))
     r = await client.get("/api/v1/courses/QC2/predictions", headers=h2, params={"reveler": True})
     assert r.json()["verrouille"] is True

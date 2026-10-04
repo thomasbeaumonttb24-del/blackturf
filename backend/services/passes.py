@@ -108,16 +108,10 @@ def valider_session(session) -> dict:
     if duree not in PASSES:
         raise PassInvalide("durée inconnue")
     prix = PASSES[duree][0]
-    # Remise de parrainage (−5 €) : posée par le SERVEUR seulement (coupon à la
-    # création de la session), jamais sur le Pass Jour. Le montant payé doit
-    # alors valoir exactement prix − 5 €, remise comprise dans le détail Stripe.
-    from services.parrainage import DUREES_PASS_PARRAINAGE, REMISE_CENTS
-    remise = meta.get("remise_parrainage") == "1"
-    if remise:
-        remise_lue = int(((session.get("total_details") or {}).get("amount_discount")) or 0)
-        if duree not in DUREES_PASS_PARRAINAGE or remise_lue != REMISE_CENTS:
-            raise PassInvalide("remise de parrainage non conforme")
-    attendu = prix - REMISE_CENTS if remise else prix
+    # Toujours le plein tarif : la remise de parrainage n'est plus jamais
+    # accordée avant paiement (elle est remboursée après vérification de la carte,
+    # cf. services.parrainage). Toute remise sur la session = montant refusé.
+    attendu = prix
     if session.get("amount_total") != attendu or (session.get("currency") or "").lower() != DEVISE:
         raise PassInvalide("montant ou devise différents du tarif")
     user_id = meta.get("user_id")
@@ -147,7 +141,6 @@ def valider_session(session) -> dict:
         "customer": session.get("customer"),
         "duree": duree,
         "montant_cents": attendu,
-        "remise_parrainage": remise,
         "payment_intent": pi,
         "renonciation_at": renonciation_at,
     }
@@ -188,6 +181,7 @@ async def accorder(db: AsyncSession, session) -> tuple[PassAcces, bool]:
 
     Lève PassInvalide si la session ne le justifie pas."""
     from api.routes.stripe_routes import _plan_effectif
+    from services import parrainage
     from services.abonnements import journaliser
 
     v = valider_session(session)
@@ -196,6 +190,12 @@ async def accorder(db: AsyncSession, session) -> tuple[PassAcces, bool]:
     )).scalar_one_or_none()
     if deja is not None:
         return deja, False
+    # Paiement relu chez Stripe : un webhook rejoué APRÈS un remboursement total
+    # ou une contestation (endpoint en panne, relivraison tardive) n'accorde rien.
+    infos = parrainage.infos_paiement(v["payment_intent"])
+    if infos["rembourse"] or infos["conteste"]:
+        log.warning("passes.paiement_deja_rembourse_ou_conteste", session=v["session_id"])
+        raise PassInvalide("paiement remboursé ou contesté")
 
     # Verrou sur le compte : deux passes payés au même instant ne calculent pas
     # le même début (sans quoi l'un des deux serait perdu).
@@ -244,21 +244,20 @@ async def accorder(db: AsyncSession, session) -> tuple[PassAcces, bool]:
     await journaliser(db, "pass_achete", user, None, plan=PLAN_PASS, plan_precedent=precedent,
                       montant_cents=v["montant_cents"], periode_fin=fin,
                       detail={"duree": v["duree"], "debut": debut.isoformat(),
-                              "session": v["session_id"], "remise_parrainage": v["remise_parrainage"]})
+                              "session": v["session_id"]})
 
     # Carte qui a payé : mémorisée comme pour un abonnement (un ancien client qui
     # rouvre un compte est ainsi reconnu), puis parrainage éventuel. Rien ici ne
     # peut retirer le pass, déjà payé : erreurs consignées seulement.
-    from services import parrainage
     await db.flush()
     try:
-        cartes = parrainage.cartes_du_paiement(v["payment_intent"])
+        cartes = infos["cartes"]
         # Point de sauvegarde : une erreur ici n'annule QUE ce bloc, jamais le pass.
         async with db.begin_nested():
             if user.parraine_par_id:
                 # Version qui LÈVE : l'erreur annule le point de sauvegarde au
                 # lieu de laisser une transaction en échec derrière elle.
-                await parrainage._sur_paiement_pass(user, v["duree"], v["montant_cents"], v["remise_parrainage"],
+                await parrainage._sur_paiement_pass(user, v["duree"], v["montant_cents"], v["payment_intent"],
                                                     v["session_id"], cartes, db)
             elif cartes:
                 from api.routes.stripe_routes import _memoriser_cartes
@@ -274,6 +273,28 @@ async def accorder(db: AsyncSession, session) -> tuple[PassAcces, bool]:
         log.warning("passes.email_confirmation_echoue", user_id=user.user_id, error=str(e)[:150])
     return p, True
 
+
+async def _recaler_passes(db: AsyncSession, user_id: str) -> None:
+    """Réenchaîne les passes actifs à venir sans trou : chacun commence à la fin
+    du précédent encore valable (ou maintenant). Ne recule jamais un pass en
+    cours, ne rallonge rien : la durée payée est conservée."""
+    maintenant = _maintenant()
+    actifs = (await db.execute(
+        select(PassAcces).where(PassAcces.user_id == user_id, PassAcces.statut == "actif",
+                                PassAcces.fin > maintenant).order_by(PassAcces.debut)
+    )).scalars().all()
+    curseur = maintenant
+    for p in actifs:
+        debut, fin = _aware(p.debut), _aware(p.fin)
+        if debut <= maintenant:          # pass en cours : intact
+            curseur = max(curseur, fin)
+            continue
+        if debut > curseur:              # trou laissé par un pass retiré
+            duree = fin - debut
+            p.debut, p.fin = curseur, curseur + duree
+            log.info("passes.recale", pass_id=p.pass_id, nouveau_debut=curseur)
+        curseur = _aware(p.fin)
+    await db.flush()
 
 async def retirer_par_paiement(db: AsyncSession, payment_intent: Optional[str], raison: str) -> int:
     """Remboursement / contestation : le pass payé par ce paiement est retiré."""
@@ -292,6 +313,9 @@ async def retirer_par_paiement(db: AsyncSession, payment_intent: Optional[str], 
         user = await db.get(User, p.user_id)
         if user is None:
             continue
+        # Les passes payés APRÈS celui-ci attendaient sa fin pour commencer : on
+        # les recale, sinon l'accès payé resterait coupé jusqu'à leur date prévue.
+        await _recaler_passes(db, user.user_id)
         precedent = user.plan
         user.plan = await _plan_effectif(user.user_id, db)
         await journaliser(db, "pass_retire", user, None, plan=p.plan, plan_precedent=precedent,
@@ -301,6 +325,29 @@ async def retirer_par_paiement(db: AsyncSession, payment_intent: Optional[str], 
     if passes:
         await db.commit()
     return len(passes)
+
+
+async def activer_passes_commences(db: AsyncSession) -> int:
+    """Filet de sécurité (tâche de chaque minute) : un pass payé et commencé dont
+    le compte n'a pas l'accès Expert (pass enchaîné qui démarre, recalage, plan
+    écrasé par un autre chemin) est rétabli. Idempotent, ne retire jamais rien."""
+    from api.routes.stripe_routes import _plan_effectif
+
+    maintenant = _maintenant()
+    ids = (await db.execute(
+        select(PassAcces.user_id).join(User, User.user_id == PassAcces.user_id).where(
+            PassAcces.statut == "actif", PassAcces.debut <= maintenant, PassAcces.fin > maintenant,
+            User.plan != PLAN_PASS, User.is_admin.is_not(True),
+        ).distinct()
+    )).scalars().all()
+    for uid in ids:
+        user = await db.get(User, uid)
+        if user is not None:
+            user.plan = await _plan_effectif(uid, db)
+            log.warning("passes.acces_retabli", user_id=uid, plan=user.plan)
+    if ids:
+        await db.commit()
+    return len(ids)
 
 
 async def expirer_passes(db: AsyncSession, user_id: Optional[str] = None) -> int:
@@ -349,21 +396,37 @@ async def expirer_passes(db: AsyncSession, user_id: Optional[str] = None) -> int
 
 
 async def expirer_si_echu(db: AsyncSession, user: User) -> None:
-    """Contrôle à la requête (compte payant seulement) : un pass échu coupe l'accès
-    à la seconde, sans attendre la tâche planifiée. Ne lève jamais : une panne ici
-    ne doit pas déconnecter un abonné — la tâche planifiée rattrape."""
-    if (user.plan or "free") == "free" or user.is_admin:
+    """Contrôle à la requête : un pass échu coupe l'accès, un pass qui commence
+    l'ouvre — à la seconde, sans attendre la tâche planifiée. Ne lève jamais : une
+    panne ici ne doit pas déconnecter un abonné — la tâche planifiée rattrape."""
+    if user.is_admin:
         return
     try:
-        echu = (await db.execute(
-            select(PassAcces.pass_id).where(
-                PassAcces.user_id == user.user_id, PassAcces.statut == "actif",
-                PassAcces.fin <= _maintenant(), PassAcces.expire_traite_at.is_(None),
-            ).limit(1)
-        )).scalar_one_or_none()
-        if echu is not None:
-            await expirer_passes(db, user.user_id)
-            await db.refresh(user)
+        maintenant = _maintenant()
+        if (user.plan or "free") != "free":
+            echu = (await db.execute(
+                select(PassAcces.pass_id).where(
+                    PassAcces.user_id == user.user_id, PassAcces.statut == "actif",
+                    PassAcces.fin <= maintenant, PassAcces.expire_traite_at.is_(None),
+                ).limit(1)
+            )).scalar_one_or_none()
+            if echu is not None:
+                await expirer_passes(db, user.user_id)
+                await db.refresh(user)
+        if (user.plan or "free") != PLAN_PASS:
+            # Pass payé qui vient de commencer (enchaîné, recalé) : accès ouvert à
+            # la seconde, sans attendre la tâche planifiée. Requête indexée.
+            commence = (await db.execute(
+                select(PassAcces.pass_id).where(
+                    PassAcces.user_id == user.user_id, PassAcces.statut == "actif",
+                    PassAcces.debut <= maintenant, PassAcces.fin > maintenant,
+                ).limit(1)
+            )).scalar_one_or_none()
+            if commence is not None:
+                from api.routes.stripe_routes import _plan_effectif
+                user.plan = await _plan_effectif(user.user_id, db)
+                await db.commit()
+                await db.refresh(user)
     except Exception as e:  # noqa: BLE001
         uid = user.user_id
         await db.rollback()

@@ -133,24 +133,17 @@ export function PassesTarifs() {
                   </div>
                 </div>
 
-                {/* Filleul : −5 € sur Semaine et Mois (appliqués par le serveur au
-                    paiement). Jamais sur le Pass Jour, que la remise rendrait gratuit. */}
+                {/* Filleul : 5 € REMBOURSÉS après paiement sur Semaine et Mois, une fois
+                    sa carte vérifiée. Jamais sur le Pass Jour, que la remise rendrait gratuit. */}
                 <div className="mt-5 flex flex-wrap items-baseline gap-1.5">
-                  {remiseFilleul && p.duree !== "jour" ? (
-                    <>
-                      <span className={cn("font-display text-5xl font-extrabold tracking-tight", vedette && "text-amber-300")}>
-                        {Number(p.prix) - 5}&nbsp;€
-                      </span>
-                      <span className={cn("text-lg font-semibold line-through", vedette ? "text-stone-400" : "text-stone-400")}>{p.prix}&nbsp;€</span>
-                    </>
-                  ) : (
-                    <span className={cn("font-display text-5xl font-extrabold tracking-tight", vedette && "text-amber-300")}>{p.prix}&nbsp;€</span>
-                  )}
+                  <span className={cn("font-display text-5xl font-extrabold tracking-tight", vedette && "text-amber-300")}>{p.prix}&nbsp;€</span>
                   <span className={cn("text-xs", vedette ? "text-stone-300" : "text-muted-foreground")}>une seule fois</span>
                 </div>
                 {remiseFilleul && (
                   <p className={cn("mt-1 text-xs font-semibold", vedette ? "text-amber-200" : "text-amber-700")}>
-                    {p.duree === "jour" ? "Remise de parrainage non valable sur le Pass Jour" : "−5 € grâce à votre parrain"}
+                    {p.duree === "jour"
+                      ? "Remise de parrainage non valable sur le Pass Jour"
+                      : `5 € remboursés après paiement grâce à votre parrain (soit ${Number(p.prix) - 5} €)`}
                   </p>
                 )}
                 <p className={cn("mt-1 text-xs font-semibold", vedette ? "text-emerald-300" : "text-emerald-700")}>{p.parJour}</p>

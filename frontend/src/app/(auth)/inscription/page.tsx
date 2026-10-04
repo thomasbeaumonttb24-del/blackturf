@@ -144,7 +144,7 @@ function InscriptionContent() {
         </p>
         <p className="text-xs text-muted-foreground mt-3">
           {parrain
-            ? `Dès la confirmation, vos ${euros(parrain.remise)} de remise de parrainage vous attendent sur votre premier abonnement.`
+            ? `Dès la confirmation, vos ${euros(parrain.remise)} de parrainage vous attendent : remboursés dès votre premier abonnement ou Pass Semaine/Mois.`
             : plan
               ? `Dès la confirmation, la formule ${plan === "expert" ? "Expert" : "Standard"} vous sera proposée — ou tout BlackTurf dès 5 € avec un pass, sans abonnement.`
               : "Dès la confirmation, votre classement gratuit du jour vous attend. Tout BlackTurf se débloque dès 5 € avec un pass, sans abonnement."}
