@@ -811,7 +811,7 @@ function PodiumReserve({ apercu, connecte }: { apercu: ApercuAnalyse; connecte: 
             {nbNommes > 0 ? ` Les ${nbNommes} derniers du classement restent visibles ci-dessous.` : ""}
           </p>
         </div>
-        <BoutonAbonnement connecte={connecte} libelle={connecte ? "Voir le podium — 12 €/mois" : "Voir le podium — essai 7 jours"} />
+        <BoutonAbonnement connecte={connecte} libelle={connecte ? "Voir le podium — dès 5 €" : "Voir le podium — compte gratuit"} />
       </div>
     </div>
   );

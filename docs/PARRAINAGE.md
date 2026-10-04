@@ -6,7 +6,7 @@
 |---|---|---|
 | Ce qu'il obtient | 5 € de remise sur sa **première facture payante** (mensuelle ou annuelle) | 5 € de crédit, déduits **automatiquement** de sa prochaine mensualité ou de l'abonnement qu'il prendra |
 | Quand | au checkout, sans rien saisir | **uniquement** quand le paiement du filleul est encaissé (facture > 0 €) |
-| Essai gratuit | **aucun**, jamais (même après résiliation) | inchangé |
+| Essai gratuit | **aucun** (supprimé pour tous le 2026-10-04) | inchangé |
 | Plafond | — | par mois de facturation, de quoi rendre la mensualité gratuite : **4 en Expert** (19 € − 20 € → 0 €), **3 en Standard** (12 € − 15 € → 0 €). Au-delà : crédit gagné mais **reporté au mois suivant**, jamais perdu |
 
 Aucun argent n'est versé : le crédit est posé sur le **solde client Stripe** du parrain

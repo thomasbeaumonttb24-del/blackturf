@@ -93,19 +93,19 @@ def _capture_checkout(monkeypatch) -> dict:
 # 1. Essai gratuit : une seule fois, carte exigée
 # ─────────────────────────────────────────────
 @pytest.mark.asyncio
-async def test_premier_checkout_accorde_lessai_et_exige_la_carte(db, monkeypatch):
+async def test_premier_checkout_sans_essai_et_carte_exigee(db, monkeypatch):
+    """Essai gratuit supprimé le 2026-10-04 : même un compte neuf paie dès le
+    premier jour ; aucun paramètre d'essai ne part chez Stripe."""
     captured = _capture_checkout(monkeypatch)
     user = await _user(db)
 
     res = await sr.create_checkout(
         sr.CheckoutRequest(plan="standard", periodicite="monthly"), db, user)
 
-    assert res["essai"] is True
-    assert captured["subscription_data"]["trial_period_days"] == 7
-    # Décision produit du 2026-08-20 : la carte est exigée dès l'ouverture de l'essai.
+    assert res["essai"] is False
+    assert "trial_period_days" not in captured["subscription_data"]
+    assert "trial_settings" not in captured["subscription_data"]
     assert captured["payment_method_collection"] == "always"
-    assert (captured["subscription_data"]["trial_settings"]["end_behavior"]
-            ["missing_payment_method"]) == "cancel"
 
 
 @pytest.mark.asyncio

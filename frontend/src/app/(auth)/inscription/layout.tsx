@@ -6,14 +6,14 @@ import { OG_IMAGE } from "@/lib/seo";
 // l'accueil — deux pages avec le même titre, ce que Google traite comme un doublon, et
 // une description qui ne parlait pas du tout de la création de compte.
 export const metadata: Metadata = {
-  title: "Créer un compte — essai Standard 7 jours",
+  title: "Créer un compte gratuit",
   description:
-    "Compte BlackTurf gratuit : programme PMU du jour, prédictions de l'algorithme et plan de mise. 7 jours d'essai Standard offerts, sans engagement.",
+    "Compte BlackTurf gratuit : programme PMU du jour, prédictions de l'algorithme et plan de mise. 1 classement offert chaque jour, tout débloqué dès 5 € sans abonnement.",
   alternates: { canonical: "/inscription" },
   openGraph: {
     title: "Créer un compte BlackTurf",
     description:
-      "Programme PMU du jour, prédictions de l'algorithme et plan de mise sur votre budget. 7 jours d'essai offerts.",
+      "Programme PMU du jour, prédictions de l'algorithme et plan de mise sur votre budget. Compte gratuit, pass dès 5 €.",
     url: "https://blackturf.fr/inscription",
     images: [OG_IMAGE],
   },

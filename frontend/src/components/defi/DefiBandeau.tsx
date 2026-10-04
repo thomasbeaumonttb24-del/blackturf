@@ -7,8 +7,8 @@
  * participer. Masquable pour le mois en cours seulement : le mois suivant, c'est un
  * nouveau défi, il revient.
  *
- * Il se tait quand le bandeau d'essai gratuit est à l'écran : deux appels à l'action
- * empilés en haut de page, c'est un de trop, et l'essai rapporte davantage.
+ * Il se tait quand le bandeau des formules (EssaiGratuitBanner, pass dès 5 €) est à
+ * l'écran : deux appels à l'action empilés en haut de page, c'est un de trop.
  */
 
 import { useEffect, useState } from "react";
@@ -17,7 +17,7 @@ import { usePathname } from "next/navigation";
 import useSWR from "swr";
 import { X } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
-import { peutDemarrerEssai } from "@/lib/auth";
+import { peutDebloquer } from "@/lib/auth";
 import { defiApi } from "@/lib/api";
 import { DEFI_FOND, DefiEmbleme, formatPts, planLabel, formatNombre } from "@/components/defi/kit";
 import { cn } from "@/lib/utils";
@@ -52,7 +52,7 @@ export function DefiBandeau() {
 
   if (loading || masque || !regles) return null;
   if (PAGES_SANS_BANDEAU.some((p) => pathname?.startsWith(p))) return null;
-  if (peutDemarrerEssai(user) && !essaiMasque) return null;
+  if (peutDebloquer(user) && !essaiMasque) return null;
 
   const fermer = () => {
     setMasque(true);

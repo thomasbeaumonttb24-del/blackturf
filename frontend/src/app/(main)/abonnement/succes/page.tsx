@@ -9,8 +9,100 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { useAuth } from "@/hooks/useAuth";
 import { ParrainageAppel } from "@/components/billing/ParrainageAppel";
+import { api } from "@/lib/api";
+
+const NOMS_PASS: Record<string, string> = { jour: "Pass Jour", semaine: "Pass Semaine", mois: "Pass Mois" };
+
+/** Retour de paiement d'un pass : le SERVEUR relit la session chez Stripe et
+ *  accorde l'accès (idempotent avec le webhook). L'adresse seule n'ouvre rien. */
+function PassSucces({ duree, sessionId }: { duree: string; sessionId: string }) {
+  const { refreshUser } = useAuth();
+  const [etat, setEtat] = useState<"attente" | "ok" | "echec">("attente");
+  const [fin, setFin] = useState<string | null>(null);
+
+  useEffect(() => {
+    let annule = false;
+    const confirmer = async () => {
+      // Paiement par carte : encaissé à la redirection. Quelques essais couvrent
+      // le cas d'une banque lente à confirmer.
+      for (let i = 0; i < 6 && !annule; i++) {
+        try {
+          const r = await api.post("/stripe/pass/confirmer", { session_id: sessionId });
+          if (annule) return;
+          setFin(r.data.fin);
+          setEtat("ok");
+          await refreshUser().catch(() => {});
+          return;
+        } catch (error: unknown) {
+          const status = (error as { response?: { status?: number } })?.response?.status;
+          if (status !== 409) break;
+          await new Promise((res) => setTimeout(res, 2500));
+        }
+      }
+      if (!annule) setEtat("echec");
+    };
+    confirmer();
+    return () => { annule = true; };
+  }, [sessionId, refreshUser]);
+
+  const nom = NOMS_PASS[duree] || "Pass";
+  const finTexte = fin
+    ? new Date(fin).toLocaleString("fr-FR", { weekday: "long", day: "numeric", month: "long", hour: "2-digit", minute: "2-digit", timeZone: "Europe/Paris" })
+    : null;
+
+  return (
+    <div className="min-h-[70vh] flex items-center justify-center px-4">
+      <div className="max-w-lg w-full text-center space-y-6">
+        {etat === "attente" && (
+          <div className="space-y-4">
+            <Loader2 className="h-12 w-12 animate-spin text-brand-gold-dark mx-auto" />
+            <p className="text-muted-foreground">Activation de votre {nom}…</p>
+          </div>
+        )}
+        {etat === "echec" && (
+          <p className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            Votre paiement est en cours de confirmation. Votre accès s&apos;ouvre dès que votre banque
+            l&apos;a validé : rechargez cette page dans une minute. Un souci ? contact@blackturf.fr
+          </p>
+        )}
+        {etat === "ok" && (
+          <div className="animate-fade-in space-y-6">
+            <div className="h-20 w-20 rounded-full bg-brand-emerald/15 border border-brand-emerald/30 flex items-center justify-center mx-auto gold-glow">
+              <CheckCircle className="h-10 w-10 text-brand-emerald-dark" />
+            </div>
+            <div>
+              <h1 className="text-3xl font-extrabold mb-2">
+                Votre <span className="text-gradient">{nom}</span> est actif !
+              </h1>
+              <p className="text-muted-foreground">
+                Accès Expert complet{finTexte ? <> jusqu&apos;au <strong>{finTexte}</strong></> : null}. Aucun
+                renouvellement : rien d&apos;autre ne sera prélevé. Une confirmation vous a été envoyée par e-mail.
+              </p>
+            </div>
+            <div className="flex flex-col sm:flex-row gap-3 justify-center">
+              <Button asChild className="bg-brand-gold hover:bg-brand-amber text-brand-dark font-bold" size="lg">
+                <Link href="/programme">Voir les courses du jour <ArrowRight className="h-4 w-4" /></Link>
+              </Button>
+              <Button variant="outline" size="lg" asChild>
+                <Link href="/value-bets">Paris de valeur</Link>
+              </Button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 
 function AbonnementSuccesContent() {
+  const searchParams = useSearchParams();
+  const pass = searchParams.get("pass");
+  const sessionId = searchParams.get("session_id");
+  if (pass && sessionId) return <PassSucces duree={pass} sessionId={sessionId} />;
+  return <AbonnementSuccesAbonnement />;
+}
+
+function AbonnementSuccesAbonnement() {
   const searchParams = useSearchParams();
   const { user, refreshUser } = useAuth();
   const [loading, setLoading] = useState(true);

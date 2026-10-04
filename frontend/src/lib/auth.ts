@@ -24,11 +24,13 @@ export interface AuthUser {
   abonnement_gerable?: boolean;
   // Vrai tant que Stripe relance la carte. Sert à EXPLIQUER la perte d'accès.
   paiement_en_echec?: boolean;
-  // Essai de 7 jours jamais consommé et aucun abonnement vivant : on peut le
-  // proposer directement, sans détour par /tarifs.
+  // Historique : essai de 7 jours encore disponible. L'essai est supprimé pour
+  // les nouveaux clients (2026-10) ; le champ n'est plus lu par l'interface.
   essai_disponible?: boolean;
   // Filleul pas encore abonné : pas d'essai, 5 € déduits de son premier paiement.
   remise_parrainage?: boolean;
+  // Pass sans renouvellement en cours : fin de l'accès (ISO). null = aucun pass.
+  pass_fin?: string | null;
 }
 
 /** Compte sans formule payante (les deux libellés historiques du gratuit). */
@@ -36,18 +38,20 @@ export function estGratuit(user: AuthUser | null | undefined): boolean {
   return !!user && (user.plan === "free" || user.plan === "decouverte");
 }
 
-/** L'essai peut être proposé en un clic : compte gratuit, adresse confirmée
- *  (le checkout l'exige, sinon 403), essai jamais pris, rien en attente de carte. */
-export function peutDemarrerEssai(user: AuthUser | null | undefined): boolean {
+/** Compte gratuit à qui proposer directement les formules (pass dès 5 €,
+ *  abonnements). Remplace `peutDemarrerEssai` : l'essai gratuit de 7 jours est
+ *  supprimé pour les nouveaux clients (2026-10). Conditions : adresse confirmée
+ *  (le checkout l'exige, sinon 403), aucun abonnement vivant, rien en attente de
+ *  carte ni en échec de paiement. */
+export function peutDebloquer(user: AuthUser | null | undefined): boolean {
   return estGratuit(user)
     && !!user!.email_verified
-    && !!user!.essai_disponible
     && !user!.essai_bloque_sans_carte
     && !user!.paiement_en_echec
     && !user!.abonnement_gerable;
 }
 
-/** Filleul qui peut s'abonner avec sa remise de parrainage (même garde que l'essai). */
+/** Filleul qui peut s'abonner avec sa remise de parrainage (même garde que `peutDebloquer`). */
 export function peutProfiterRemise(user: AuthUser | null | undefined): boolean {
   return estGratuit(user)
     && !!user!.email_verified

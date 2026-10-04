@@ -83,6 +83,10 @@ class Encaissement:
     # `subscription_update` = facture née d'un changement de formule (ou de la
     # fin d'un essai refusé) ; `subscription_cycle` = échéance ordinaire.
     motif_facture: Optional[str] = None
+    # Pass sans renouvellement (jour / semaine / mois) : paiement unique, sans
+    # facture. Lu sur les métadonnées que le checkout pose sur le paiement — le
+    # montant seul ne suffit pas (Pass Semaine 12 € = prix du Standard mensuel).
+    pass_duree: Optional[str] = None
 
 
 @dataclass
@@ -192,6 +196,7 @@ def _encaissement(ch: Any) -> Optional[Encaissement]:
         price_id=price_id,
         plan_prix=plan_prix,
         motif_facture=_g(facture, "billing_reason") if isinstance(facture, dict) else None,
+        pass_duree=(_g(ch, "metadata", "duree") if _g(ch, "metadata", "type") == "pass" else None),
     )
 
 

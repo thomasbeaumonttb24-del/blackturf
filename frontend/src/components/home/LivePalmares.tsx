@@ -152,7 +152,7 @@ export function LivePalmares({ initial }: { initial?: Partial<PalmaresResp> | Re
                   Ces paris sont publiés <span className="text-brand-gold-dark">après</span> l&apos;arrivée. Les abonnés les reçoivent <span className="text-brand-gold-dark">avant le départ</span>.
                 </p>
                 <p className="mt-1 text-xs text-gray-600">
-                  Paris de valeur, plan de mise et alertes en temps réel — dès 12€/mois, 7 jours d&apos;essai sans prélèvement.
+                  Paris de valeur, plan de mise et alertes en temps réel — dès 5 € avec un pass, sans abonnement.
                 </p>
               </div>
               <div className="flex shrink-0 flex-col items-center gap-3 sm:flex-row">

@@ -424,7 +424,7 @@ function HeroPalmares({ courses, depuis, stats, barreBas = false }: {
         <div className="mt-5 flex justify-center sm:mt-8">
           <Button size="xl" asChild
             className="press btn-shimmer h-12 w-full max-w-sm rounded-xl bg-brand-gold px-6 text-base font-bold text-brand-dark shadow-lg shadow-amber-500/30 hover:bg-brand-gold-deep sm:h-14 sm:w-auto sm:px-10">
-            <Link href="/tarifs">Essayer 7 jours gratuitement <ArrowRight className="ml-1 h-5 w-5" /></Link>
+            <Link href="/tarifs#passes">Débloquer dès 5 € <ArrowRight className="ml-1 h-5 w-5" /></Link>
           </Button>
         </div>
 
@@ -433,7 +433,7 @@ function HeroPalmares({ courses, depuis, stats, barreBas = false }: {
           <span aria-hidden="true">·</span>
           <span className="inline-flex items-center gap-1.5"><Database className="h-3.5 w-3.5 text-emerald-300" aria-hidden="true" /> Rapports PMU officiels</span>
           <span className="hidden sm:inline" aria-hidden="true">·</span>
-          <span className="hidden items-center gap-1.5 sm:inline-flex"><CheckCircle2 className="h-3.5 w-3.5 text-emerald-300" aria-hidden="true" /> Aucun prélèvement pendant l&apos;essai</span>
+          <span className="hidden items-center gap-1.5 sm:inline-flex"><CheckCircle2 className="h-3.5 w-3.5 text-emerald-300" aria-hidden="true" /> Pass sans abonnement</span>
         </p>
 
         <div className="mx-auto mt-5 grid w-full max-w-4xl grid-cols-2 gap-2 sm:mt-10 sm:grid-cols-4 sm:gap-4">
@@ -1221,7 +1221,7 @@ export default function TrackRecordPage({ initialTrackRecord, initialPalmares }:
               </h2>
               <p className="mt-4 max-w-2xl text-sm leading-6 text-slate-300 sm:text-base">
                 Retrouvez les analyses complètes, les probabilités et les plans de mise qui ont produit ces performances.
-                7 jours d&apos;essai : carte requise, aucun prélèvement avant la fin de l&apos;essai, annulable à tout moment. Les performances passées ne garantissent pas les résultats futurs.
+                Pass Jour 5 €, Semaine 12 € ou Mois 24 € : tout Expert, paiement unique, sans renouvellement. Les performances passées ne garantissent pas les résultats futurs.
               </p>
               <ul className="mt-6 grid gap-2 text-sm text-slate-200 sm:grid-cols-3">
                 <li className="flex items-center gap-2"><CheckCircle2 className="h-4 w-4 text-emerald-300" aria-hidden="true" /> Pronostics complets</li>
@@ -1231,9 +1231,9 @@ export default function TrackRecordPage({ initialTrackRecord, initialPalmares }:
             </div>
             <div className="flex flex-col gap-3">
               <Button asChild variant="brand" size="lg" className="press btn-shimmer min-h-14 rounded-xl px-8 text-base font-bold shadow-lg shadow-amber-500/25">
-                <Link href="/tarifs">Démarrer l&apos;essai gratuit <ArrowRight className="ml-1 h-4 w-4" /></Link>
+                <Link href="/tarifs#formules">Voir les formules <ArrowRight className="ml-1 h-4 w-4" /></Link>
               </Button>
-              <p className="text-center text-[11px] text-slate-400">Standard 12€/mois · Expert 19€/mois · sans engagement</p>
+              <p className="text-center text-[11px] text-slate-400">Pass dès 5 € · Standard 12€/mois · Expert 19€/mois</p>
             </div>
           </div>
         </section>

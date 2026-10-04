@@ -11,13 +11,13 @@ import { cn } from "@/lib/utils";
  * cotes disparaissait sans un mot pour l'anonyme (401 → `return null`), et le
  * calculateur n'offrait qu'un « Se connecter » à quelqu'un qui n'a pas de compte.
  *
- * `suite` : la page où revenir après confirmation de l'adresse (cf. intentionEssai).
+ * `suite` : la page où revenir après confirmation de l'adresse (cf. lib/intentionEssai).
  */
 export const AVANTAGES_COMPTE_GRATUIT = [
   "Marché des cotes en direct sur chaque course",
   "Classement IA complet sur 1 course par jour",
   "1 plan de mise calculé sur votre budget par jour",
-  "7 jours d'essai offerts (Standard ou Expert)",
+  "Tout débloquer dès 5 € avec un pass, sans abonnement",
   "Défi du mois : 30 jours Expert à gagner",
 ];
 

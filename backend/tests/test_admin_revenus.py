@@ -341,3 +341,64 @@ async def test_suivi_prochaine_relance_suit_les_relances_faites(client: AsyncCli
     # J+7 est passé, mais 4 jours doivent séparer les deux relances.
     prochaine = datetime.fromisoformat(c["prochaine_relance"].replace("Z", "+00:00"))
     assert abs((prochaine - (relance + timedelta(days=4))).total_seconds()) < 5
+
+
+async def test_pass_range_a_part_et_rapproche_de_son_achat(client: AsyncClient, admin_headers, db, monkeypatch):
+    """Un Pass Semaine (12 €) n'est PAS du Standard mensuel (même montant) : rangé
+    en « pass », rapproché de son `pass_achete`, sans faire du client un abonné déjà vu."""
+    from api.config import get_settings
+    from services import revenus_stripe
+    from services.revenus_stripe import Encaissement, Grand_livre
+    now = datetime.now(timezone.utc)
+    u = User(user_id=str(uuid.uuid4()), email="passant@x.fr", plan="free", stripe_customer_id="cus_p")
+    db.add(u)
+    db.add(SubscriptionEvent(event_id=str(uuid.uuid4()), user_id=u.user_id, email="passant@x.fr",
+                             type="pass_achete", plan="expert", montant_cents=1200,
+                             created_at=now - timedelta(minutes=40)))
+    await db.commit()
+    livre = Grand_livre(lu_le=now.timestamp())
+    livre.encaissements = [
+        Encaissement("ch_p", now - timedelta(minutes=40), 1200, 0, 40, 1160, "eur", "cus_p", "passant@x.fr",
+                     None, None, "BlackTurf — Pass Semaine", pass_duree="semaine"),
+        # Puis il s'abonne : c'est bien un NOUVEAU client abonné.
+        Encaissement("ch_s", now - timedelta(minutes=10), 1200, 0, 40, 1160, "eur", "cus_p", "passant@x.fr",
+                     "in_s", None, "Subscription creation"),
+    ]
+    monkeypatch.setattr(get_settings(), "stripe_secret_key", "sk_test_local")
+    monkeypatch.setattr(revenus_stripe, "lire", lambda cle, depuis, forcer=False: livre)
+
+    m = (await client.get("/admin/api/revenus?mois=2", headers=admin_headers)).json()
+    courant = m["mois"][-1]
+    assert courant["passes_cents"] == 1200
+    assert courant["par_formule"] == {"standard": 1200, "expert": 0}
+    assert courant["nouveaux_cents"] == 1200
+    natures = {p["charge_id"]: (p["nature"], p["plan"]) for p in courant["paiements"]}
+    assert natures["ch_p"] == ("pass", "pass") and natures["ch_s"][0] == "nouveau"
+    assert all(e["charge_id"] != "ch_p" for e in m["rapprochement"]["absents_du_journal"])
+    assert m["rapprochement"]["absents_de_stripe"] == []
+
+
+async def test_encaissement_reconnait_un_pass_a_ses_metadonnees():
+    from services.revenus_stripe import _encaissement
+    base = {"id": "ch_1", "amount": 1200, "created": 1, "currency": "eur",
+            "status": "succeeded", "paid": True, "captured": True}
+    assert _encaissement({**base, "metadata": {"type": "pass", "duree": "semaine"}}).pass_duree == "semaine"
+    assert _encaissement({**base, "metadata": {}}).pass_duree is None
+
+
+async def test_abonnements_compte_les_pass_a_part(client: AsyncClient, admin_headers, db):
+    from db.models import PassAcces
+    now = datetime.now(timezone.utc)
+    u = User(user_id=str(uuid.uuid4()), email="pass@x.fr", plan="expert")
+    db.add(u)
+    db.add(PassAcces(user_id=u.user_id, duree="jour", plan="expert", montant_cents=500,
+                     stripe_session_id="cs_x", debut=now - timedelta(hours=1), fin=now + timedelta(hours=23),
+                     statut="actif", renonciation_at=now, renonciation_version="v1"))
+    await db.commit()
+    data = (await client.get("/admin/api/abonnements", headers=admin_headers)).json()
+    r = data["repartition"]
+    assert r["passes"] == 1 and r["offerts"] == 0
+    assert r["par_formule"]["expert"]["passes"] == 1
+    assert [p["email"] for p in data["passes"]] == ["pass@x.fr"]
+    fiche = (await client.get(f"/admin/api/users/{u.user_id}", headers=admin_headers)).json()
+    assert fiche["passes"][0]["duree"] == "jour" and fiche["passes"][0]["statut"] == "actif"

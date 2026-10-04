@@ -859,6 +859,7 @@ const FORMULES: Record<string, { texte: string; classe: string }> = {
   standard: { texte: "Standard", classe: "bg-[#eef2f7] text-[#27456b] ring-[#d3dce8]" },
   starter: { texte: "Standard", classe: "bg-[#eef2f7] text-[#27456b] ring-[#d3dce8]" },
   free: { texte: "Gratuit", classe: "bg-card text-muted-foreground ring-border" },
+  pass: { texte: "Pass", classe: "bg-[#e9f5ef] text-[#0f5a40] ring-[#bfe3d1]" },
   admin: { texte: "Admin", classe: "bg-[#1b2230] text-white ring-[#1b2230]" },
 };
 

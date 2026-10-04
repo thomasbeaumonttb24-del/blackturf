@@ -364,3 +364,26 @@ async def test_pool_evolution_reste_reserve_aux_abonnes(client: AsyncClient, db:
     headers = await _headers_for_plan(client, db, "decouverte")
     resp = await client.get("/api/v1/courses/R1C1/pool-evolution", headers=headers)
     assert resp.status_code == 403
+
+
+async def test_course_courue_ne_consomme_pas_le_quota_standard(client: AsyncClient, db: AsyncSession,
+                                                                 auth_headers, monkeypatch):
+    """Course terminée : chevaux publics, le plan de mise n'y dévoile rien — aucun
+    plan ne brûle d'ouverture (avant le 2026-10-04, seul le gratuit en était dispensé)."""
+    from sqlalchemy import select
+    from api.routes import courses as courses_routes
+    from db.models import Course, User
+
+    await _create_test_course(db)
+    course = (await db.execute(select(Course).where(Course.course_id == "R1C1"))).scalar_one()
+    course.statut = "termine"
+    user = (await db.execute(select(User).where(User.email == "test@blackturf.fr"))).scalar_one()
+    user.plan = "standard"
+    await db.commit()
+
+    async def _interdit(*a, **k):
+        raise AssertionError("quota consulté pour une course courue")
+
+    monkeypatch.setattr(courses_routes, "_mise_plan_quota_check", _interdit)
+    resp = await client.post("/api/v1/courses/R1C1/mise-plan", json={"montant": 50}, headers=auth_headers)
+    assert resp.status_code == 200, resp.text

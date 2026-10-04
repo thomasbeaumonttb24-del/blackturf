@@ -246,7 +246,7 @@ export function ParrainageSection() {
             "C'est une réduction sur votre abonnement BlackTurf, jamais un versement d'argent.",
             "Vos crédits se cumulent jusqu'à rendre votre mensualité gratuite : 4 parrainages par mois en Expert (19 €), 3 en Standard (12 €). Au-delà, ils sont reportés au mois suivant, rien n'est perdu.",
             "Quand vos crédits couvrent toute la facture, vous n'êtes pas prélevé ce mois-là ; le petit reste éventuel (1 € en Expert, 3 € en Standard) est déduit du mois suivant.",
-            "Votre ami doit être un nouveau client, avec son propre compte et sa propre carte bancaire. Sa remise remplace l'essai gratuit.",
+            "Votre ami doit être un nouveau client, avec son propre compte et sa propre carte bancaire. Sa remise s'applique à son premier abonnement.",
             "Si le paiement de votre ami est remboursé ou contesté, le crédit correspondant est annulé.",
           ].map((r) => (
             <li key={r} className="flex gap-2">

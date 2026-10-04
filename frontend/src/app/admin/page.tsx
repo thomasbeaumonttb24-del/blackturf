@@ -118,6 +118,7 @@ export default function PilotagePage() {
               <MiniRepartition parts={[
                 { label: "Payants", n: r.payants, couleur: "#0f7b5a" },
                 { label: "Essais", n: r.essais, couleur: "#27456b" },
+                { label: "Pass", n: r.passes ?? 0, couleur: "#3aa37b" },
                 { label: "Offerts", n: r.offerts, couleur: "#6b5b95" },
                 { label: "Gratuits", n: r.gratuits, couleur: "#d5d9de" },
               ]} />

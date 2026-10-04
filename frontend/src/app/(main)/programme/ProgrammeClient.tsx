@@ -27,7 +27,7 @@ import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { TrendingUp as IconeMarcheDirect } from "lucide-react";
 import { CompteGratuitCta } from "@/components/billing/CompteGratuitCta";
-import { peutDemarrerEssai } from "@/lib/auth";
+import { peutDebloquer } from "@/lib/auth";
 import useSWR from "swr";
 import { coursesApi, predictionsApi } from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
@@ -1270,10 +1270,10 @@ export default function ProgrammeClient({
         {!isPaid && (
           <ValueBetsCompteurBanner
             initial={initialCompteurVB}
-            // Anonyme : l'étape d'avant l'abonnement, c'est le compte gratuit (et son
-            // essai). Compte gratuit avec essai à prendre : il est offert, pas « dès 12 € ».
-            href={user ? "/tarifs" : "/inscription?plan=standard&suite=%2Fprogramme"}
-            libelle={!user ? "Créer un compte gratuit" : peutDemarrerEssai(user) ? "Essai 7 jours offert" : "Visibles dès Standard"}
+            // Anonyme : l'étape d'avant, c'est le compte gratuit. Compte gratuit : le
+            // prix d'entrée est le Pass Jour (5 €, sans abonnement), pas « dès 12 € ».
+            href={user ? "/tarifs#passes" : "/inscription?plan=standard&suite=%2Fprogramme"}
+            libelle={!user ? "Créer un compte gratuit" : "Débloquer dès 5 €"}
           />
         )}
 
@@ -1502,23 +1502,23 @@ export default function ProgrammeClient({
           />
         )}
 
-        {/* ── Compte gratuit : l'essai de 7 jours, en un clic ── */}
-        {!isPaid && user && peutDemarrerEssai(user) && isToday && programme && programme.nb_courses > 0 && (
+        {/* ── Compte gratuit confirmé : les pass sans abonnement, en un clic ── */}
+        {!isPaid && user && peutDebloquer(user) && isToday && programme && programme.nb_courses > 0 && (
           <div className="flex flex-wrap items-center justify-between gap-3.5 rounded-[20px] px-5 py-4" style={{ border: "1px solid rgba(16,185,129,.28)", background: "linear-gradient(135deg,#ECFDF5,#FFFBF0)" }}>
             <div className="min-w-[200px] flex-1">
-              <p className="text-sm font-bold text-emerald-900">Paris de valeur de ce soir : 7 jours offerts</p>
-              <p className="mt-1 text-xs text-emerald-800">Essai Standard ou Expert gratuit — carte demandée, 0 € prélevé avant la fin de l&apos;essai.</p>
+              <p className="text-sm font-bold text-emerald-900">Paris de valeur de ce soir : dès 5 €</p>
+              <p className="mt-1 text-xs text-emerald-800">Pass Jour : tout Expert pendant 24 h, paiement unique, sans abonnement.</p>
             </div>
-            <Button variant="brand" size="default" className="flex-shrink-0" asChild><Link href="/tarifs#formules">Choisir mon essai</Link></Button>
+            <Button variant="brand" size="default" className="flex-shrink-0" asChild><Link href="/tarifs#formules">Voir les formules</Link></Button>
           </div>
         )}
 
-        {/* ── Upsell (utilisateurs gratuits ayant déjà pris l'essai) ── */}
-        {!isPaid && user && !peutDemarrerEssai(user) && isToday && programme && programme.nb_courses > 0 && (
+        {/* ── Upsell (autres comptes gratuits : adresse non confirmée, paiement en attente…) ── */}
+        {!isPaid && user && !peutDebloquer(user) && isToday && programme && programme.nb_courses > 0 && (
           <div className="flex flex-wrap items-center justify-between gap-3.5 rounded-[20px] px-5 py-4" style={{ border: "1px solid rgba(245,158,11,.28)", background: "linear-gradient(135deg,#FFFBF0,#FEF3E2)" }}>
             <div className="min-w-[200px]">
               <p className="text-sm font-bold text-amber-900">Paris de valeur verrouillés</p>
-              <p className="mt-1 text-xs text-amber-700">Passez Standard pour les voir détectés par l&apos;IA sur chaque course.</p>
+              <p className="mt-1 text-xs text-amber-700">Dès 5 € avec un pass, ou avec Standard : détectés par l&apos;IA sur chaque course.</p>
             </div>
             <Link href="/tarifs" className="flex-shrink-0 rounded-xl px-5 py-2.5 text-sm font-bold text-white transition-transform hover:-translate-y-0.5" style={{ background: "linear-gradient(135deg,#F59E0B,#D97706)", boxShadow: "0 8px 22px -8px rgba(245,158,11,.55)" }}>
               Voir les offres

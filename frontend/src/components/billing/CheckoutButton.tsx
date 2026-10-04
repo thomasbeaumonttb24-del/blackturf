@@ -21,9 +21,9 @@ export function CheckoutButton({ plan, periodicite, label, variant = "brand", si
   const { user, loading: authLoading } = useAuth();
   const router = useRouter();
   const [loading, setLoading] = useState(false);
-  // Filleul : l'essai n'existe pas pour lui, le bouton annonce sa remise.
+  // Filleul : le bouton annonce sa remise de 5 € sur le premier paiement.
   // Abonné : ce bouton CHANGE sa formule — il le dit, et ne propose jamais
-  // « Essayer 7 jours gratuit » ni sa propre formule.
+  // sa propre formule.
   const abonne = Boolean(user?.abonnement_gerable) && (user?.plan === "standard" || user?.plan === "expert");
   // Déjà abonné : le passage mensuel ↔ annuel se fait sur demande (il refacture
   // tout et déplace l'échéance) — le bouton annuel ne propose donc rien.
@@ -36,7 +36,7 @@ export function CheckoutButton({ plan, periodicite, label, variant = "brand", si
       ? "Votre formule actuelle"
       : abonne
         ? `Passer en ${nomPlan} — ${plan === "expert" ? "19" : "12"} €/mois`
-        : user?.remise_parrainage && /essai|essayer/i.test(label) ? "S'abonner — 5 € offerts" : label;
+        : user?.remise_parrainage ?`${label} — 5 € offerts` : label;
 
   async function startCheckout() {
     if (!user) {

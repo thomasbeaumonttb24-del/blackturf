@@ -5,13 +5,16 @@
  *
  * L'inscription ne connecte pas : elle envoie un lien de confirmation, et la
  * session ne s'ouvre qu'au clic dans l'e-mail. Entre les deux, `?plan=expert`
- * (bouton « Essayer 7 jours » de /tarifs) et la page d'origine (une course, le
+ * (grille des formules de l'accueil) et la page d'origine (une course, le
  * marché des cotes) étaient perdus — l'écran de confirmation renvoyait tout le
- * monde vers /programme, sans un mot sur l'essai.
+ * monde vers /programme, sans un mot sur la formule choisie.
+ *
+ * Nom historique (« Essai ») : l'essai gratuit de 7 jours est supprimé pour les
+ * nouveaux clients depuis 2026-10, l'intention retenue est celle de s'abonner.
  *
  * Gardé en localStorage : si le lien est ouvert sur un autre appareil, rien n'est
- * retrouvé et l'écran de confirmation retombe sur ses valeurs par défaut (essai
- * Standard, programme). Chaque accès est protégé : le stockage peut lever.
+ * retrouvé et l'écran de confirmation retombe sur ses valeurs par défaut (formules,
+ * programme). Chaque accès est protégé : le stockage peut lever.
  */
 const CLE = "bt_intention_inscription";
 const DUREE_MS = 7 * 24 * 3600 * 1000;

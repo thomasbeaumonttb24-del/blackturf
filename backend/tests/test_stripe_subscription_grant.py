@@ -97,7 +97,7 @@ async def test_active_subscription_grants_plan(db, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_checkout_ouvre_bien_un_essai_de_7_jours(db, monkeypatch):
+async def test_checkout_n_ouvre_plus_d_essai(db, monkeypatch):
     """L'essai de 7 jours est promis sur l'accueil, sur /tarifs et dans les CGU :
     la session Checkout doit réellement le porter.
 
@@ -124,6 +124,5 @@ async def test_checkout_ouvre_bien_un_essai_de_7_jours(db, monkeypatch):
     await sr.create_checkout(sr.CheckoutRequest(plan="standard", periodicite="monthly"), db, user)
 
     assert captured["payment_method_collection"] == "always"
-    assert captured["subscription_data"]["trial_period_days"] == 7
-    assert (captured["subscription_data"]["trial_settings"]["end_behavior"]
-            ["missing_payment_method"]) == "cancel"
+    # Essai gratuit supprimé le 2026-10-04 : plus jamais de période offerte.
+    assert "trial_period_days" not in captured["subscription_data"]

@@ -722,8 +722,8 @@ export function PlanSite({ d }: { d: DonneesSite }) {
           flexDirection: "column",
         }}
       >
-        {/* Titre repris du dépliant. « 7 jours offerts » annonce une durée ; « moins cher
-            qu'un ticket perdu » annonce un ordre de grandeur, et se retient. */}
+        {/* Titre repris du dépliant : « moins cher qu'un ticket perdu » annonce un ordre de
+            grandeur, et se retient. Plus d'essai gratuit (2026-10) : le pass Jour à 5 € le remplace. */}
         <span
           style={{
             fontFamily: "Grotesk",
@@ -745,7 +745,7 @@ export function PlanSite({ d }: { d: DonneesSite }) {
             marginTop: 24,
           }}
         >
-          Sept jours d&apos;essai gratuit, puis 12&nbsp;€/mois. Annulation en deux clics.
+          Pass Jour à 5&nbsp;€, sans abonnement. Ou 12&nbsp;€/mois, résiliable en deux clics.
         </span>
       </div>
 

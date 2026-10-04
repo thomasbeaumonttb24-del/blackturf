@@ -201,6 +201,16 @@ async def list_users(
     return result
 
 
+async def _passes_du_compte(db: AsyncSession, user_id: str) -> list[dict]:
+    """Passes sans renouvellement du compte, du plus récent au plus ancien."""
+    from db.models import PassAcces
+    rows = (await db.execute(
+        select(PassAcces).where(PassAcces.user_id == user_id).order_by(PassAcces.created_at.desc())
+    )).scalars().all()
+    return [{"duree": p.duree, "montant_cents": p.montant_cents, "debut": p.debut, "fin": p.fin,
+             "statut": p.statut, "achete_le": p.created_at} for p in rows]
+
+
 async def _acces_offert_public(db: AsyncSession, user_id: str) -> Optional[dict]:
     from services.acces_offert import dernier_acces_offert
     don = await dernier_acces_offert(db, user_id)
@@ -303,6 +313,7 @@ async def get_user_detail(
         },
         "defi": {"mois": mois, "rang": rang, **resume},
         "acces_offert": await _acces_offert_public(db, user.user_id),
+        "passes": await _passes_du_compte(db, user.user_id),
         "par_type": par_type,
         "subscriptions": [
             {
@@ -1601,9 +1612,19 @@ async def abonnements(
         don = await dernier_acces_offert(db, uid) if uid else None
         if don and don["actif"]:
             dons_actifs[uid] = don
-    par_formule = {f: {"payants": 0, "essais": 0, "offerts": 0} for f in ("standard", "expert")}
-    repartition = {"comptes": 0, "payants": 0, "essais": 0, "offerts": 0, "gratuits": 0}
+    # Passes sans renouvellement en cours : payés une fois, ni abonnés ni offerts.
+    from db.models import PassAcces
+    passes_actifs: dict[str, datetime] = {}
+    for uid, fin in (await db.execute(
+        select(PassAcces.user_id, func.max(PassAcces.fin))
+        .where(PassAcces.statut == "actif", PassAcces.fin > now)
+        .group_by(PassAcces.user_id)
+    )).all():
+        passes_actifs[uid] = fin
+    par_formule = {f: {"payants": 0, "essais": 0, "offerts": 0, "passes": 0} for f in ("standard", "expert")}
+    repartition = {"comptes": 0, "payants": 0, "essais": 0, "passes": 0, "offerts": 0, "gratuits": 0}
     offerts = []
+    passes = []
     for u in (await db.execute(
         select(User).where(User.is_admin.is_not(True)).order_by(desc(User.created_at))
     )).scalars().all():
@@ -1612,6 +1633,10 @@ async def abonnements(
             case_, formule = "payants", _formule(ids_payants[u.user_id])
         elif u.user_id in ids_essai:
             case_, formule = "essais", _formule(ids_essai[u.user_id])
+        elif u.user_id in passes_actifs:
+            case_, formule = "passes", "expert"
+            passes.append({"user_id": u.user_id, "email": u.email, "jusqu_au": passes_actifs[u.user_id],
+                           "created_at": u.created_at, "last_login": u.last_login_at})
         elif (u.user_id in dons_actifs
               or (u.plan in PRIX_MENSUEL_CENTS and u.user_id not in ids_abonnes)):
             don = dons_actifs.get(u.user_id)
@@ -1632,6 +1657,7 @@ async def abonnements(
     return {
         "repartition": repartition,
         "offerts": offerts,
+        "passes": passes,
         "suivi": await _suivi_essais(db, now),
         "resume": {
             "en_essai_avec_carte": en_essai,
@@ -1821,7 +1847,9 @@ async def revenus(
         for e in livre.encaissements:  # ordre chronologique
             qui = e.client_id or (e.email or "").lower()
             premier = bool(qui) and qui not in premiers
-            if qui:
+            # Un pass ne fait pas d'un client un « abonné déjà vu » : son premier
+            # abonnement reste un nouveau client.
+            if qui and not getattr(e, "pass_duree", None):
                 premiers.add(qui)
             uid_email = par_client.get(e.client_id or "")
             email = (uid_email[1] if uid_email else None) or e.email
@@ -1831,6 +1859,10 @@ async def revenus(
             nature = ("nouveau" if premier
                       else "changement" if e.motif_facture == "subscription_update"
                       else "renouvellement")
+            if getattr(e, "pass_duree", None):
+                # Pass payé une fois : ni abonnement ni échéance — rangé à part,
+                # jamais deviné d'après son montant (12 € = Standard mensuel).
+                plan, nature = "pass", "pass"
             lignes_paiement.append(_ligne_paiement(
                 e.cree_le, email, plan, e.montant_cents, nature,
                 frais=e.frais_cents, net=e.net_cents, rembourse=e.rembourse_cents,
@@ -1850,9 +1882,15 @@ async def revenus(
         # Rapprochement : chaque débit Stripe doit avoir son `paiement_recu`
         # (même e-mail, même montant, à 3 jours près), et réciproquement.
         restants = [ev for ev in journal if ev.type == "paiement_recu"]
+        # Un pass se rapproche de son `pass_achete` (pas de facture, donc pas de
+        # `paiement_recu`) : sans ça, chaque pass apparaîtrait en écart.
+        restants_pass = list((await db.execute(
+            select(SubscriptionEvent).where(SubscriptionEvent.type == "pass_achete")
+            .order_by(SubscriptionEvent.created_at)
+        )).scalars().all())
         for lp in lignes_paiement:
             trouve = None
-            for ev in restants:
+            for ev in (restants_pass if lp["nature"] == "pass" else restants):
                 d = ev.created_at if ev.created_at.tzinfo else ev.created_at.replace(tzinfo=timezone.utc)
                 if (int(ev.montant_cents or 0) == lp["montant_cents"]
                         and (ev.email or "").lower() == (lp["email"] or "").lower()
@@ -1860,12 +1898,12 @@ async def revenus(
                     trouve = ev
                     break
             if trouve is not None:
-                restants.remove(trouve)
+                (restants_pass if lp["nature"] == "pass" else restants).remove(trouve)
             elif lp["date"] >= debut_fenetre_utc:
                 ecarts["absents_du_journal"].append(
                     {"date": lp["date"], "email": lp["email"], "montant_cents": lp["montant_cents"],
                      "charge_id": lp["charge_id"]})
-        for ev in restants:
+        for ev in restants + restants_pass:
             d = ev.created_at if ev.created_at.tzinfo else ev.created_at.replace(tzinfo=timezone.utc)
             if d >= debut_fenetre_utc:
                 ecarts["absents_de_stripe"].append(
@@ -1893,6 +1931,14 @@ async def revenus(
                 "nouveau" if premier else "renouvellement",
                 motif=detail.get("motif"), facture_id=detail.get("facture"), source="journal",
             ))
+        # Repli : les passes viennent de leur propre mouvement `pass_achete`.
+        for ev in (await db.execute(
+            select(SubscriptionEvent).where(SubscriptionEvent.type == "pass_achete")
+        )).scalars().all():
+            d = ev.created_at if ev.created_at.tzinfo else ev.created_at.replace(tzinfo=timezone.utc)
+            lignes_paiement.append(_ligne_paiement(
+                d, ev.email, "pass", int(ev.montant_cents or 0), "pass", source="journal",
+            ))
 
     # ── Agrégation mensuelle (mois de Paris) ──
     buckets = {
@@ -1900,6 +1946,8 @@ async def revenus(
             "mois": k, "encaisse_cents": 0, "rembourse_cents": 0, "frais_cents": 0,
             "net_cents": 0, "verse_cents": 0, "nb_paiements": 0, "nb_remboursements": 0,
             "nouveaux_cents": 0, "renouvellements_cents": 0, "changements_cents": 0,
+            # Passes : hors formules d'abonnement (paiement unique).
+            "passes_cents": 0,
             "par_formule": {"standard": 0, "expert": 0},
             "echecs_cents": 0, "nb_echecs": 0, "nb_echecs_regles": 0, "nb_tentatives_echouees": 0,
             "frais_connus": livre is not None,
@@ -1916,10 +1964,13 @@ async def revenus(
         b["nb_paiements"] += 1
         b["frais_cents"] += lp["frais_cents"] or 0
         b["net_cents"] += lp["net_cents"] if lp["net_cents"] is not None else m
-        f = lp["plan"] if lp["plan"] in b["par_formule"] else "standard"
-        b["par_formule"][f] += m
-        b[{"nouveau": "nouveaux_cents", "changement": "changements_cents"}.get(
-            lp["nature"], "renouvellements_cents")] += m
+        if lp["nature"] == "pass":
+            b["passes_cents"] += m
+        else:
+            f = lp["plan"] if lp["plan"] in b["par_formule"] else "standard"
+            b["par_formule"][f] += m
+            b[{"nouveau": "nouveaux_cents", "changement": "changements_cents"}.get(
+                lp["nature"], "renouvellements_cents")] += m
         if lp["email"]:
             b["clients"].add(lp["email"].lower())
         b["paiements"].append(lp)

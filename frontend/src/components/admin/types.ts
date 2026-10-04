@@ -90,17 +90,18 @@ export interface MouvementAbo {
 }
 
 export type Formule = "standard" | "expert";
-export type CaseCompte = "payants" | "essais" | "offerts" | "gratuits";
+export type CaseCompte = "payants" | "essais" | "passes" | "offerts" | "gratuits";
 
 /** Chaque compte (hors admin) est rangé dans UNE seule case : la somme des
- *  quatre vaut `comptes`. */
+ *  cases vaut `comptes`. `passes` : pass sans renouvellement en cours (payé une fois). */
 export interface Repartition {
   comptes: number;
   payants: number;
   essais: number;
+  passes: number;
   offerts: number;
   gratuits: number;
-  par_formule: Record<Formule, { payants: number; essais: number; offerts: number }>;
+  par_formule: Record<Formule, { payants: number; essais: number; passes: number; offerts: number }>;
 }
 
 export interface CompteOffert {
@@ -109,6 +110,15 @@ export interface CompteOffert {
   plan: Formule;
   jusqu_au?: string | null;
   motif?: string | null;
+  created_at: string;
+  last_login: string | null;
+}
+
+/** Pass sans renouvellement en cours. */
+export interface ComptePass {
+  user_id: string;
+  email: string;
+  jusqu_au: string;
   created_at: string;
   last_login: string | null;
 }
@@ -190,6 +200,7 @@ export interface SuiviEssais {
 export interface AbonnementsData {
   repartition: Repartition;
   offerts: CompteOffert[];
+  passes?: ComptePass[];
   suivi: SuiviEssais;
   resume: {
     en_essai_avec_carte: number;
@@ -212,14 +223,15 @@ export interface AbonnementsData {
 export interface PaiementRecu {
   date: string;
   email: string | null;
-  plan: Formule;
+  /** `pass` : pass sans renouvellement (paiement unique). */
+  plan: Formule | "pass";
   montant_cents: number;
   rembourse_cents: number;
   /** Frais Stripe et net crédité — `null` quand la source est le journal interne. */
   frais_cents: number | null;
   net_cents: number | null;
   /** Premier encaissement du client, ou échéance suivante. */
-  nature: "nouveau" | "renouvellement" | "changement";
+  nature: "nouveau" | "renouvellement" | "changement" | "pass";
   motif: string | null;
   charge_id: string | null;
   /** Reçu Stripe officiel du paiement. */
@@ -247,6 +259,8 @@ export interface MoisRevenu {
   /** Différences au prorata réglées lors d'un changement de formule. */
   changements_cents?: number;
   par_formule: Record<Formule, number>;
+  /** Passes sans renouvellement encaissés (hors formules d'abonnement). */
+  passes_cents?: number;
   echecs_cents: number;
   /** Abonnements dont le prélèvement a échoué ce mois-ci (un par abonnement, pas par tentative). */
   nb_echecs: number;
@@ -349,6 +363,8 @@ export interface UserDetail {
     stripe_client: boolean; created_at: string; updated_at: string; last_login: string | null;
   };
   acces_offert?: { plan: string; jusqu_au: string | null; motif: string | null; depuis: string; actif: boolean } | null;
+  /** Pass sans renouvellement achetés (du plus récent au plus ancien). */
+  passes?: Array<{ duree: string; montant_cents: number; debut: string; fin: string; statut: string; achete_le: string }>;
   /** Défi du mois en cours. */
   defi: DefiStatsAdmin & {
     mois: string; rang: number | null; solde: number;
@@ -410,6 +426,9 @@ export const MOUVEMENT_LABELS: Record<string, string> = {
   impaye_perdu: "Impayé après 2 relances — compte perdu",
   essai_refuse_carte_reutilisee: "Essai refusé — carte d'un autre compte",
   carte_refusee_autre_compte: "Abonnement refusé — carte d'un autre compte",
+  pass_achete: "Pass sans renouvellement acheté",
+  pass_retire: "Pass retiré — paiement remboursé ou contesté",
+  pass_termine: "Pass arrivé à échéance",
   // Statuts Stripe bruts : `_handle_subscription_updated` les journalise tels quels
   // quand le changement ne correspond à aucun mouvement métier nommé.
   past_due: "Impayé — accès coupé, relances Stripe en cours",
@@ -423,6 +442,8 @@ export const MOUVEMENT_LABELS: Record<string, string> = {
 export const MOUVEMENT_TONS: Record<string, "ok" | "attention" | "alerte" | "neutre"> = {
   carte_ajoutee: "ok",
   abonnement_actif: "ok",
+  pass_achete: "ok",
+  pass_retire: "alerte",
   resiliation_annulee: "ok",
   paiement_recu: "ok",
   essai_ouvert: "neutre",

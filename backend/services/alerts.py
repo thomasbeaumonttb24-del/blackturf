@@ -790,8 +790,8 @@ def _weekly_best_vb_email_html(vb: dict, unsubscribe_url: str) -> str:
       BlackTurf est un outil d'aide à la décision et ne garantit aucun gain.
       ⚠️ {JEU_RESPONSABLE_TXT}
     </p>
-    <a href="https://blackturf.fr/tarifs" style="display: block; text-align: center; margin-top: 15px; padding: 12px 24px; background: #e94560; color: white; text-decoration: none; border-radius: 6px;">
-      Voir les paris de valeur en direct — passer Standard →
+    <a href="https://blackturf.fr/tarifs#passes" style="display: block; text-align: center; margin-top: 15px; padding: 12px 24px; background: #e94560; color: white; text-decoration: none; border-radius: 6px;">
+      Voir les paris de valeur en direct — dès 5 € sans abonnement →
     </a>
   </div>
   <div style="padding: 16px 20px; text-align: center; font-size: 11px; color: #6b7280;">

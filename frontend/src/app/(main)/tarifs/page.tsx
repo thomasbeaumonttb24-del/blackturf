@@ -5,13 +5,14 @@ import { Check, X, Zap, ChevronRight, Gift } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { PlansTarifs } from "@/components/billing/PlansTarifs";
+import { PassesTarifs } from "@/components/billing/PassesTarifs";
 
 export const metadata: Metadata = {
   // Le corps de la page employait déjà trente et une fois le vocabulaire de l'IA sans
   // que le titre ni la description ne le disent.
-  title: "Tarifs — pronostics PMU par IA à partir de 12 €/mois",
+  title: "Tarifs — pronostics PMU par IA, pass dès 5 € ou 12 €/mois",
   description:
-    "Trois formules d'accès aux pronostics IA : Gratuit (programme et cotes), Standard 12 €/mois, Expert 19 €/mois. Sans engagement, 7 jours d'essai.",
+    "Trois formules d'accès aux pronostics IA : Gratuit (programme et cotes), Standard 12 €/mois, Expert 19 €/mois, ou pass sans abonnement dès 5 € (jour, semaine, mois).",
   alternates: { canonical: "/tarifs" },
   openGraph: {
     // ALIGNÉ SUR LE <title>, et ce n'est pas cosmétique : `og:title` est l'une des
@@ -19,8 +20,8 @@ export const metadata: Metadata = {
     // formulations sans rapport — « Tarifs BlackTurf — Gratuit, Standard, Expert »
     // contre « Tarifs — pronostics PMU par IA à partir de 12 €/mois » — le laissent
     // trancher seul, et il peut retenir celle qui ne dit ni le prix ni l'IA.
-    title: "Tarifs — pronostics PMU par IA à partir de 12 €/mois",
-    description: "Trois formules : Gratuit, Standard 12 €/mois, Expert 19 €/mois. Sans engagement, 7 jours d'essai.",
+    title: "Tarifs — pronostics PMU par IA, pass dès 5 € ou 12 €/mois",
+    description: "Gratuit, Standard 12 €/mois, Expert 19 €/mois, ou pass sans abonnement dès 5 € (jour, semaine, mois).",
     url: "https://blackturf.fr/tarifs",
     images: [OG_IMAGE],
   },
@@ -48,6 +49,9 @@ const offersJsonLd = {
     { "@type": "Offer", name: "Expert", price: "19", priceCurrency: "EUR", url: "https://blackturf.fr/tarifs", category: "Abonnement mensuel" },
     { "@type": "Offer", name: "Standard annuel", price: "115.20", priceCurrency: "EUR", url: "https://blackturf.fr/tarifs", category: "Abonnement annuel" },
     { "@type": "Offer", name: "Expert annuel", price: "182.40", priceCurrency: "EUR", url: "https://blackturf.fr/tarifs", category: "Abonnement annuel" },
+    { "@type": "Offer", name: "Pass Jour", price: "5", priceCurrency: "EUR", url: "https://blackturf.fr/tarifs", category: "Paiement unique" },
+    { "@type": "Offer", name: "Pass Semaine", price: "12", priceCurrency: "EUR", url: "https://blackturf.fr/tarifs", category: "Paiement unique" },
+    { "@type": "Offer", name: "Pass Mois", price: "24", priceCurrency: "EUR", url: "https://blackturf.fr/tarifs", category: "Paiement unique" },
   ],
 };
 
@@ -62,6 +66,14 @@ const FAQ = [
   {
     q: "Puis-je annuler à tout moment ?",
     a: "Oui, sans frais ni condition. Votre abonnement reste actif jusqu'à la fin de la période.",
+  },
+  {
+    q: "Comment fonctionnent les pass sans abonnement ?",
+    a: "Pass Jour (5 €, 24 h), Pass Semaine (12 €, 7 jours) ou Pass Mois (24 €, 30 jours) : accès Expert complet, payé une fois. Aucun renouvellement : l'accès s'arrête seul à l'échéance et rien d'autre n'est prélevé. Un pass pris pendant qu'un autre court s'ajoute à la suite. L'accès étant immédiat, il n'ouvre ni droit de rétractation ni remboursement.",
+  },
+  {
+    q: "Comment découvrir BlackTurf avant de m'engager ?",
+    a: "Le compte gratuit montre le classement complet d'une course par jour. Pour tout voir sans abonnement, le Pass Jour à 5 € ouvre tout BlackTurf pendant 24 h.",
   },
   {
     q: "Les prédictions sont-elles garanties ?",
@@ -146,7 +158,7 @@ export default function TarifsPage() {
           Des tarifs <span className="text-gradient">simples et transparents</span>
         </h1>
         <p className="text-muted-foreground text-sm sm:text-lg max-w-xl mx-auto">
-          Commencez gratuitement. Annulez à tout moment.
+          Commencez gratuitement. Abonnement résiliable à tout moment, ou pass sans abonnement dès 5 €.
         </p>
         <div className="mt-4 inline-flex items-center gap-2 text-sm text-brand-gold-dark">
           <Zap className="h-4 w-4" />
@@ -156,6 +168,9 @@ export default function TarifsPage() {
 
       {/* Plans — un sélecteur mensuel/annuel, un seul bouton par formule */}
       <PlansTarifs />
+
+      {/* Pass sans renouvellement : paiement unique, accès coupé à l'échéance. */}
+      <PassesTarifs />
 
       {/* Parrainage : l'argument « abonnement gratuit » dit là où l'on regarde le prix. */}
       <section className="relative mb-12 overflow-hidden rounded-3xl bg-gradient-to-br from-stone-900 via-stone-900 to-stone-800 p-6 text-white shadow-[0_30px_60px_-30px_rgba(28,25,23,.7)] ring-1 ring-white/10 sm:p-8">
@@ -282,7 +297,7 @@ export default function TarifsPage() {
       {/* CTA */}
       <div className="mt-12 sm:mt-16 text-center p-6 sm:p-8 rounded-2xl gradient-hero border border-brand-gold/20">
         <h2 className="text-xl sm:text-2xl font-bold mb-3">Prêt à parier plus intelligemment ?</h2>
-        <p className="text-muted-foreground mb-6">7 jours d&apos;essai gratuit. Carte requise, aucun prélèvement avant la fin de l&apos;essai.</p>
+        <p className="text-muted-foreground mb-6">Abonnement dès 12 €/mois, ou tout BlackTurf pendant 24 h pour 5 €, sans abonnement.</p>
         {/* Ce bouton ouvrait directement Standard : on renvoie au choix des formules. */}
         <Button variant="brand" size="xl" asChild>
           <Link href="#formules">Choisir ma formule</Link>

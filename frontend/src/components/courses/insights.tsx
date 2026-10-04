@@ -1186,7 +1186,7 @@ export function ApercuAnalyseCard({
               href={connecte ? "/programme" : "/inscription"}
               className="mt-3 inline-flex min-h-10 items-center gap-1.5 rounded-xl bg-amber-500 px-4 text-[13px] font-semibold text-brand-dark transition-colors hover:bg-amber-600"
             >
-              {connecte ? "Voir les courses analysées" : "Essayer 7 jours gratuitement"}
+              {connecte ? "Voir les courses analysées" : "Créer un compte gratuit"}
               <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
             </a>
           )}
@@ -1277,10 +1277,10 @@ export function CtaAbonnementBand({ connecte, revele, nbSignaux }: { connecte: b
 
   // Course déjà courue : promettre « le pronostic de cette course » n'a aucun
   // sens, elle n'est plus jouable. On renvoie vers celles qui le sont.
-  const href = revele ? (connecte ? "/programme" : "/inscription") : connecte ? "/tarifs" : "/inscription";
+  const href = revele ? (connecte ? "/programme" : "/inscription") : connecte ? "/tarifs#formules" : "/inscription";
   const libelle = revele
-    ? connecte ? "Voir les courses à venir" : "Essayer 7 jours gratuitement"
-    : connecte ? "Débloquer le pronostic — 12 €/mois" : "Voir le pronostic — essai 7 jours gratuit";
+    ? connecte ? "Voir les courses à venir" : "Créer un compte gratuit"
+    : connecte ? "Débloquer le pronostic — dès 5 €" : "Voir le pronostic — compte gratuit";
 
   // Ce que débloque l'abonnement : l'inventaire des capacités réelles (cf.
   // CAPACITES), une ligne chacune, avec la formule qui l'ouvre.
@@ -1316,10 +1316,9 @@ export function CtaAbonnementBand({ connecte, revele, nbSignaux }: { connecte: b
               Comparer les formules
             </a>
           </div>
-          {/* La carte est exigée par Stripe (payment_method_collection="always") :
-              écrire « sans CB » ici contredirait le tunnel et la page /tarifs. */}
+          {/* Plus d'essai gratuit (2026-10) : l'entrée de gamme est le pass sans abonnement. */}
           <p className="mt-3 text-[11.5px] text-stone-400">
-            Sans engagement · carte requise, aucun prélèvement avant la fin de l&apos;essai
+            Pass dès 5 €, sans abonnement · ou abonnement résiliable à tout moment
           </p>
         </div>
 

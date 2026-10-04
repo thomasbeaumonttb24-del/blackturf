@@ -46,6 +46,9 @@ LIBELLES = {
     "parrainage_valide": "Parrainage validé — 5 € de crédit au parrain",
     "parrainage_refuse": "Parrainage refusé — carte du filleul déjà vue ailleurs",
     "parrainage_annule": "Parrainage annulé — paiement du filleul remboursé ou contesté",
+    "pass_achete": "Pass sans renouvellement acheté",
+    "pass_retire": "Pass retiré — paiement remboursé ou contesté",
+    "pass_termine": "Pass arrivé à échéance",
 
     # Statuts Stripe bruts. `_handle_subscription_updated` journalise le STATUT
     # lui-même quand il change sans correspondre à un mouvement métier nommé :
@@ -74,6 +77,7 @@ TYPES_NOTIFIES = {
     "essai_refuse_carte_reutilisee", "carte_refusee_autre_compte",
     "unpaid", "impaye_perdu",
     "parrainage_valide", "parrainage_refuse", "parrainage_annule",
+    "pass_achete", "pass_retire",
 }
 
 

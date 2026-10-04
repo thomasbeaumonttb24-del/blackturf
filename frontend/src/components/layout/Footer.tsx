@@ -37,6 +37,7 @@ const COLUMNS: Array<{
       { href: "/tarifs", label: "Gratuit" },
       { href: "/tarifs", label: "Standard — 12€/mois" },
       { href: "/tarifs", label: "Expert — 19€/mois" },
+      { href: "/tarifs#passes", label: "Pass sans abonnement — dès 5€" },
     ],
   },
   {

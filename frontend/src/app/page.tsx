@@ -92,13 +92,13 @@ const PLANS = [
     cta: "Commencer gratuitement", href: "/inscription", popular: false },
   { name: "Standard", price: "12€", period: "/mois", desc: "L'essentiel pour parier mieux",
     features: ["5 pronostics/jour", "Top 3 paris de valeur (délai 15 min)", "Calculateur de mise", "Alertes push & e-mail", "Historique des résultats"],
-    cta: "Essayer 7 jours gratuit", href: "/inscription?plan=standard", popular: false },
+    cta: "Choisir Standard", href: "/inscription?plan=standard", popular: false },
   // Expert = plan mis en avant (aligné sur /tarifs, qui le marque « Recommandé »).
-  // CTA « Essayer 7 jours gratuit » comme Standard : depuis le 2026-08-17 l'essai de
-  // 7 jours s'applique AUSSI à Expert (cf. subscription_data dans stripe_routes.py).
+  // Plus d'essai gratuit depuis 2026-10 : les pass sans abonnement (dès 5 €) le
+  // remplacent, annoncés au-dessus de la grille.
   { name: "Expert", price: "19€", period: "/mois", desc: "Pour les parieurs sérieux", badge: "Populaire",
     features: ["Pronostics illimités", "Paris de valeur en temps réel ★★★★", "Calculateur de mise avancé", "Assistant illimité", "Performances détaillées par discipline", "Créateur de stratégies 30+ filtres"],
-    cta: "Essayer 7 jours gratuit", href: "/inscription?plan=expert", popular: true },
+    cta: "Choisir Expert", href: "/inscription?plan=expert", popular: true },
 ];
 
 const DISC_LABEL: Record<string, string> = {
@@ -180,7 +180,7 @@ function buildFaq(tr: TrackRecord | null): Array<{ q: string; r: string }> {
     },
     {
       q: "Puis-je annuler ?",
-      r: "À tout moment depuis votre compte, en deux clics. L'essai de 7 jours demande une carte, mais rien n'est prélevé avant son terme : annulez avant la fin et vous ne payez rien.",
+      r: "L'abonnement se résilie à tout moment depuis votre compte, en deux clics. Les pass Jour, Semaine et Mois n'ont rien à annuler : paiement unique, sans renouvellement, l'accès se coupe seul à la fin.",
     },
   ];
 }
@@ -310,14 +310,14 @@ export default async function HomePage() {
           <div className="mx-auto mt-5 grid w-full max-w-md grid-cols-2 gap-2 sm:mt-8 sm:flex sm:max-w-none sm:justify-center sm:gap-3">
             <Button size="xl" asChild
               className="press btn-shimmer h-auto min-h-12 whitespace-normal rounded-xl bg-brand-gold px-2 py-2 text-center text-sm font-bold leading-tight text-brand-dark shadow-lg shadow-amber-500/30 hover:bg-brand-gold-deep sm:h-14 sm:px-10 sm:text-base">
-              <Link href="/inscription">Essai gratuit 7&nbsp;jours <ArrowRight className="ml-1 hidden h-5 w-5 sm:inline" /></Link>
+              <Link href="/tarifs#passes">Débloquer dès 5&nbsp;€ <ArrowRight className="ml-1 hidden h-5 w-5 sm:inline" /></Link>
             </Button>
             <Button variant="outline" size="xl" asChild
               className="press h-auto min-h-12 whitespace-normal rounded-xl border-white/25 bg-white/10 px-2 py-2 text-center text-sm leading-tight text-white backdrop-blur-sm hover:bg-white/20 hover:text-white sm:h-14 sm:px-10 sm:text-base">
               <Link href="/programme"><span className="sm:hidden">Courses du jour</span><span className="hidden sm:inline">Voir les courses du jour</span></Link>
             </Button>
           </div>
-          <p className="mt-3 text-[11px] text-white/60 sm:mt-5">7 jours gratuits · aucun prélèvement avant la fin de l&apos;essai<span className="hidden sm:inline"> · annulation à tout moment</span></p>
+          <p className="mt-3 text-[11px] text-white/60 sm:mt-5">Pass Jour 5&nbsp;€ sans abonnement<span className="hidden sm:inline"> · compte gratuit : 1 classement par jour</span></p>
 
           {/* Stats clés — cartes verre + count-up (live, mêmes chiffres que le palmarès) */}
           <HeroStats
@@ -875,6 +875,7 @@ export default async function HomePage() {
                 profil: "Deux ou trois réunions, un budget défini",
                 points: [
                   "5 pronostics par jour, largement de quoi couvrir un samedi",
+                  "Ou le Pass Jour à 5 € pour un seul dimanche, sans abonnement",
                   "Le calculateur répartit votre mise au lieu de tout mettre sur un cheval",
                   "Alertes quand un pari de valeur sort sur vos courses",
                 ],
@@ -935,8 +936,8 @@ export default async function HomePage() {
                 <span className="text-gradient">ticket perdu par semaine</span>
               </h2>
               <p className="text-gray-600 max-w-xl mx-auto">
-                7 jours d&apos;essai gratuit, sans prélèvement avant son terme. Le palmarès, lui, reste public — vous pouvez
-                juger avant de payer.
+                Pas envie d&apos;un abonnement ? Pass Jour 5&nbsp;€, Semaine 12&nbsp;€ ou Mois 24&nbsp;€ : tout Expert,
+                paiement unique. Le palmarès, lui, reste public — vous pouvez juger avant de payer.
               </p>
             </div>
           </ScrollReveal>
@@ -1049,17 +1050,17 @@ export default async function HomePage() {
               {" "}— pas avec votre instinct.
             </h2>
             <p className="text-gray-200 text-lg mb-10 max-w-xl mx-auto">
-              Des analyses chiffrées et vérifiées sur les vrais résultats du PMU. Essayez BlackTurf
-              7 jours, sans engagement : annulez avant la fin de l&apos;essai et rien ne vous est prélevé.
+              Des analyses chiffrées et vérifiées sur les vrais résultats du PMU. Tout BlackTurf dès
+              5&nbsp;€ avec le Pass Jour, sans abonnement : l&apos;accès se coupe seul au bout de 24&nbsp;h.
             </p>
             <div className="flex flex-col sm:flex-row gap-3 justify-center">
               <Button size="xl" asChild
                 className="press btn-shimmer bg-brand-gold hover:bg-brand-gold-deep text-brand-dark font-bold text-base shadow-xl shadow-amber-900/40">
-                <Link href="/inscription">Essai gratuit 7 jours <ArrowRight className="h-5 w-5 ml-1" /></Link>
+                <Link href="/tarifs#passes">Débloquer dès 5 € <ArrowRight className="h-5 w-5 ml-1" /></Link>
               </Button>
               <Button variant="outline" size="xl" asChild
                 className="press border-white/30 bg-white/5 text-white hover:bg-white/15 hover:border-white/50">
-                <Link href="#tarifs">Voir les tarifs</Link>
+                <Link href="/inscription">Créer un compte gratuit</Link>
               </Button>
             </div>
           </ScrollReveal>

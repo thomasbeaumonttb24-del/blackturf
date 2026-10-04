@@ -947,6 +947,37 @@ class Subscription(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
+class PassAcces(Base):
+    """Pass sans renouvellement (jour / semaine / mois), payé une fois.
+
+    Une ligne = un paiement Stripe confirmé. `stripe_session_id` est UNIQUE : le
+    webhook et la page de retour peuvent tous deux accorder le pass, la base
+    garantit qu'il ne l'est qu'une fois. `debut` peut être dans le futur : un
+    pass acheté pendant qu'un autre court commence à la fin du précédent.
+    `statut` : actif / rembourse (remboursement ou contestation bancaire = accès
+    retiré). `expire_traite_at` : l'échéance a été appliquée au plan du compte.
+    """
+    __tablename__ = "passes_acces"
+
+    pass_id: Mapped[str] = mapped_column(String(36), primary_key=True, default=gen_uuid)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.user_id", ondelete="CASCADE"), index=True)
+    duree: Mapped[str] = mapped_column(String(10))  # jour / semaine / mois
+    plan: Mapped[str] = mapped_column(String(10), default="expert")
+    montant_cents: Mapped[int] = mapped_column(Integer)
+    stripe_session_id: Mapped[str] = mapped_column(String(100), unique=True)
+    stripe_payment_intent: Mapped[str | None] = mapped_column(String(100), index=True)
+    debut: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    fin: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    statut: Mapped[str] = mapped_column(String(12), default="actif")
+    # Preuve de la renonciation expresse au droit de rétractation (art. L221-28
+    # 13° du Code de la consommation) : horodatage de la case cochée + version
+    # du texte affiché.
+    renonciation_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    renonciation_version: Mapped[str] = mapped_column(String(10))
+    expire_traite_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class SubscriptionEvent(Base):
     """Journal APPEND-ONLY des mouvements d'abonnement.
 

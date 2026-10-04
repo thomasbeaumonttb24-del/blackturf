@@ -40,7 +40,7 @@ function InscriptionContent() {
   const [renvoi, setRenvoi] = useState(false);
   const { register: registerAuth, user } = useAuth();
   const params = useSearchParams();
-  // Intention d'arrivée : `?plan=expert` depuis « Essayer 7 jours », `?suite=/courses/…`
+  // Intention d'arrivée : `?plan=expert` depuis la grille des formules, `?suite=/courses/…`
   // depuis un appel à créer un compte. Mémorisée pour l'écran de confirmation d'adresse.
   const plan = planEssai(params.get("plan"));
   const suite = cheminInterne(params.get("suite"));
@@ -145,7 +145,9 @@ function InscriptionContent() {
         <p className="text-xs text-muted-foreground mt-3">
           {parrain
             ? `Dès la confirmation, vos ${euros(parrain.remise)} de remise de parrainage vous attendent sur votre premier abonnement.`
-            : `Dès la confirmation, votre essai ${plan === "expert" ? "Expert" : "Standard"} de 7 jours vous sera proposé.`}
+            : plan
+              ? `Dès la confirmation, la formule ${plan === "expert" ? "Expert" : "Standard"} vous sera proposée — ou tout BlackTurf dès 5 € avec un pass, sans abonnement.`
+              : "Dès la confirmation, votre classement gratuit du jour vous attend. Tout BlackTurf se débloque dès 5 € avec un pass, sans abonnement."}
         </p>
 
         <Button variant="outline" className="w-full mt-6" onClick={renvoyerLien} disabled={renvoi}>
@@ -373,7 +375,7 @@ export default function InscriptionPage() {
           </h1>
           <p className="text-muted-foreground mb-6 md:mb-8">
             Le marché des cotes en direct, le classement de l&apos;algorithme et un plan de mise
-            calculé sur votre budget. Compte gratuit, 7 jours d&apos;essai Standard offerts.
+            calculé sur votre budget. Compte gratuit, tout débloqué dès 5&nbsp;€ sans abonnement.
           </p>
 
           <ul className="hidden md:flex flex-col gap-3">

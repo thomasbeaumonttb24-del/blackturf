@@ -5,11 +5,11 @@ import { useEffect, useState, Suspense } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { useSearchParams } from "next/navigation";
-import { CheckCircle, XCircle, Loader2, Gift } from "lucide-react";
+import { CheckCircle, XCircle, Loader2, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { api, authApi } from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
-import { peutDemarrerEssai } from "@/lib/auth";
+import { peutDebloquer } from "@/lib/auth";
 import { lireIntention, oublierIntention, type IntentionInscription } from "@/lib/intentionEssai";
 import { CheckoutButton } from "@/components/billing/CheckoutButton";
 
@@ -44,7 +44,7 @@ function VerifierEmailContent() {
     }
     api.get(`/auth/verify-email?token=${token}`)
       .then(async () => {
-        // Le profil d'abord : l'écran de succès décide d'après lui s'il propose l'essai.
+        // Le profil d'abord : l'écran de succès décide d'après lui s'il propose les formules.
         try { await refreshUser(); } catch { /* ignore */ }
         setIntention(lireIntention());
         oublierIntention();
@@ -54,7 +54,9 @@ function VerifierEmailContent() {
   }, [token]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const suite = intention.suite ?? "/programme";
-  const planPropose = intention.plan ?? "standard";
+  // Formule choisie avant l'inscription (grille de l'accueil), sinon aucune :
+  // on présente alors les pass et les abonnements sur /tarifs.
+  const planPropose = intention.plan;
 
   return (
     <div className="min-h-screen gradient-hero flex items-center justify-center p-4">
@@ -73,9 +75,9 @@ function VerifierEmailContent() {
           )}
 
           {/* Premier moment où le compte est connecté ET confirmé : c'est ici que
-              l'essai se prend en un clic. Avant, le seul bouton menait au programme,
-              et l'essai n'était plus jamais évoqué (2 essais sur 44 comptes gratuits). */}
-          {status === "success" && peutDemarrerEssai(user) && (
+              l'offre se présente en un clic. L'essai gratuit de 7 jours est supprimé
+              (2026-10) : on propose la formule choisie, ou les pass dès 5 €. */}
+          {status === "success" && peutDebloquer(user) && (
             <div className="py-2">
               <CheckCircle className="h-12 w-12 text-brand-emerald-dark mx-auto mb-4" />
               <h1 className="text-xl font-bold mb-2">Adresse confirmée, bienvenue !</h1>
@@ -85,19 +87,41 @@ function VerifierEmailContent() {
               </p>
               <div className="rounded-xl border border-emerald-200 bg-emerald-50/60 p-4 text-left mb-5">
                 <p className="flex items-center gap-2 text-sm font-semibold text-slate-900">
-                  <Gift className="h-4 w-4 text-emerald-700" aria-hidden />
-                  7 jours {planPropose === "expert" ? "Expert" : "Standard"} offerts
+                  <Zap className="h-4 w-4 text-emerald-700" aria-hidden />
+                  {planPropose ? `Formule ${planPropose === "expert" ? "Expert" : "Standard"}` : "Tout BlackTurf dès 5 €"}
                 </p>
                 <p className="mt-1 text-[13px] leading-5 text-stone-600">
                   {planPropose === "expert"
                     ? "Pronostics illimités, paris de valeur en temps réel, assistant IA."
-                    : "Pronostics sur 5 courses par jour, paris de valeur, calculateur de mise complet."}
+                    : planPropose === "standard"
+                      ? "Pronostics sur 5 courses par jour, paris de valeur, calculateur de mise complet."
+                      : "Pass Jour 5 €, Semaine 12 € ou Mois 24 € : accès Expert complet, paiement unique, sans abonnement."}
                 </p>
               </div>
-              <CheckoutButton plan={planPropose} periodicite="monthly" label="Démarrer mes 7 jours gratuits" />
-              <p className="text-xs text-muted-foreground mt-2">
-                Carte demandée, 0 € prélevé avant la fin de l&apos;essai. Résiliable en un clic.
-              </p>
+              {planPropose ? (
+                <>
+                  <CheckoutButton
+                    plan={planPropose}
+                    periodicite="monthly"
+                    label={`S'abonner — ${planPropose === "expert" ? "19" : "12"} €/mois`}
+                  />
+                  <p className="text-xs text-muted-foreground mt-2">
+                    Paiement sécurisé Stripe · résiliable à tout moment depuis votre profil.{" "}
+                    <Link href="/tarifs#passes" className="underline underline-offset-2 hover:text-slate-900">
+                      Ou un pass dès 5 €, sans abonnement
+                    </Link>
+                  </p>
+                </>
+              ) : (
+                <>
+                  <Button variant="brand" size="lg" asChild>
+                    <Link href="/tarifs#formules">Voir les formules</Link>
+                  </Button>
+                  <p className="text-xs text-muted-foreground mt-2">
+                    Pass sans renouvellement, ou abonnement Standard 12 €/mois et Expert 19 €/mois.
+                  </p>
+                </>
+              )}
               <p className="text-sm mt-5">
                 <Link href={suite} className="font-medium text-slate-600 underline underline-offset-2 hover:text-slate-900">
                   {intention.suite ? "Plus tard — reprendre où j'en étais" : "Plus tard — voir le programme"}
@@ -106,7 +130,7 @@ function VerifierEmailContent() {
             </div>
           )}
 
-          {status === "success" && !peutDemarrerEssai(user) && (
+          {status === "success" && !peutDebloquer(user) && (
             <div className="py-4">
               <CheckCircle className="h-12 w-12 text-brand-emerald-dark mx-auto mb-4" />
               <h1 className="text-xl font-bold mb-2">Adresse confirmée !</h1>

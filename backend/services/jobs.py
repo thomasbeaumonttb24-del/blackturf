@@ -370,6 +370,19 @@ async def job_expirer_acces_offerts() -> None:
         log.error("jobs.expirer_acces_offerts.error", error=str(e))
 
 
+async def job_expirer_passes() -> None:
+    """Chaque minute — un pass (jour / semaine / mois) arrivé à échéance coupe
+    l'accès. Les requêtes HTTP le font déjà à la seconde (get_current_user) ;
+    ceci couvre le reste : WebSocket, alertes, bot, comptes inactifs."""
+    try:
+        from db.database import AsyncSessionLocal
+        from services.passes import expirer_passes
+        async with AsyncSessionLocal() as session:
+            await expirer_passes(session)
+    except Exception as e:
+        log.error("jobs.expirer_passes.error", error=str(e))
+
+
 async def job_rappel_reconduction() -> None:
     """1x/jour — rappel légal avant reconduction d'un abonnement annuel (L215-1)."""
     try:
@@ -779,6 +792,16 @@ def start_scheduler() -> None:
         id="expirer_acces_offerts",
         replace_existing=True,
         misfire_grace_time=1800,
+    )
+
+    scheduler.add_job(
+        job_expirer_passes,
+        CronTrigger(minute="*"),
+        id="expirer_passes",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=300,
     )
 
     # Rappel légal avant reconduction des abonnements annuels, en journée.

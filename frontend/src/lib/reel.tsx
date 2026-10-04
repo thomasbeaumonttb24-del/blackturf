@@ -670,11 +670,11 @@ export function PlanReel({ n, d }: { n: number; d: DonneesReel }) {
           <span
             style={{ fontFamily: "Grotesk", fontWeight: 700, fontSize: 52, color: ENCRE, letterSpacing: -1.6 }}
           >
-            7 jours offerts
+            Dès 5 €
           </span>
           <span style={{ fontFamily: "Inter", fontSize: 27, lineHeight: 1.45, color: CHARBON, marginTop: 10 }}>
-            Programme, cotes et rapports gratuits. Prédictions et plan de mise dès 12 €/mois,
-            annulation en deux clics.
+            Programme, cotes et rapports gratuits. Prédictions et plan de mise dès 5 €
+            avec un pass, sans abonnement.
           </span>
         </div>
       </div>

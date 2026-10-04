@@ -1176,7 +1176,7 @@ export function ClassementApercu({
                     ))}
                   </div>
                 </div>
-                <BoutonAbonnement className="w-full sm:w-auto" connecte={connecte} libelle={connecte ? "Voir le classement nommé" : "Voir le classement — essai 7 jours"} />
+                <BoutonAbonnement className="w-full sm:w-auto" connecte={connecte} libelle={connecte ? "Voir le classement nommé" : "Voir le classement — compte gratuit"} />
               </div>
             </li>
           )}

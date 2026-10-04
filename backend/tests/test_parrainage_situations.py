@@ -190,8 +190,9 @@ async def test_parrain_gratuit_credite_puis_sabonne(db, monkeypatch):
     monkeypatch.setattr(sr, "PRICE_MAP", {"standard_monthly": "price_std"})
     await sr.create_checkout(sr.CheckoutRequest(plan="standard", periodicite="monthly"), db, zoe)
     assert captured["customer"] == client_zoe  # même client → même solde
-    # Zoé n'est pas filleule : elle garde son essai et les codes promo.
-    assert captured["subscription_data"]["trial_period_days"] == 7
+    # Zoé n'est pas filleule : codes promo gardés ; plus d'essai depuis le 2026-10-04.
+    assert "trial_period_days" not in captured["subscription_data"]
+    assert captured["allow_promotion_codes"] is True
 
 
 # ─── Situations du filleul ──────────────────────────────────────────────────

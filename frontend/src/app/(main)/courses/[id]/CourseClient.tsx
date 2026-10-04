@@ -595,7 +595,7 @@ function MiseCalculatorWidget({
         // Quota d'essai gratuit épuisé aujourd'hui — état dédié, pas un toast qui
         // disparaît : on affiche le message backend (déjà une phrase propre) + CTA.
         setQuotaExceeded(true);
-        setQuotaMessage(detail || "Essai gratuit utilisé aujourd'hui — passez à Standard pour un accès illimité.");
+        setQuotaMessage(detail || "Plan gratuit du jour utilisé — débloquez tout dès 5 € avec un pass, sans abonnement.");
         setQuotaRestant(0);
       } else {
         toast.error(detail || "Erreur lors du calcul du plan");
@@ -703,9 +703,9 @@ function MiseCalculatorWidget({
     return (
       <div style={{ textAlign: "center", padding: "24px 0" }}>
         <Calculator className="h-10 w-10 mx-auto mb-3" style={{ color: CX.gold, opacity: 0.6 }} />
-        <p style={{ fontSize: 14, fontWeight: 600, marginBottom: 4, color: CX.ink2 }}>Essai gratuit utilisé aujourd&apos;hui</p>
+        <p style={{ fontSize: 14, fontWeight: 600, marginBottom: 4, color: CX.ink2 }}>Plan gratuit du jour utilisé</p>
         <p style={{ fontSize: 12, color: CX.gray400, marginBottom: 16 }}>
-          {quotaMessage || "Revenez demain pour un nouvel essai gratuit, ou passez à Expert pour un calculateur illimité."}
+          {quotaMessage || "Revenez demain pour un nouveau plan gratuit, ou débloquez le calculateur illimité dès 5 € avec un pass."}
         </p>
         <Button variant="brand" asChild>
           <Link href="/tarifs#formules">Voir les formules</Link>
@@ -761,8 +761,8 @@ function MiseCalculatorWidget({
           {quotaRestant === null
             ? "Gratuit : sur la course dont vous avez révélé le classement aujourd'hui."
             : quotaRestant > 0
-              ? `Essai gratuit — encore ${quotaRestant} aujourd'hui.`
-              : "Dernier essai gratuit du jour utilisé."}
+              ? `Plan gratuit — encore ${quotaRestant} aujourd'hui.`
+              : "Dernier plan gratuit du jour utilisé."}
         </p>
       )}
       {/* Étape 1 — le profil décide QUELS paris entrent dans le plan et comment la

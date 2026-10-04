@@ -124,6 +124,30 @@ export default function AccesOffert({ data, onChange }: { data: UserDetail; onCh
           </p>
         )}
       </div>
+
+      {/* Pass payés une fois : ni offerts ni retirables ici (un remboursement
+          Stripe retire l'accès automatiquement). */}
+      {(data.passes?.length ?? 0) > 0 && (
+        <div className="mt-3 rounded-xl border border-border p-3 text-xs">
+          <p className="mb-2 font-semibold">Pass achetés</p>
+          <ul className="space-y-1">
+            {data.passes!.map((p) => {
+              const enCoursPass = p.statut === "actif" && new Date(p.fin) > new Date() && new Date(p.debut) <= new Date();
+              return (
+                <li key={p.achete_le + p.duree} className="flex flex-wrap justify-between gap-2">
+                  <span>
+                    <b className="font-semibold">Pass {p.duree === "jour" ? "Jour" : p.duree === "semaine" ? "Semaine" : "Mois"}</b>
+                    <span className="text-muted-foreground"> · {(p.montant_cents / 100).toFixed(2).replace(".", ",")} € · du {formatDateTime(p.debut)} au {formatDateTime(p.fin)}</span>
+                  </span>
+                  <span className={p.statut === "rembourse" ? "text-destructive" : enCoursPass ? "text-emerald-700" : "text-muted-foreground"}>
+                    {p.statut === "rembourse" ? "Remboursé / contesté" : enCoursPass ? "En cours" : new Date(p.debut) > new Date() ? "À venir" : "Terminé"}
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
     </section>
   );
 }

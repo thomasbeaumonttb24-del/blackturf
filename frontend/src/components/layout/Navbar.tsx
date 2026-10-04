@@ -9,7 +9,7 @@ import { LucideIcon, Menu, X, Bell, User, LogOut, ChevronDown, Zap, LayoutDashbo
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/hooks/useAuth";
-import { peutDemarrerEssai } from "@/lib/auth";
+import { peutDebloquer } from "@/lib/auth";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import { chatApi, notificationsApi } from "@/lib/api";
 import { planLabel, cn } from "@/lib/utils";
@@ -187,12 +187,12 @@ export function Navbar() {
   const nbNonLues = notifData?.count ?? 0;
   const nbChat = surChat ? 0 : (chatData?.non_lus ?? 0);
   const lienActif = (href: string) => pathname === href || pathname.startsWith(`${href}/`);
-  // Compte gratuit à qui l'essai est offert : la barre porte en plus le bouton
-  // « Essai offert ». Dans les 1 216 px utiles de `max-w-7xl`, noms complets + bouton +
+  // Compte gratuit confirmé (l'essai gratuit est supprimé depuis 2026-10) : la barre
+  // porte en plus le bouton « Pass dès 5 € ». Dans les 1 216 px utiles de `max-w-7xl`, noms complets + bouton +
   // badge de plan se chevauchaient (constaté le 2026-09-28) : dans ce cas les liens
   // gardent leur forme courte et le badge « Découverte » s'efface — le bouton dit
   // déjà que le compte est gratuit.
-  const essai = peutDemarrerEssai(user);
+  const essai = peutDebloquer(user);
 
   return (
     <nav className="sticky top-0 z-50 border-b border-[#e2e6df] bg-white/95 backdrop-blur-md">
@@ -307,18 +307,17 @@ export function Navbar() {
                   )}
                 </Link>
 
-                {/* Compte gratuit avec essai jamais pris : l'offre reste visible sur
-                    chaque page. Avant, seul le menu déroulant la portait, sous
-                    « Passer Standard » — un prix, pas une offre gratuite. */}
+                {/* Compte gratuit : l'offre sans abonnement reste visible sur chaque
+                    page. Avant, seul le menu déroulant portait une offre. */}
                 {/* À partir de `xl` seulement : entre 1 024 et 1 280 px il n'y a pas
                     la place, l'offre reste alors dans le menu du compte. */}
                 {essai && (
                   <Link
-                    href="/tarifs"
-                    title="Essai gratuit 7 jours"
+                    href="/tarifs#passes"
+                    title="Tout BlackTurf dès 5 €, sans abonnement"
                     className="hidden xl:inline-flex flex-shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg bg-brand-gold px-3 py-1.5 text-[13px] font-semibold text-brand-dark shadow-sm shadow-brand-gold/25 ring-1 ring-brand-gold/30 hover:bg-brand-gold-deep transition-colors"
                   >
-                    <Zap className="h-3.5 w-3.5" /> Essai offert
+                    <Zap className="h-3.5 w-3.5" /> Pass dès 5 €
                   </Link>
                 )}
                 {/* Alerts bell with unread count */}
@@ -434,7 +433,7 @@ export function Navbar() {
                             className="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-brand-gold-dark font-medium hover:bg-brand-gold-tint/60 transition-colors"
                             onClick={() => setUserMenuOpen(false)}
                           >
-                            <Zap className="h-4 w-4" /> {peutDemarrerEssai(user) ? "Essai gratuit 7 jours" : "Voir les formules"}
+                            <Zap className="h-4 w-4" /> {peutDebloquer(user) ? "Pass dès 5 €, sans abonnement" : "Voir les formules"}
                           </Link>
                         )}
                         {/* Une seule porte vers l'administration.
@@ -501,7 +500,7 @@ export function Navbar() {
                   className="btn-shimmer active:scale-[0.97] bg-brand-gold hover:bg-brand-gold-deep text-brand-dark font-semibold shadow-sm shadow-brand-gold/25 ring-1 ring-brand-gold/30 transition-all"
                   onClick={() => router.push("/inscription")}
                 >
-                  Essai gratuit
+                  S&apos;inscrire
                 </Button>
               </div>
               </>
@@ -552,13 +551,13 @@ export function Navbar() {
               </Link>
             </div>
           )}
-          {peutDemarrerEssai(user) && (
+          {peutDebloquer(user) && (
             <Link
-              href="/tarifs"
+              href="/tarifs#passes"
               className="mt-2 flex items-center justify-center gap-1.5 rounded-xl bg-brand-gold px-4 py-2.5 text-sm font-semibold text-brand-dark"
               onClick={() => setMenuOpen(false)}
             >
-              <Zap className="h-4 w-4" /> Essai gratuit 7 jours
+              <Zap className="h-4 w-4" /> Tout débloquer dès 5 €
             </Link>
           )}
           {!user && (
@@ -576,7 +575,7 @@ export function Navbar() {
                 className="flex-1 bg-brand-gold hover:bg-brand-gold-deep text-brand-dark font-semibold"
                 onClick={() => { router.push("/inscription"); setMenuOpen(false); }}
               >
-                Essai gratuit
+                S&apos;inscrire
               </Button>
             </div>
           )}

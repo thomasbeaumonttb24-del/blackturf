@@ -219,6 +219,9 @@ class UserMeResponse(BaseModel):
     essai_disponible: bool = False
     # Filleul pas encore abonné : pas d'essai, 5 € de remise au premier paiement.
     remise_parrainage: bool = False
+    # Pass sans renouvellement en cours : fin de l'accès (passes enchaînés
+    # compris). None = aucun pass.
+    pass_fin: Optional[datetime] = None
 
 
 # ─────────────────────────────────────────────
@@ -286,6 +289,11 @@ async def get_current_user(
     user = result.scalar_one_or_none()
     if not user or not user.is_active:
         raise credentials_exc
+    # Pass sans renouvellement échu : l'accès se coupe à la seconde, pas à la
+    # prochaine passe de la tâche planifiée. Compte payant seulement (une requête
+    # indexée) ; ne lève jamais.
+    from services.passes import expirer_si_echu
+    await expirer_si_echu(db, user)
     return user
 
 
@@ -685,6 +693,9 @@ async def me(user: User = Depends(get_current_user), db: AsyncSession = Depends(
     from services.parrainage import remise_filleul_due
     remise_parrainage = await remise_filleul_due(user, db)
 
+    from services.passes import pass_actif
+    pass_en_cours = await pass_actif(db, user.user_id)
+
     return UserMeResponse(
         user_id=user.user_id,
         email=user.email,
@@ -700,10 +711,11 @@ async def me(user: User = Depends(get_current_user), db: AsyncSession = Depends(
         essai_fin=bloque.essai_fin if bloque else None,
         abonnement_gerable=gerable,
         paiement_en_echec=en_echec,
-        # Un filleul n'a pas d'essai : sa remise de 5 € en tient lieu.
-        essai_disponible=(user.essai_utilise_at is None and not vivants
-                          and not user.parraine_par_id),
+        # Essai gratuit supprimé le 2026-10-04 (passes à la place) : plus jamais
+        # proposé. Champ conservé pour les fronts encore en cache.
+        essai_disponible=False,
         remise_parrainage=remise_parrainage is not None and not vivants,
+        pass_fin=(pass_en_cours or {}).get("fin"),
     )
 
 

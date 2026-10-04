@@ -265,3 +265,57 @@ def parrainage_inscrit(prenom: Optional[str], prenom_filleul: Optional[str], lie
         f"Votre suivi : {lien}\n\n{D.RESPONSABLE}"
     )
     return D.document(f"{ami} a rejoint BlackTurf", "Un ami s'est inscrit avec votre lien de parrainage.", rangees), texte
+
+
+_MOIS = ("janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août",
+         "septembre", "octobre", "novembre", "décembre")
+
+
+def _date_heure_paris(d) -> str:
+    from zoneinfo import ZoneInfo
+    p = d.astimezone(ZoneInfo("Europe/Paris"))
+    return f"{p.day} {_MOIS[p.month - 1]} {p.year} à {p.hour:02d} h {p.minute:02d}"
+
+
+def confirmation_pass(prenom: Optional[str], libelle: str, montant_cents: int, debut, fin,
+                      renonciation_texte: str, renonciation_at) -> tuple[str, str]:
+    """Confirmation d'achat d'un pass, sur support durable (art. L221-13) : elle
+    reprend la renonciation expresse au droit de rétractation."""
+    prix = f"{montant_cents / 100:.2f}".replace(".", ",") + " €"
+    detail = (f"Votre {libelle} est confirmé ({prix}, paiement unique). Accès Expert du "
+              f"{_date_heure_paris(debut)} au {_date_heure_paris(fin)} (heure de Paris). "
+              "Aucun renouvellement : l’accès s’arrête seul à cette date, rien ne sera prélevé.")
+    renonciation = (f"Lors du paiement, le {_date_heure_paris(renonciation_at)}, vous avez coché : "
+                    f"« {renonciation_texte} »")
+    carte = (
+        D.surtitre("Votre pass")
+        + f'<div style="font-size:14px;line-height:22px;color:{C["slate7"]}">{e(detail)}</div>'
+        + f'<div style="margin-top:14px;font-size:13px;line-height:20px;color:{C["slate7"]}">{e(renonciation)}</div>'
+        + f'<div style="margin-top:14px;font-size:14px;line-height:22px;color:{C["slate7"]}">Une question ? '
+          f'<a href="mailto:contact@blackturf.fr" style="color:{C["or"]};font-weight:700">contact@blackturf.fr</a>.</div>'
+    )
+    rangees = (
+        D.barre_logo("Votre pass")
+        + D.entete(None, "Paiement confirmé", libelle, "Votre accès Expert est ouvert.", icone="valide")
+        + _carte_claire(carte)
+        + _action("Voir les courses du jour", SITE + "/programme", "")
+        + D.pied("Message lié à votre achat sur blackturf.fr.")
+    )
+    saut = chr(10)
+    texte = saut.join([
+        f"Bonjour {prenom or ''},", "", detail.replace(chr(8217), chr(39)), "",
+        renonciation, "", f"Les courses du jour : {SITE}/programme",
+        "Une question : contact@blackturf.fr", "", D.RESPONSABLE,
+    ])
+    return D.document("Votre pass BlackTurf", detail, rangees), texte
+
+
+async def envoyer_confirmation_pass(user, p) -> None:
+    from services.alerts import send_email
+    from services.passes import PASSES, RENONCIATION_TEXTE
+
+    libelle = PASSES[p.duree][2].split(" — ")[0]
+    html, texte = confirmation_pass(user.prenom, libelle, p.montant_cents, p.debut, p.fin,
+                                    RENONCIATION_TEXTE, p.renonciation_at)
+    await send_email(to=user.email, subject=f"BlackTurf — {libelle} confirmé",
+                     html=html, text=texte)

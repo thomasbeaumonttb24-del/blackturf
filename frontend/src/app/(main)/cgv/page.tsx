@@ -43,6 +43,10 @@ export default function CGVPage() {
           <li><strong>Découverte</strong> : gratuit (0&nbsp;€).</li>
           <li><strong>Standard</strong> : 12&nbsp;€/mois ou 115,20&nbsp;€/an.</li>
           <li><strong>Expert</strong> : 19&nbsp;€/mois ou 182,40&nbsp;€/an.</li>
+          <li>
+            <strong>Pass sans abonnement</strong> (accès Expert, paiement unique) : Pass Jour 5&nbsp;€ (24&nbsp;h),
+            Pass Semaine 12&nbsp;€ (7&nbsp;jours), Pass Mois 24&nbsp;€ (30&nbsp;jours). Voir section 6 bis.
+          </li>
         </ul>
         <p className="text-muted-foreground">
           Les tarifs en vigueur sont ceux affichés sur la page{" "}
@@ -88,6 +92,12 @@ export default function CGVPage() {
             Pour vous rétracter : écrivez à contact@blackturf.fr (ou utilisez le formulaire-type de
             rétractation). Remboursement sous 14 jours par le moyen de paiement d&apos;origine.
           </p>
+          <p className="mt-2">
+            <strong>Pass sans abonnement :</strong> l&apos;accès est ouvert dès le paiement. Avant de payer, vous
+            cochez une case par laquelle vous demandez l&apos;exécution immédiate du service et renoncez
+            expressément à votre droit de rétractation (art. L221-28, 13°). Cette renonciation vous est
+            confirmée par e-mail. Le pass n&apos;ouvre donc pas de droit de rétractation.
+          </p>
         </div>
       </section>
 
@@ -103,6 +113,35 @@ export default function CGVPage() {
           (fonctionnalité « résilier en quelques clics », art. L215-1-1) ou par email à contact@blackturf.fr.
           La résiliation prend effet à la fin de la période en cours ; l&apos;accès reste ouvert jusque-là.
         </p>
+      </section>
+
+      <section className="mb-8" id="passes">
+        <h2 className="text-lg font-bold mb-3">6 bis. Pass sans abonnement</h2>
+        <ul className="text-muted-foreground list-disc pl-5 space-y-1.5">
+          <li>
+            Le pass donne accès à l&apos;ensemble des fonctionnalités de la formule Expert pendant la durée
+            achetée (24&nbsp;heures, 7&nbsp;jours ou 30&nbsp;jours), décomptée à partir de la confirmation du
+            paiement.
+          </li>
+          <li>
+            <strong>Paiement unique, sans reconduction</strong> : aucun autre prélèvement n&apos;a lieu ; l&apos;accès
+            prend fin automatiquement à l&apos;échéance. Il n&apos;y a rien à résilier.
+          </li>
+          <li>
+            Un pass acheté alors qu&apos;un autre est en cours commence à l&apos;échéance du précédent. Le cumul
+            est limité : un nouveau pass ne peut être acheté lorsque l&apos;accès est déjà ouvert pour plus de
+            31&nbsp;jours. Un abonné Expert, qui dispose déjà d&apos;un accès illimité, ne peut pas acheter de pass.
+          </li>
+          <li>
+            <strong>Ni annulation, ni remboursement</strong> une fois le paiement confirmé (voir section 5), sauf
+            disposition légale impérative, notamment en cas d&apos;indisponibilité du service imputable à BlackTurf.
+          </li>
+          <li>
+            Un paiement remboursé ou contesté auprès de la banque met fin immédiatement à l&apos;accès
+            correspondant.
+          </li>
+          <li>Le pass est personnel et attaché au compte qui l&apos;a acheté.</li>
+        </ul>
       </section>
 
       <section className="mb-8">
@@ -125,7 +164,7 @@ export default function CGVPage() {
           <li>
             <strong>Avantage du filleul</strong> : une remise de 5 € TTC sur sa première facture payante
             (formule Standard ou Expert, mensuelle ou annuelle), appliquée automatiquement lors du paiement.
-            Cette remise remplace la période d&apos;essai gratuit, dont le filleul ne bénéficie pas.
+            Elle ne s&apos;applique pas aux pass sans abonnement.
           </li>
           <li>
             <strong>Avantage du parrain</strong> : un crédit de 5 € TTC par filleul, acquis uniquement lorsque le

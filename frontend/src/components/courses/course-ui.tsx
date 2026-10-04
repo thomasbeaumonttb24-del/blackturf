@@ -234,11 +234,11 @@ export const INCLINABLE_CLS =
    en formes neutres — rien à lire sous un flou, rien dans le HTML. */
 
 /** Destination de l'appel à l'abonnement : un visiteur crée d'abord son compte
- *  (l'essai part de là), un compte gratuit passe directement aux formules. */
+ *  (1 classement offert par jour), un compte gratuit passe directement aux formules. */
 export function lienAbonnement(connecte: boolean, suite?: string) {
   return connecte
     ? { href: "/tarifs#formules", libelle: "Voir les formules" }
-    : { href: `/inscription${suite ? `?suite=${encodeURIComponent(suite)}` : ""}`, libelle: "Essai gratuit 7 jours" };
+    : { href: `/inscription${suite ? `?suite=${encodeURIComponent(suite)}` : ""}`, libelle: "Créer un compte gratuit" };
 }
 
 /** Bouton doré d'abonnement, identique partout où un contenu est réservé. */

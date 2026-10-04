@@ -172,6 +172,7 @@ async def _plans_offerts(user_id: str, db: AsyncSession) -> list[str]:
     """
     from db.models import DefiRecompense
     from services.acces_offert import plan_offert_actif
+    from services.passes import plan_pass_actif
     plans = list((await db.execute(select(DefiRecompense.plan_offert).where(
         DefiRecompense.user_id == user_id, DefiRecompense.statut == "applique",
         DefiRecompense.expire_at > datetime.now(timezone.utc),
@@ -179,6 +180,11 @@ async def _plans_offerts(user_id: str, db: AsyncSession) -> list[str]:
     offert = await plan_offert_actif(db, user_id)
     if offert:
         plans.append(offert)
+    # Pass payé une fois (jour / semaine / mois) en cours : même logique, un
+    # webhook d'abonnement ne doit pas l'effacer avant son échéance.
+    du_pass = await plan_pass_actif(db, user_id)
+    if du_pass:
+        plans.append(du_pass)
     return plans
 
 
@@ -494,16 +500,12 @@ async def create_checkout(
         user.stripe_customer_id = customer_id
         await db.commit()
 
-    # 2) Essai gratuit : une seule fois par compte.
-    #
-    # Stripe ne déduplique pas les essais par client : sans ce contrôle, le cycle
-    # « essai → annulation → nouveau checkout » rendait le produit gratuit à vie
-    # (constaté en production le 2026-08-20, 3 essais ouverts en 24 h sur un même
-    # compte). La consommation est enregistrée par le webhook, quand Stripe
-    # confirme l'essai — un checkout abandonné ne brûle donc rien.
-    # Un filleul n'a JAMAIS d'essai, même après sa remise : sinon résilier puis
-    # se réabonner lui donnerait la remise ET l'essai.
-    droit_a_lessai = user.essai_utilise_at is None and not user.parraine_par_id
+    # 2) Essai gratuit SUPPRIMÉ (décision de l'exploitant du 2026-10-04) : trop de
+    # résiliations au 7e jour. La découverte payante passe par les passes jour /
+    # semaine / mois (services/passes.py). Aucun chemin n'ouvre plus d'essai :
+    # `trial_period_days` n'est jamais envoyé à Stripe. Les essais ouverts avant
+    # cette date suivent leur cours (webhooks inchangés).
+    droit_a_lessai = False
 
     # 2 bis) Carte déjà vue sur un autre compte : l'essai ne se rouvre pas avec une
     # nouvelle adresse e-mail. Le contrôle définitif est côté webhook (la carte du
@@ -551,16 +553,6 @@ async def create_checkout(
     }
     if parrainage_filleul is not None:
         subscription_data["metadata"]["parrainage_id"] = parrainage_filleul.parrainage_id
-    if droit_a_lessai:
-        # Essai gratuit 7 jours : Standard ET Expert (alignés, cf. page /tarifs).
-        subscription_data["trial_period_days"] = 7
-        # Filet de sécurité : si la carte disparaît d'ici la fin de l'essai
-        # (supprimée depuis le portail), on annule au lieu de laisser traîner un
-        # impayé — le webhook repasse alors l'utilisateur en `free`.
-        subscription_data["trial_settings"] = {
-            "end_behavior": {"missing_payment_method": "cancel"}
-        }
-
     # Créer la session
     session = stripe.checkout.Session.create(
         customer=customer_id,
@@ -585,6 +577,142 @@ async def create_checkout(
              remise_parrainage=parrainage_filleul is not None)
     return {"url": session.url, "essai": droit_a_lessai,
             "remise_parrainage": parrainage_filleul is not None}
+
+
+# ── Passes sans renouvellement ───────────────────────────────────────────────
+# Cumul plafonné : au-delà, un achat de plus n'apporte rien au client et
+# allonge l'exposition aux contestations bancaires.
+PASS_CUMUL_MAX = timedelta(days=31)
+
+
+class PassRequest(BaseModel):
+    duree: str  # jour / semaine / mois
+    # Case « accès immédiat + renonciation au droit de rétractation » cochée.
+    # Exigée ICI, côté serveur : un appel direct à l'API sans la case est refusé.
+    renonciation: bool = False
+
+
+class PassConfirmation(BaseModel):
+    session_id: str
+
+
+@router.post("/stripe/pass")
+async def creer_checkout_pass(
+    body: PassRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_verified_email),
+):
+    """Session Stripe Checkout d'un pass : paiement unique, aucun abonnement.
+
+    Le prix vient du SERVEUR (services.passes.PASSES) ; le client ne choisit que
+    la durée. Rien n'est accordé ici : l'accès naît du paiement encaissé
+    (webhook `checkout.session.completed` ou page de retour), cf. passes.accorder.
+    """
+    from services import passes
+
+    if body.duree not in passes.PASSES:
+        raise HTTPException(status_code=400, detail="Durée invalide")
+    if body.renonciation is not True:
+        raise HTTPException(
+            status_code=400,
+            detail="Cochez la case de demande d'accès immédiat et de renonciation au "
+                   "droit de rétractation pour continuer.",
+        )
+    if user.is_admin:
+        raise HTTPException(status_code=409, detail="Un compte administrateur a déjà accès à tout.")
+    vivants = [s for s in await _subs_vivantes(user.user_id, db) if s.statut in STATUTS_ACCES]
+    if any(s.plan == "expert" for s in vivants):
+        raise HTTPException(
+            status_code=409,
+            detail="Votre abonnement Expert donne déjà un accès illimité : un pass "
+                   "ne vous apporterait rien.",
+        )
+    fin_actuelle = await passes._fin_des_passes(db, user.user_id)
+    if fin_actuelle and fin_actuelle > datetime.now(timezone.utc) + PASS_CUMUL_MAX:
+        raise HTTPException(
+            status_code=409,
+            detail="Votre accès est déjà ouvert pour plus d'un mois. Revenez plus près "
+                   "de son échéance pour le prolonger.",
+        )
+
+    prix, _duree, libelle = passes.PASSES[body.duree]
+    customer_id = user.stripe_customer_id
+    _expirer_sessions_ouvertes(customer_id)
+    if not customer_id:
+        customer = stripe.Customer.create(
+            email=user.email,
+            name=f"{user.prenom or ''} {user.nom or ''}".strip() or user.email,
+            metadata={"user_id": user.user_id},
+        )
+        customer_id = customer.id
+        user.stripe_customer_id = customer_id
+        await db.commit()
+
+    metadata = {
+        "type": "pass", "duree": body.duree, "user_id": user.user_id,
+        "renonciation_at": datetime.now(timezone.utc).isoformat(),
+        "renonciation_version": passes.RENONCIATION_VERSION,
+    }
+    price_id = passes.prix_stripe(body.duree) if _stripe_joignable() else None
+    ligne = ({"price": price_id, "quantity": 1} if price_id else {
+        "quantity": 1,
+        "price_data": {
+            "currency": passes.DEVISE,
+            "unit_amount": prix,
+            "product_data": {"name": f"BlackTurf — {libelle}"},
+        },
+    })
+    session = stripe.checkout.Session.create(
+        customer=customer_id,
+        client_reference_id=user.user_id,
+        mode="payment",
+        payment_method_types=["card"],
+        line_items=[ligne],
+        metadata=metadata,
+        # Le paiement porte aussi les métadonnées : un remboursement ou une
+        # contestation (événements de charge) retrouve ainsi le pass.
+        payment_intent_data={"metadata": metadata, "description": f"BlackTurf — {libelle}"},
+        custom_text={"submit": {"message": passes.RENONCIATION_TEXTE}},
+        # Session courte (minimum Stripe : 30 min) : pas de vieil onglet payé
+        # après un changement de tarif ou un autre achat.
+        expires_at=int((datetime.now(timezone.utc) + timedelta(minutes=30)).timestamp()),
+        success_url=f"{settings.frontend_url}/abonnement/succes?pass={body.duree}&session_id={{CHECKOUT_SESSION_ID}}",
+        cancel_url=f"{settings.frontend_url}/tarifs",
+        locale="fr",
+    )
+    log.info("stripe.checkout_pass_cree", user_id=user.user_id, duree=body.duree)
+    return {"url": session.url}
+
+
+@router.post("/stripe/pass/confirmer")
+async def confirmer_pass(
+    body: PassConfirmation,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Page de retour : relit la session CHEZ STRIPE et accorde le pass si elle est
+    payée. Filet si le webhook tarde ou n'est pas branché ; idempotent avec lui."""
+    from services import passes
+
+    sid = (body.session_id or "").strip()
+    if not sid.startswith("cs_") or len(sid) > 100:
+        raise HTTPException(status_code=400, detail="Session invalide")
+    try:
+        session = stripe.checkout.Session.retrieve(sid)
+    except stripe.error.InvalidRequestError:
+        raise HTTPException(status_code=404, detail="Session introuvable")
+    meta = dict(session.get("metadata") or {})
+    if meta.get("user_id") != user.user_id:
+        # Session d'un autre compte : on ne dit rien de plus.
+        raise HTTPException(status_code=404, detail="Session introuvable")
+    try:
+        p, _cree = await passes.accorder(db, session)
+    except passes.PassInvalide as e:
+        log.info("stripe.pass_non_confirme", user_id=user.user_id, raison=str(e))
+        raise HTTPException(status_code=409, detail="Paiement pas encore confirmé. Réessayez dans un instant.")
+    await db.refresh(user)
+    actif = await passes.pass_actif(db, user.user_id)
+    return {"plan": user.plan, "duree": p.duree, "debut": p.debut, "fin": (actif or {}).get("fin") or p.fin}
 
 
 def _abonnement_courant(vivants: list[Subscription]) -> Subscription:
@@ -1034,16 +1162,46 @@ async def _traiter_evenement(event_type: str, data: dict, db: AsyncSession) -> N
         await _handle_payment_succeeded(data, db)
     elif event_type == "invoice.payment_failed":
         await _handle_payment_failed(data, db)
+    elif event_type == "checkout.session.completed":
+        await _handle_checkout_pass(data, db)
     elif event_type == "charge.refunded":
         await parrainage.sur_remboursement(data, db, "paiement_rembourse")
+        # Remboursement TOTAL d'un pass : accès retiré. Un remboursement partiel
+        # (geste commercial) laisse l'accès.
+        if data.get("refunded"):
+            from services.passes import retirer_par_paiement
+            await retirer_par_paiement(db, _payment_intent_id(data), "paiement_rembourse")
     elif event_type == "charge.dispute.created":
         await parrainage.sur_remboursement(data, db, "paiement_conteste")
+        from services.passes import retirer_par_paiement
+        await retirer_par_paiement(db, _payment_intent_id(data), "paiement_conteste")
     elif event_type == "customer.subscription.trial_will_end":
         await _handle_trial_will_end(data, db)
     elif event_type in ("payment_method.attached", "customer.updated",
                         "setup_intent.succeeded"):
         # Une carte vient d'arriver : débloquer les essais mis en attente.
         await _handle_moyen_paiement_ajoute(data, db)
+
+
+def _payment_intent_id(obj: dict) -> Optional[str]:
+    pi = obj.get("payment_intent")
+    return pi.get("id") if isinstance(pi, dict) else pi
+
+
+async def _handle_checkout_pass(session: dict, db: AsyncSession) -> None:
+    """Session Checkout terminée : seules celles d'un pass nous concernent (les
+    abonnements arrivent par `customer.subscription.*`)."""
+    from services import passes
+
+    if (session.get("metadata") or {}).get("type") != "pass":
+        return
+    try:
+        await passes.accorder(db, session)
+    except passes.PassInvalide as e:
+        # Session signée par Stripe mais qui ne justifie pas l'accès (montant
+        # différent, non payée…) : rien n'est accordé, l'exploitant est alerté par
+        # le journal d'erreurs. Pas d'exception : Stripe la relivrerait en boucle.
+        log.error("stripe.pass_refuse", session=session.get("id"), raison=str(e))
 
 
 async def _find_user_by_customer(customer_id: str, db: AsyncSession) -> Optional[User]:

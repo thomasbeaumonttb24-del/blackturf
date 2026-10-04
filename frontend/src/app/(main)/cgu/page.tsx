@@ -63,9 +63,10 @@ export default function CguPage() {
         <h2 className="text-lg font-semibold">5. Abonnements et paiements</h2>
         <ul className="text-sm text-muted-foreground space-y-1 list-disc list-inside">
           <li>Les abonnements sont gérés via Stripe (paiement sécurisé PCI-DSS).</li>
-          <li>L'essai gratuit de 7 jours est disponible pour les plans Standard et Expert, une seule fois par compte. L'enregistrement d'une carte bancaire est requis pour l'ouvrir ; aucun montant n'est prélevé avant son terme, et l'abonnement peut être résilié à tout moment pendant l'essai sans être facturé.</li>
+          <li>Les abonnements Standard et Expert se renouvellent automatiquement chaque période.</li>
+          <li>Les pass Jour (24 h), Semaine (7 jours) et Mois (30 jours) donnent un accès Expert pour une durée fixe, contre un paiement unique, sans renouvellement : l'accès prend fin automatiquement à leur terme. L'accès étant immédiat, le client renonce expressément à son droit de rétractation lors du paiement ; un pass n'est pas remboursable.</li>
           <li>Résiliation possible à tout moment via le portail Stripe, sans pénalité.</li>
-          <li>Remboursement : au cas par cas sur demande à contact@blackturf.fr.</li>
+          <li>Remboursement d&apos;un abonnement : au cas par cas sur demande à contact@blackturf.fr (les pass ne sont pas remboursables, voir ci-dessus et les <a href="/cgv#passes" className="underline">CGV</a>).</li>
         </ul>
       </section>
 

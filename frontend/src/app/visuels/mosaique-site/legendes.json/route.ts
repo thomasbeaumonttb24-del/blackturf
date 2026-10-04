@@ -90,7 +90,7 @@ export async function GET() {
         `EXPERT — 19 €/mois\n` +
         `Plans illimités et paris de valeur en temps réel : les chevaux dont la cote paie ` +
         `plus que leur risque réel, signalés dès que l'écart apparaît.\n\n` +
-        `Sept jours d'essai gratuit, annulation en deux clics. Vous jouez où vous voulez, ` +
+        `Ou un pass sans abonnement : 5 € la journée, 12 € la semaine, 24 € le mois. Vous jouez où vous voulez, ` +
         `au comptoir ou en ligne : aucune commission n'est prise sur vos gains.\n\n` +
         `Vous misez combien par semaine, vous ? Dites-le en commentaire.\n` +
         `${SITE}` +
@@ -156,7 +156,7 @@ export async function GET() {
         `signal sort sur une course que vous suivez.\n\n` +
         `Toutes les disciplines : plat, trot attelé, monté, obstacle.\n\n` +
         `Vous y passez combien de temps chaque jour, vous, sur le programme ?\n` +
-        `7 jours offerts sur ${SITE}` +
+        `Tout débloqué dès 5 €, sans abonnement, sur ${SITE}` +
         pied([
           "#courseshippiques",
           "#pmu",
@@ -260,7 +260,7 @@ export async function GET() {
         `4. Après l'arrivée, tout est réglé aux rapports officiels et publié, gagnant ou ` +
         `perdant.\n\n` +
         `Programme, cotes comparées et rapports officiels en accès libre. Prédictions et ` +
-        `plan de mise à partir de 12 €/mois, avec 7 jours offerts.\n\n` +
+        `plan de mise dès 5 € avec un pass, sans abonnement.\n\n` +
         `Faites défiler le profil : les six publications ne forment qu'une seule image.\n` +
         `Abonnez-vous au compte, le bilan tombe chaque semaine.\n` +
         `${SITE}` +

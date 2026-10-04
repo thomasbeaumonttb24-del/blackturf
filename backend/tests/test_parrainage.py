@@ -164,11 +164,13 @@ async def test_filleul_sans_essai_avec_remise(db, monkeypatch, plan, periodicite
 
 
 @pytest.mark.asyncio
-async def test_client_ordinaire_garde_essai_et_codes_promo(db, monkeypatch):
+async def test_client_ordinaire_garde_les_codes_promo_sans_essai(db, monkeypatch):
+    """Essai supprimé le 2026-10-04 : plus d'essai pour personne, codes promo gardés."""
     captured = _capture(monkeypatch)
     user = await _user(db, stripe_customer_id="cus_x")
     res = await sr.create_checkout(sr.CheckoutRequest(plan="standard", periodicite="monthly"), db, user)
-    assert res["essai"] is True and res["remise_parrainage"] is False
+    assert res["essai"] is False and res["remise_parrainage"] is False
+    assert "trial_period_days" not in captured["subscription_data"]
     assert captured["allow_promotion_codes"] is True
     assert "discounts" not in captured
 

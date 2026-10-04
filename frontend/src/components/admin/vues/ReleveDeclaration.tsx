@@ -125,9 +125,9 @@ export default function ReleveDeclaration({
     ["Date (Paris)", "Client", "Formule", "Montant encaissé (€)", "Dont remboursé (€)", "Frais Stripe (€)", "Net perçu (€)", "Nature", "Référence Stripe", "Reçu"],
     ...(total?.mois ?? []).flatMap((m) => [...m.paiements].reverse()).map((p) => [
       new Date(p.date).toLocaleString("fr-FR", { timeZone: "Europe/Paris" }),
-      p.email ?? "", p.plan === "expert" ? "Expert" : "Standard",
+      p.email ?? "", p.plan === "pass" ? "Pass" : p.plan === "expert" ? "Expert" : "Standard",
       csvMontant(p.montant_cents), csvMontant(p.rembourse_cents), csvMontant(p.frais_cents), csvMontant(p.net_cents),
-      p.nature === "nouveau" ? "Premier paiement" : p.nature === "changement" ? "Changement de formule" : "Renouvellement", p.charge_id ?? p.facture_id ?? "", p.recu_url ?? "",
+      p.nature === "pass" ? "Pass (paiement unique)" : p.nature === "nouveau" ? "Premier paiement" : p.nature === "changement" ? "Changement de formule" : "Renouvellement", p.charge_id ?? p.facture_id ?? "", p.recu_url ?? "",
     ]),
   ]);
 

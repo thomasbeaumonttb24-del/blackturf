@@ -58,7 +58,7 @@ const ANGLES: Record<string, { titre: string; intro: string }> = {
     titre: "Le programme, passé au calcul",
     intro:
       "Le programme PMU, les cotes et les rapports officiels sont en accès libre. Les prédictions, " +
-      "les paris de valeur et le plan de mise commencent à 12 €/mois, avec 7 jours d'essai offerts.",
+      "les paris de valeur et le plan de mise se débloquent dès 5 € avec un pass, sans abonnement.",
   },
 };
 

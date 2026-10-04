@@ -37,6 +37,9 @@ import { adminApi } from "@/lib/api";
 
 /* ─────────────────────────────── formats ───────────────────────────────── */
 
+/** Pass sans renouvellement (paiement unique) — vert, distinct des deux formules. */
+const COULEUR_PASS = "#3aa37b";
+
 const euros = (cents: number | null | undefined, digits = 0) =>
   cents == null ? "—" : eur(cents / 100, digits);
 const eurosFin = (cents: number) => eur(cents / 100, cents % 100 ? 2 : 0);
@@ -306,7 +309,9 @@ const COLONNES_PAIEMENTS: Colonne<PaiementRecu>[] = [
   { titre: "Formule", rendu: (p) => <BadgeFormule plan={p.plan} /> },
   {
     titre: "Nature",
-    rendu: (p) => p.nature === "nouveau"
+    rendu: (p) => p.nature === "pass"
+      ? <Etat ton="neutre" titre="Pass sans renouvellement, paiement unique">Pass</Etat>
+      : p.nature === "nouveau"
       ? <Etat ton="or">Premier paiement</Etat>
       : p.nature === "changement"
         ? <Etat ton="attention" titre="Différence au prorata réglée lors d'un changement de formule">Changement de formule</Etat>
@@ -380,6 +385,7 @@ function DetailMois({ m, precedent }: { m: MoisRevenu; precedent?: MoisRevenu })
             parts={[
               { cle: "standard", label: "Standard", n: m.par_formule.standard, couleur: COULEUR_FORMULE.standard },
               { cle: "expert", label: "Expert", n: m.par_formule.expert, couleur: COULEUR_FORMULE.expert },
+              { cle: "pass", label: "Pass", n: m.passes_cents ?? 0, couleur: COULEUR_PASS },
             ]}
             centre={
               <>
@@ -401,6 +407,16 @@ function DetailMois({ m, precedent }: { m: MoisRevenu; precedent?: MoisRevenu })
                 </dd>
               </div>
             ))}
+            <div className="flex items-center justify-between gap-3">
+              <dt className="flex items-center gap-2 text-muted-foreground">
+                <span className="h-2 w-2 rounded-[3px]" style={{ background: COULEUR_PASS }} aria-hidden />
+                Pass
+              </dt>
+              <dd className="tabular-nums">
+                <b className="font-semibold">{euros(m.passes_cents ?? 0)}</b>
+                <span className="ml-1.5 text-xs text-muted-foreground">{total > 0 ? pct(((m.passes_cents ?? 0) / total) * 100, 0) : "—"}</span>
+              </dd>
+            </div>
           </dl>
         </div>
         <dl className="grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-border bg-border sm:grid-cols-3">
@@ -828,12 +844,13 @@ export default function RevenusPage() {
               ]}
             />
           </Panneau>
-          <Panneau titre="Par formule" desc="Encaissements Standard et Expert, mois par mois.">
+          <Panneau titre="Par formule" desc="Encaissements Standard, Expert et pass sans abonnement, mois par mois.">
             <CourbeComposition
               mois={data.mois}
               series={[
                 { cle: "standard", label: "Standard", couleur: COULEUR_FORMULE.standard, valeur: (m) => m.par_formule.standard },
                 { cle: "expert", label: "Expert", couleur: COULEUR_FORMULE.expert, valeur: (m) => m.par_formule.expert },
+                { cle: "pass", label: "Pass", couleur: COULEUR_PASS, valeur: (m) => m.passes_cents ?? 0 },
               ]}
             />
           </Panneau>

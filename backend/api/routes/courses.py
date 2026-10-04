@@ -1828,9 +1828,11 @@ async def get_mise_plan(
     from db.models import Prediction as PredModel, ValueBet
 
     # Course courue : ses chevaux sont publics (arrivée + classement révélé), le plan
-    # n'y dévoile rien — pas de quota pour un compte gratuit, comme le classement.
+    # n'y dévoile rien — aucun quota, pour AUCUN plan, comme le classement. Avant le
+    # 2026-10-04 seul le gratuit en était dispensé : un Standard qui relisait le plan
+    # d'une course passée brûlait une de ses 5 ouvertures du jour.
     _statut = (await db.execute(select(Course.statut).where(Course.course_id == course_id))).scalar_one_or_none()
-    if user.plan in ("free", "decouverte") and _statut == "termine":
+    if _statut == "termine":
         autorise, quota_restant, quota_limite = True, -1, -1
     else:
         autorise, quota_restant, quota_limite = await _mise_plan_quota_check(user, course_id)

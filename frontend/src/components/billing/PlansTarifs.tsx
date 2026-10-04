@@ -162,7 +162,7 @@ export function PlansTarifs() {
           <CheckoutButton
             plan="expert"
             periodicite={periodicite}
-            label="Essayer Expert 7 jours gratuit"
+            label="Choisir Expert"
             variant="brand"
             size="lg"
             className="h-12 w-full text-base"

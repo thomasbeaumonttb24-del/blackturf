@@ -483,7 +483,26 @@ export default function ProfilPage() {
                     mais garde un abonnement vivant : lui montrer « Voir les
                     offres » l'envoyait vers un checkout qui refuse (409) en le
                     renvoyant ici, vers un bouton qui n'était plus affiché. */}
-                {isFree && !abonnementGerable ? (
+                {user?.pass_fin && !abonnementGerable ? (
+                  // Pass payé une fois : rien chez Stripe à gérer ni à résilier.
+                  <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 sm:p-5 space-y-3">
+                    <p className="font-semibold text-emerald-900">
+                      Pass actif jusqu&apos;au{" "}
+                      {new Date(user.pass_fin).toLocaleString("fr-FR", {
+                        day: "numeric", month: "long", hour: "2-digit", minute: "2-digit", timeZone: "Europe/Paris",
+                      })}
+                    </p>
+                    <p className="text-sm text-emerald-800">
+                      Paiement unique, sans renouvellement : l&apos;accès s&apos;arrête seul, rien à résilier.
+                    </p>
+                    <Link
+                      href="/tarifs#passes"
+                      className="inline-flex items-center gap-2 text-sm font-semibold text-emerald-900 underline"
+                    >
+                      Prolonger ou passer à un abonnement <ChevronRight className="h-4 w-4" />
+                    </Link>
+                  </div>
+                ) : isFree && !abonnementGerable ? (
                   <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 sm:p-5 space-y-3">
                     <div className="flex items-center gap-2">
                       <Zap className="h-5 w-5 text-amber-700" />

@@ -1,4 +1,7 @@
-"""L'essai de 7 jours doit être proposé à ceux qui y ont droit — et à eux seuls.
+"""Essai gratuit SUPPRIMÉ le 2026-10-04 (décision de l'exploitant) : plus jamais
+proposé, quel que soit le compte. L'entrée payante est le pass sans abonnement.
+
+Historique : l'essai de 7 jours devait être proposé à ceux qui y avaient droit.
 
 Constat en production le 2026-09-13 : 44 comptes gratuits, 2 seulement ont
 jamais ouvert l'essai. Aucun écran ne le proposait directement ; tous renvoyaient
@@ -30,9 +33,9 @@ async def _user(db) -> User:
 
 
 @pytest.mark.asyncio
-async def test_compte_neuf_a_droit_a_lessai(client, auth_headers):
+async def test_compte_neuf_na_plus_dessai(client, auth_headers):
     me = (await client.get("/api/v1/auth/me", headers=auth_headers)).json()
-    assert me["essai_disponible"] is True
+    assert me["essai_disponible"] is False
 
 
 @pytest.mark.asyncio
@@ -66,9 +69,9 @@ def test_le_bandeau_dessai_est_monte_dans_le_layout():
     layout = exiger(FRONT / "app" / "(main)" / "layout.tsx")
     bandeau = exiger(FRONT / "components" / "billing" / "EssaiGratuitBanner.tsx")
     assert "EssaiGratuitBanner" in layout
-    assert "peutDemarrerEssai" in bandeau
-    # La carte est dite avant le clic : la découvrir chez Stripe fait abandonner.
-    assert "Carte demandée" in bandeau
+    # Le bandeau pousse désormais les passes, plus l'essai.
+    assert "peutDebloquer" in bandeau
+    assert "/tarifs#passes" in bandeau
 
 
 def test_linscription_affiche_lecran_dattente():
@@ -90,6 +93,8 @@ def test_linscription_oriente_un_ancien_inscrit():
     assert 'href="/mot-de-passe-oublie"' in source
 
 
-def test_la_confirmation_dadresse_propose_lessai():
+def test_la_confirmation_dadresse_propose_formules_et_passes():
     source = exiger(FRONT / "app" / "(auth)" / "verifier-email" / "page.tsx")
-    assert "CheckoutButton" in source and "peutDemarrerEssai" in source
+    assert "CheckoutButton" in source and "peutDebloquer" in source
+    assert "/tarifs#passes" in source
+    assert "Essayer" not in source and "essai gratuit" not in source.split("*/}")[-1].lower()

@@ -28,10 +28,10 @@ import CompteARebours from "@/components/admin/vues/CompteARebours";
 import { Anneau, Fraicheur, useRecuLe } from "@/components/admin/graphes";
 import {
   MOUVEMENT_LABELS, MOUVEMENT_TONS,
-  type AbonneLigne, type CompteOffert, type MouvementAbo, type Repartition,
+  type AbonneLigne, type CompteOffert, type ComptePass, type MouvementAbo, type Repartition,
 } from "@/components/admin/types";
 
-type Onglet = "payants" | "essais" | "offerts" | "journal";
+type Onglet = "payants" | "essais" | "passes" | "offerts" | "journal";
 
 /** Un statut Stripe brut n'est pas un libellé. */
 const ETATS_STRIPE: Record<string, string> = {
@@ -132,6 +132,21 @@ const COLONNES_ESSAIS: Colonne<AbonneLigne>[] = [
   { titre: "Fin d'essai", rendu: (a) => <FinEssai a={a} /> },
 ];
 
+const COLONNES_PASSES: Colonne<ComptePass>[] = [
+  { titre: "Compte", rendu: (o) => <CelluleCompte email={o.email} />, className: "max-w-[300px]" },
+  { titre: "Accès", rendu: () => <BadgeFormule plan="pass" /> },
+  {
+    titre: "Jusqu'au",
+    rendu: (o) => <span className="whitespace-nowrap" title={formatDateTime(o.jusqu_au)}>{dateCourte(o.jusqu_au)}</span>,
+  },
+  { titre: "Inscrit le", rendu: (o) => <span className="whitespace-nowrap">{dateCourte(o.created_at)}</span> },
+  {
+    titre: "Dernière connexion",
+    rendu: (o) => <span className="whitespace-nowrap text-muted-foreground" title={o.last_login ? formatDateTime(o.last_login) : undefined}>{depuis(o.last_login)}</span>,
+    droite: true,
+  },
+];
+
 const COLONNES_OFFERTS: Colonne<CompteOffert>[] = [
   { titre: "Compte", rendu: (o) => <CelluleCompte email={o.email} />, className: "max-w-[300px]" },
   { titre: "Accès", rendu: (o) => <BadgeFormule plan={o.plan} /> },
@@ -159,6 +174,7 @@ function Formules({ r }: { r: Repartition }) {
             <th scope="col" className={cn(TH, "px-3")}>Formule</th>
             <th scope="col" className={cn(TH, "px-3 text-right")}>Payants</th>
             <th scope="col" className={cn(TH, "px-3 text-right")}>En essai</th>
+            <th scope="col" className={cn(TH, "px-3 text-right")}>Pass</th>
             <th scope="col" className={cn(TH, "px-3 text-right")}>Offerts</th>
           </tr>
         </thead>
@@ -168,6 +184,7 @@ function Formules({ r }: { r: Repartition }) {
               <th scope="row" className="px-3 py-2.5 text-left"><BadgeFormule plan={f} /></th>
               <td className={cellule}>{num(r.par_formule[f].payants)}</td>
               <td className={cellule}>{num(r.par_formule[f].essais)}</td>
+              <td className={cellule}>{num(r.par_formule[f].passes ?? 0)}</td>
               <td className={cellule}>{num(r.par_formule[f].offerts)}</td>
             </tr>
           ))}
@@ -289,6 +306,7 @@ export default function AbonnementsPage() {
   const onglets = [
     { key: "payants", label: `Payants · ${payants.length}` },
     { key: "essais", label: `Essais · ${essais.length}` },
+    { key: "passes", label: `Pass · ${(data.passes ?? []).length}` },
     { key: "offerts", label: `Offerts · ${data.offerts.length}` },
     { key: "journal", label: "Journal" },
   ] as const;
@@ -363,6 +381,7 @@ export default function AbonnementsPage() {
               parts={[
                 { cle: "payants", label: "Payants", n: r.payants, couleur: "#0f7b5a" },
                 { cle: "essais", label: "En essai", n: r.essais, couleur: "#27456b" },
+                { cle: "passes", label: "Pass", n: r.passes ?? 0, couleur: "#3aa37b" },
                 { cle: "offerts", label: "Offerts", n: r.offerts, couleur: "#6b5b95" },
                 { cle: "gratuits", label: "Gratuits", n: r.gratuits, couleur: "#d5d9de" },
               ]}
@@ -380,6 +399,7 @@ export default function AbonnementsPage() {
           segments={[
             { cle: "payants", label: "Payants", n: r.payants, couleur: "bg-[#0f7b5a]" },
             { cle: "essais", label: "En essai", n: r.essais, couleur: "bg-[#27456b]" },
+            { cle: "passes", label: "Pass", n: r.passes ?? 0, couleur: "bg-[#3aa37b]" },
             { cle: "offerts", label: "Offerts", n: r.offerts, couleur: "bg-[#6b5b95]" },
             { cle: "gratuits", label: "Gratuits", n: r.gratuits, couleur: "bg-[#d5d9de]" },
           ]}
@@ -415,6 +435,15 @@ export default function AbonnementsPage() {
               cle={(a) => a.stripe_subscription_id ?? a.user_id}
               label="Essais en cours"
               vide="Aucun essai en cours."
+            />
+          )}
+          {onglet === "passes" && (
+            <Tableau
+              lignes={data.passes ?? []}
+              colonnes={COLONNES_PASSES}
+              cle={(o) => o.user_id}
+              label="Pass en cours"
+              vide="Aucun pass sans renouvellement en cours."
             />
           )}
           {onglet === "offerts" && (
