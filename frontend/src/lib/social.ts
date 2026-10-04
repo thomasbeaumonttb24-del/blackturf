@@ -18,7 +18,31 @@ export const RESEAUX = [
   },
 ] as const;
 
+/**
+ * Où laisser un avis. `ecrire` mène droit au formulaire ; `profil` est la page publique
+ * (déclarée dans `sameAs`). Trustpilot : fiche revendiquée blackturf.fr. Google : lien
+ * « Demander des avis » donné par la fiche d'établissement, fiche Maps par son identifiant.
+ */
+export const AVIS = {
+  trustpilot: {
+    ecrire: "https://fr.trustpilot.com/evaluate/blackturf.fr",
+    profil: "https://fr.trustpilot.com/review/blackturf.fr",
+    // Widget « Review Collector » généré dans Trustpilot Business (TrustBox).
+    templateId: "56278e9abfbbba0bdcd568bc",
+    businessUnitId: "6ab1334bd0ecf7b4b35e9342",
+    token: "d33f70d7-a691-4701-aace-eef6d11a7b0b",
+  },
+  google: {
+    ecrire: "https://g.page/r/Ca-aIiYY44FdEBM/review",
+    profil: "https://maps.google.com/?cid=6737916210381494959",
+  },
+} as const;
+
 /** Les adresses seules, pour `Organization.sameAs`. */
-export const SAME_AS: string[] = RESEAUX.map((r) => r.url);
+export const SAME_AS: string[] = [
+  ...RESEAUX.map((r) => r.url),
+  AVIS.trustpilot.profil,
+  AVIS.google.profil,
+];
 
 export const INSTAGRAM = RESEAUX[0];

@@ -21,6 +21,9 @@ from typing import Optional
 SITE = "https://blackturf.fr"
 IMG = f"{SITE}/img/email"
 INSTAGRAM = "https://www.instagram.com/blackturf.fr/"
+# Mêmes adresses que AVIS dans frontend/src/lib/social.ts.
+AVIS_TRUSTPILOT = "https://fr.trustpilot.com/evaluate/blackturf.fr"
+AVIS_GOOGLE = "https://g.page/r/Ca-aIiYY44FdEBM/review"
 RESPONSABLE = (
     "Les résultats passés ne garantissent pas les résultats futurs. Jouer comporte des risques : "
     "endettement, isolement, dépendance. Appelez le 09 74 75 13 13 (appel non surtaxé). "
@@ -389,13 +392,37 @@ def fermeture() -> str:
     )
 
 
-def pied(mention: str, responsable: str = RESPONSABLE) -> str:
+def bloc_avis() -> str:
+    """Boutons Trustpilot et Google. Ce sont des images (logos officiels, voir
+    scripts/generer_boutons_avis.ps1) : un mail n'exécute pas le widget Trustpilot,
+    et une image garde ses couleurs quand le client passe le mail en sombre."""
+    boutons = "".join(
+        f'<a href="{url}" style="display:inline-block;margin:4px 4px 0;text-decoration:none">'
+        f'<img src="{IMG}/{img}" width="{l}" height="48" alt="{alt}" '
+        f'style="display:inline-block;width:{l}px;height:48px;border:0;vertical-align:top"></a>'
+        for url, img, l, alt in [
+            (AVIS_TRUSTPILOT, "avis-trustpilot.png", 272, "Évaluez-nous sur Trustpilot"),
+            (AVIS_GOOGLE, "avis-google.png", 252, "Laisser un avis Google"),
+        ]
+    )
+    return (
+        f'<div style="margin:0 0 18px">'
+        f'<div class="bt-te" style="font-size:14px;line-height:20px;font-weight:700;color:{CLAIR["te"]};font-family:{POLICE}">Un avis sur BlackTurf ?</div>'
+        f'<div class="bt-td" style="font-size:12px;line-height:18px;color:{CLAIR["td"]};margin:0 0 6px">30 secondes, et ça aide d’autres turfistes à nous trouver.</div>'
+        f'{boutons}</div>'
+    )
+
+
+def pied(mention: str, responsable: str = RESPONSABLE, avis: bool = True) -> str:
+    """Pied commun. `avis=False` pour les messages de sécurité (mot de passe,
+    vérification d'adresse) : on n'y demande rien d'autre que l'action attendue."""
     liens = '<span class="bt-td" style="color:#A8A08F">&nbsp;·&nbsp;</span>'.join(
         lien_or(t, u, souligne=False) for t, u in [
             ("Courses du jour", f"{SITE}/programme"), ("Value bets", f"{SITE}/value-bets"),
             ("Palmarès", f"{SITE}/track-record"), ("Instagram", INSTAGRAM)])
     return f"""
   <tr><td style="padding:26px 20px 0;text-align:center">
+    {bloc_avis() if avis else ""}
     <a href="{SITE}"><img src="{IMG}/logo-medaillon.png" width="60" height="60" alt="BlackTurf" style="display:inline-block;width:60px;height:60px;border:0"></a>
     <div style="margin:10px 0 14px;font-size:12px;line-height:18px">{liens}</div>
     <div class="bt-td" style="font-size:11.5px;line-height:18px;color:{CLAIR['td']};max-width:520px;margin:0 auto">{e(responsable)}</div>

@@ -65,7 +65,7 @@ def confirmation_newsletter(lien: str) -> tuple[str, str]:
         + _carte_claire(D.surtitre("Ce que vous recevrez chaque lundi") + avantages)
         + _securite("Vous n’êtes pas à l’origine de cette demande ? Ignorez ce message : sans confirmation, aucune lettre ne sera envoyée.")
         + D.bloc_instagram("En attendant lundi, le bilan du jour passe aussi en story.")
-        + D.pied("Vous recevez ce message parce qu’une inscription à la lettre BlackTurf a été demandée avec cette adresse.")
+        + D.pied("Vous recevez ce message parce qu’une inscription à la lettre BlackTurf a été demandée avec cette adresse.", avis=False)
     )
     texte = (
         "Confirmez votre inscription à la lettre hebdomadaire BlackTurf.\n\n"
@@ -93,7 +93,7 @@ def verification_adresse(prenom: Optional[str], lien: str) -> tuple[str, str]:
         + _carte_claire(D.surtitre("Ce qui vous attend sur BlackTurf") + avantages)
         + _securite("Si vous n’êtes pas à l’origine de cette inscription, ignorez ce message : le compte ne s’ouvrira pas.")
         + D.bloc_instagram()
-        + D.pied("Message envoyé suite à la création d’un compte sur blackturf.fr.")
+        + D.pied("Message envoyé suite à la création d’un compte sur blackturf.fr.", avis=False)
     )
     texte = (
         f"Bienvenue sur BlackTurf, {prenom or 'parieur'} !\n\n"
@@ -115,7 +115,7 @@ def reinitialisation_mot_de_passe(prenom: Optional[str], lien: str) -> tuple[str
         + _securite("Si vous n’avez pas demandé cette réinitialisation, ignorez cet e-mail : votre mot de passe actuel reste inchangé. "
                     "BlackTurf ne vous demandera jamais votre mot de passe par e-mail.")
         + D.fermeture()
-        + D.pied("Message de sécurité lié à votre compte blackturf.fr.")
+        + D.pied("Message de sécurité lié à votre compte blackturf.fr.", avis=False)
     )
     texte = (
         f"Bonjour {prenom or 'parieur'},\n\n"
