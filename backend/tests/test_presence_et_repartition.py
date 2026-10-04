@@ -174,7 +174,8 @@ async def test_chaque_compte_tombe_dans_une_seule_case(client: AsyncClient, admi
     r = data["repartition"]
     # Le compte admin des fixtures n'est compté nulle part.
     assert (r["comptes"], r["payants"], r["essais"], r["offerts"], r["gratuits"]) == (4, 1, 1, 1, 1)
-    assert r["payants"] + r["essais"] + r["offerts"] + r["gratuits"] == r["comptes"]
-    assert r["par_formule"]["expert"] == {"payants": 1, "essais": 0, "offerts": 1}
-    assert r["par_formule"]["standard"] == {"payants": 0, "essais": 1, "offerts": 0}
+    assert r["passes"] == 0
+    assert r["payants"] + r["essais"] + r["passes"] + r["offerts"] + r["gratuits"] == r["comptes"]
+    assert r["par_formule"]["expert"] == {"payants": 1, "essais": 0, "passes": 0, "offerts": 1}
+    assert r["par_formule"]["standard"] == {"payants": 0, "essais": 1, "passes": 0, "offerts": 0}
     assert [o["email"] for o in data["offerts"]] == ["ami@x.fr"]
