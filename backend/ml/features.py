@@ -208,6 +208,10 @@ POSITION_HISTORIQUE_SQL = f"""
 # veille, elle passe `date_course < jour` alors que la ligne interne (datée du jour)
 # ne passe pas. Au direct elle n'existe pas encore ; dans tout recalcul a posteriori
 # c'était le résultat de la course dans ses propres features.
+#
+# Depuis le 2026-10-05 le scraper date la copie au jour de Paris (jour_pmu_epoch_ms) :
+# les copies neuves tombent le MÊME jour que la ligne interne, les anciennes restent à
+# la veille. L'appariement accepte les deux.
 HIST_JUMEAU_LATERAL = """
         LEFT JOIN LATERAL (
             SELECT e.ecart_longueurs, e.indice_vitesse, e.corde, e.poids_porte_course,
@@ -216,7 +220,7 @@ HIST_JUMEAU_LATERAL = """
             FROM historique_courses e
             WHERE h.course_id IS NOT NULL AND e.cheval_id = h.cheval_id
               AND e.course_id IS NULL
-              AND e.date_course = h.date_course - 1 AND e.distance = h.distance
+              AND e.date_course IN (h.date_course - 1, h.date_course) AND e.distance = h.distance
               AND (e.position_arrivee IS NULL OR e.position_arrivee = h.position_arrivee)
             ORDER BY e.historique_id
             LIMIT 1
@@ -226,7 +230,7 @@ HIST_SANS_COPIE_SQL = """
           AND NOT (h.course_id IS NULL AND EXISTS (
               SELECT 1 FROM historique_courses i
               WHERE i.cheval_id = h.cheval_id AND i.course_id IS NOT NULL
-                AND i.date_course = h.date_course + 1 AND i.distance = h.distance
+                AND i.date_course IN (h.date_course + 1, h.date_course) AND i.distance = h.distance
                 AND (h.position_arrivee IS NULL OR h.position_arrivee = i.position_arrivee)))"""
 
 # Copie PMU de la course CALCULÉE (paramètre :cid), sans condition de place : pour
@@ -235,7 +239,7 @@ HIST_SANS_COPIE_COURSE_SQL = """
           AND NOT (h.course_id IS NULL AND EXISTS (
               SELECT 1 FROM historique_courses i
               WHERE i.cheval_id = h.cheval_id AND i.course_id = :cid
-                AND i.date_course = h.date_course + 1 AND i.distance = h.distance))"""
+                AND i.date_course IN (h.date_course + 1, h.date_course) AND i.distance = h.distance))"""
 
 # Colonnes que la copie PMU complète sur la ligne interne.
 HIST_COLONNES_COMPLETEES = ("ecart_longueurs", "indice_vitesse", "corde", "poids_porte_course",

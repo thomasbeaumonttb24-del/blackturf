@@ -42,11 +42,13 @@ def test_colonnes_completees_par_la_copie():
     assert F.hist_col("date_course", True) == "h.date_course"
 
 
-def test_la_copie_est_la_veille_meme_distance():
-    """Mesuré sur 379 338 lignes : décalage d'un jour, jamais zéro."""
-    assert "i.date_course = h.date_course + 1" in F.HIST_SANS_COPIE_SQL
-    assert "e.date_course = h.date_course - 1" in F.HIST_JUMEAU_LATERAL
-    for sql in (F.HIST_SANS_COPIE_SQL, F.HIST_JUMEAU_LATERAL):
+def test_la_copie_est_la_veille_ou_le_jour_meme_distance():
+    """Mesuré sur 379 338 lignes : décalage d'un jour, jamais zéro, pour les copies
+    écrites avant le 2026-10-05 ; datées au jour de Paris depuis (jour_pmu_epoch_ms)."""
+    assert "i.date_course IN (h.date_course + 1, h.date_course)" in F.HIST_SANS_COPIE_SQL
+    assert "i.date_course IN (h.date_course + 1, h.date_course)" in F.HIST_SANS_COPIE_COURSE_SQL
+    assert "e.date_course IN (h.date_course - 1, h.date_course)" in F.HIST_JUMEAU_LATERAL
+    for sql in (F.HIST_SANS_COPIE_SQL, F.HIST_JUMEAU_LATERAL, F.HIST_SANS_COPIE_COURSE_SQL):
         assert "distance" in sql
 
 

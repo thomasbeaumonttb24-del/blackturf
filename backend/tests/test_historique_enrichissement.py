@@ -75,3 +75,58 @@ async def test_sans_marge_exploitable_rien_n_est_ecrit(db):
     lignes = (await db.execute(text(
         "SELECT ecart_longueurs FROM historique_courses"))).all()
     assert len(lignes) == 1 and lignes[0][0] is None
+
+
+# ── Date des copies PMU : jour de Paris, pas d'UTC (2026-10-05) ─────────────────
+# Le PMU date une course passée par minuit heure de Paris. Lu en UTC, ce minuit
+# tombait la VEILLE : la copie de la course passait `date_course < jour` et tout
+# recalcul a posteriori relisait l'arrivée dans les variables de la course.
+MINUIT_PARIS_ETE_MS = 1_784_152_800_000      # 2026-07-16 00:00 Paris = 07-15 22:00 UTC
+
+
+def test_jour_pmu_est_le_jour_de_paris():
+    from datetime import date
+    from services.temps_courses import jour_pmu_epoch_ms
+    assert jour_pmu_epoch_ms(MINUIT_PARIS_ETE_MS) == date(2026, 7, 16)
+    # hiver : minuit Paris = 23:00 UTC la veille
+    assert jour_pmu_epoch_ms(1_767_999_600_000) == date(2026, 1, 10)
+
+
+@pytest.mark.asyncio
+async def test_copie_pmu_datee_du_jour_de_paris(db):
+    nom = await _cheval(db)
+    c = dict(_course_pmu(1.0), date_ms=MINUIT_PARIS_ETE_MS)
+    assert await save_historique_pmu(db, nom, [c]) == 1
+    await db.commit()
+    d = (await db.execute(text("SELECT date_course FROM historique_courses"))).scalar()
+    assert str(d) == "2026-07-16"
+
+
+@pytest.mark.asyncio
+async def test_ancienne_copie_datee_de_la_veille_n_est_pas_dupliquee(db):
+    """Les copies écrites avant le correctif sont à J-1 : la relecture des performances
+    du cheval doit les retrouver (et les compléter), pas en créer une seconde."""
+    nom = await _cheval(db)
+    db.add(HistoriqueCourse(historique_id="h-old", cheval_id="ch-1", course_id=None,
+                            date_course=__import__("datetime").date(2026, 7, 15),
+                            hippodrome="VINCENNES", discipline="Attelé", distance=2700,
+                            position_arrivee=4))
+    await db.commit()
+    c = dict(_course_pmu(2.5), date_ms=MINUIT_PARIS_ETE_MS)
+    assert await save_historique_pmu(db, nom, [c]) == 0
+    await db.commit()
+    lignes = (await db.execute(text(
+        "SELECT historique_id, ecart_longueurs FROM historique_courses"))).all()
+    assert len(lignes) == 1 and lignes[0][1] == pytest.approx(2.5)
+
+
+@pytest.mark.asyncio
+async def test_vraie_sortie_de_la_veille_autre_distance_reste_distincte(db):
+    nom = await _cheval(db)
+    db.add(HistoriqueCourse(historique_id="h-veille", cheval_id="ch-1", course_id=None,
+                            date_course=__import__("datetime").date(2026, 7, 15),
+                            hippodrome="VINCENNES", discipline="Attelé", distance=2100,
+                            position_arrivee=1))
+    await db.commit()
+    c = dict(_course_pmu(2.5), date_ms=MINUIT_PARIS_ETE_MS)
+    assert await save_historique_pmu(db, nom, [c]) == 1

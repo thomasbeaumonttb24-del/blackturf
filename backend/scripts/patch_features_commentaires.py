@@ -30,7 +30,7 @@ os.environ.setdefault(
 
 from sqlalchemy import text  # noqa: E402
 
-from ml.features import compute_commentaire_signal  # noqa: E402
+from ml.features import HIST_SANS_COPIE_COURSE_SQL, compute_commentaire_signal  # noqa: E402
 
 CLES = ("commentaire_signal", "commentaire_malchance_recente", "commentaire_gagne_facile",
         "nb_commentaires_lus")
@@ -50,15 +50,19 @@ async def vecteurs_course(session, course_id: str, jour) -> dict[str, dict]:
     """), {"cid": course_id})).all()
     if not parts:
         return {}
-    rows = (await session.execute(text("""
+    rows = (await session.execute(text(f"""
         SELECT cheval_id, commentaire_course FROM (
-            SELECT cheval_id, commentaire_course,
-                   ROW_NUMBER() OVER (PARTITION BY cheval_id ORDER BY date_course DESC) AS rang
-            FROM historique_courses
-            WHERE cheval_id = ANY(:cids) AND date_course < :jour
+            SELECT h.cheval_id, h.commentaire_course,
+                   ROW_NUMBER() OVER (PARTITION BY h.cheval_id ORDER BY h.date_course DESC) AS rang
+            FROM historique_courses h
+            WHERE h.cheval_id = ANY(:cids) AND h.date_course < :jour
+              -- la copie PMU de CETTE course (datée de la veille) passe la borne :
+              -- son commentaire est le déroulé de l'arrivée qu'on prédit.
+              {HIST_SANS_COPIE_COURSE_SQL}
         ) h WHERE h.rang <= :n
         ORDER BY cheval_id, rang
-    """), {"cids": [p[1] for p in parts], "jour": jour, "n": SORTIES_LUES})).all()
+    """), {"cids": [p[1] for p in parts], "jour": jour, "cid": course_id,
+           "n": SORTIES_LUES})).all()
     textes: dict = {}
     for cheval_id, com in rows:
         if com:

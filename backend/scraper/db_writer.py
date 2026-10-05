@@ -5,7 +5,7 @@ Gère la déduplication et les upserts.
 import uuid
 import structlog
 from typing import Optional
-from datetime import datetime, date, timezone
+from datetime import datetime, date, timedelta, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import func, select, update, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -20,7 +20,7 @@ from db.models import (
     AssociationJockeyEntraineur, StatsJockey, StatsEntraineur,
 )
 from services.pmu_enjeux import PERIMETRE_TOTAL
-from services.temps_courses import jour_courses
+from services.temps_courses import jour_courses, jour_pmu_epoch_ms
 from scraper.base import (
     CourseScrape, PartantScrape, ResultatScrape,
     CoteBookmakerScrape, PoolPMUScrape, SuspensionScrape,
@@ -61,7 +61,6 @@ async def save_historique_pmu(session: AsyncSession, cheval_nom: str, courses: l
     Retourne le nb de lignes ajoutées.
     """
     from db.models import HistoriqueCourse, Cheval
-    from datetime import datetime as _dt
 
     # Trouver le cheval (doit exister depuis la sauvegarde des partants)
     r = await session.execute(select(Cheval.cheval_id).where(Cheval.nom == cheval_nom))
@@ -81,8 +80,10 @@ async def save_historique_pmu(session: AsyncSession, cheval_nom: str, courses: l
         dms = c.get("date_ms")
         if not dms:
             continue
-        d_course = _dt.fromtimestamp(dms / 1000.0).date()
+        # Jour à Paris : lu en UTC, minuit à Paris tombait la veille (cf. jour_pmu_epoch_ms).
+        d_course = jour_pmu_epoch_ms(dms)
         hippo = _t(c.get("hippodrome"), 100) or "?"
+        numeric = _historique_numeric(c)
 
         ecart = c.get("ecart")
         incident = _t(c.get("incident"), 100)
@@ -98,11 +99,20 @@ async def save_historique_pmu(session: AsyncSession, cheval_nom: str, courses: l
         #
         # On enrichit donc les lignes existantes DONT LA COLONNE EST VIDE. Jamais
         # d'écrasement : une valeur déjà là est une observation, pas un brouillon.
+        #
+        # Les copies écrites avant le 2026-10-05 sont datées de la VEILLE (lecture UTC) :
+        # sans les chercher aussi à J-1, chaque course déjà connue serait réinsérée à la
+        # première relecture des performances du cheval. Même distance exigée pour ne
+        # pas confondre avec une vraie sortie de la veille sur le même hippodrome.
         exist = await session.execute(text("""
             SELECT historique_id, ecart_longueurs, position_arrivee, incident
             FROM historique_courses
-            WHERE cheval_id = :cid AND date_course = :d AND hippodrome = :h LIMIT 1
-        """), {"cid": cheval_id, "d": d_course, "h": hippo})
+            WHERE cheval_id = :cid AND hippodrome = :h
+              AND (date_course = :d
+                   OR (date_course = :veille AND course_id IS NULL AND distance = :dist))
+            ORDER BY date_course DESC LIMIT 1
+        """), {"cid": cheval_id, "d": d_course, "veille": d_course - timedelta(days=1),
+               "h": hippo, "dist": numeric["distance"]})
         deja = exist.first()
         if deja:
             if deja.ecart_longueurs is None and isinstance(ecart, (int, float)):
@@ -130,7 +140,7 @@ async def save_historique_pmu(session: AsyncSession, cheval_nom: str, courses: l
             date_course=d_course,
             hippodrome=hippo,
             discipline=_t(c.get("discipline"), 20) or "?",
-            **_historique_numeric(c),
+            **numeric,
             ecart_longueurs=float(ecart) if isinstance(ecart, (int, float)) else None,
             incident=incident,
             allocation=c.get("allocation"),

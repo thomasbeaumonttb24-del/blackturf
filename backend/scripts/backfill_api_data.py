@@ -11,7 +11,8 @@ import asyncio
 import json
 import os
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import httpx
 import asyncpg
@@ -57,7 +58,9 @@ async def main():
                     dms = c.get("date")
                     if not dms:
                         continue
-                    dcourse = datetime.fromtimestamp(dms / 1000.0).date()
+                    # Jour à Paris (minuit PMU lu en UTC = la veille) ; les lignes écrites
+                    # avant le 2026-10-05 sont datées de la veille : on cherche les deux.
+                    dcourse = datetime.fromtimestamp(dms / 1000.0, tz=ZoneInfo("Europe/Paris")).date()
                     hippo = (c.get("hippodrome") or "?")[:100]
                     moi = next((x for x in (c.get("participants") or []) if x.get("itsHim")), None) or {}
                     terr = c.get("etatTerrain")
@@ -79,7 +82,7 @@ async def main():
                           poids_porte_course = COALESCE($3, poids_porte_course),
                           indice_vitesse = COALESCE($4, indice_vitesse),
                           equipement_course = COALESCE($5::jsonb, equipement_course)
-                        WHERE cheval_id = $6 AND date_course = $7 AND hippodrome = $8
+                        WHERE cheval_id = $6 AND date_course IN ($7, $9) AND hippodrome = $8
                           AND (terrain IS NULL OR indice_vitesse IS NULL OR corde IS NULL)
                         """,
                         terr,
@@ -87,7 +90,7 @@ async def main():
                         (float(poids) if isinstance(poids, (int, float)) else None),
                         vit,
                         (json.dumps({"oeilleres": bool(oe)}) if oe is not None else None),
-                        chid, dcourse, hippo,
+                        chid, dcourse, hippo, dcourse - timedelta(days=1),
                     )
                     try:
                         updated += int(res.split()[-1])
