@@ -1,3 +1,4 @@
+import { apiServeurV1, initServeur } from "@/lib/apiServeur";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { ImageResponse } from "next/og";
@@ -8,7 +9,9 @@ import { TuileSite, type DonneesSite } from "@/lib/mosaique-site";
 // et évite de recomposer un plan de 3104 × 2700 à chaque appel.
 export const revalidate = 3600;
 
-const API = (process.env.NEXT_PUBLIC_API_URL || "https://api.blackturf.fr") + "/api/v1";
+// Lecture serveur : réseau Docker + en-tête interne en production (cf. lib/apiServeur.ts),
+// pour ne plus partager le quota par IP de nginx avec tout le rendu serveur du site.
+const API = apiServeurV1();
 
 /**
  * Photo FIXE, contrairement à la mosaïque du jour qui en fait tourner cinq.
@@ -64,7 +67,7 @@ async function donnees(): Promise<DonneesSite> {
   let favoriGagnant: number | null = null;
   let coursesMesurees = 0;
   try {
-    const res = await fetch(`${API}/stats/chiffres-site`, { next: { revalidate: 3600 } });
+    const res = await fetch(`${API}/stats/chiffres-site`, initServeur({ next: { revalidate: 3600 } }));
     if (res.ok) {
       const d = await res.json();
       coursesEnBase = Number(d.courses_en_base ?? 0);

@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.models import Subscription, SubscriptionEvent, User
 from services.abonnements import journaliser
+from services.journal import masquer_email
 
 log = structlog.get_logger()
 
@@ -63,12 +64,12 @@ async def envoyer_rappels(db: AsyncSession, maintenant: datetime | None = None) 
                              subject="BlackTurf — Votre abonnement annuel arrive à échéance",
                              html=html, text=texte)
         except Exception as e:  # noqa: BLE001 — retenté le lendemain (fenêtre de 14 jours)
-            log.error("reconduction.envoi_echoue", email=user.email, error=str(e)[:150])
+            log.error("reconduction.envoi_echoue", email=masquer_email(user.email), error=str(e)[:150])
             continue
         await journaliser(db, "rappel_reconduction", user, sub, notifier=False,
                           montant_cents=montant,
                           detail={"echeance": fin.date().isoformat()})
         await db.commit()
         envoyes += 1
-        log.info("reconduction.rappel_envoye", email=user.email, echeance=fin.date().isoformat())
+        log.info("reconduction.rappel_envoye", email=masquer_email(user.email), echeance=fin.date().isoformat())
     return envoyes

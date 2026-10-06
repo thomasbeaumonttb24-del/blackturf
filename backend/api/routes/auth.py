@@ -2,13 +2,16 @@
 Auth routes — BlackTurf.
 JWT (login/register/refresh) + Google OAuth.
 """
+import json
+import re
 import uuid
 import secrets
+import time
 import structlog
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status, Request, Response
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status, Request, Response
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jose import JWTError, jwt
 from passlib.context import CryptContext
@@ -22,6 +25,7 @@ from api.config import get_settings
 from db.database import get_db
 from db.models import User
 from api.middleware.throttle import rate_limit_auth
+from services.journal import masquer_email
 
 settings = get_settings()
 log = structlog.get_logger()
@@ -53,6 +57,11 @@ SESSION_HINT_COOKIE = "bt_session"
 # Le cookie de refresh n'est utile QUE sur les routes d'authentification : le
 # restreindre réduit d'autant sa surface d'exposition.
 REFRESH_COOKIE_PATH = "/api/v1/auth"
+# Nonce posé dans le navigateur qui s'inscrit, et rangé avec le jeton du lien de
+# confirmation. Le clic n'ouvre une session QUE dans ce navigateur-là : sinon un
+# tiers qui inscrit l'adresse d'une victime (pré-détournement) ou lui fait ouvrir
+# un lien à lui (connexion forcée, login CSRF) récupérait une session.
+INSCRIPTION_COOKIE = "bt_inscription"
 
 
 def _cookie_secure() -> bool:
@@ -97,6 +106,21 @@ def _set_auth_cookies(response: Response, tokens: "TokenResponse") -> None:
     )
 
 
+def _reponse_jetons(request: Request, tokens: "TokenResponse") -> "TokenResponse":
+    """Corps de réponse de /login, /refresh, /google.
+
+    Un navigateur n'a que faire des jetons dans le corps : ils sont déjà posés en
+    cookies httpOnly, et le front ne les lit pas. Les y laisser, c'est les rendre
+    lisibles au premier script injecté — précisément ce que les cookies httpOnly
+    devaient empêcher. Un navigateur envoie toujours `Origin` sur ces POST (l'API
+    est sur un autre sous-domaine) ; seuls les clients hors navigateur (scripts,
+    tests) le taisent, et ce sont eux qui ont besoin du jeton dans le corps.
+    """
+    if request.headers.get("origin"):
+        return tokens.model_copy(update={"access_token": None, "refresh_token": None})
+    return tokens
+
+
 def _clear_auth_cookies(response: Response) -> None:
     response.delete_cookie(ACCESS_COOKIE, path="/")
     response.delete_cookie(REFRESH_COOKIE, path=REFRESH_COOKIE_PATH)
@@ -121,6 +145,26 @@ GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v2/userinfo"
 # ─────────────────────────────────────────────
 # Schemas
 # ─────────────────────────────────────────────
+# Lettres (accents compris), espace, trait d'union, apostrophe. Le prénom finit
+# dans des e-mails et des écrans : un champ libre y injectait liens et texte.
+_NOM_RE = re.compile(r"[^\W\d_]+(?:[ '’-]+[^\W\d_]+)*")
+NOM_MAX = 40
+
+
+def valider_nom(v) -> Optional[str]:
+    """Nom ou prénom saisi : None si vide, ValueError si hors règle."""
+    if v is None:
+        return None
+    v = str(v).strip()
+    if not v:
+        return None
+    if len(v) > NOM_MAX or not _NOM_RE.fullmatch(v):
+        raise ValueError(
+            f"Nom ou prénom invalide : {NOM_MAX} caractères au plus, lettres, espaces, "
+            "traits d'union et apostrophes uniquement.")
+    return v
+
+
 class RegisterRequest(BaseModel):
     email: EmailStr
     # Politique mot de passe : 10-128 chars (bcrypt tronque >72 octets → cap),
@@ -141,6 +185,11 @@ class RegisterRequest(BaseModel):
         if v.isalpha() or v.isdigit():
             raise ValueError("Mot de passe trop faible : mélangez lettres et chiffres")
         return v
+
+    @field_validator("nom", "prenom", mode="before")
+    @classmethod
+    def _nom_propre(cls, v):
+        return valider_nom(v)
 
 
 class RegisterResponse(BaseModel):
@@ -163,8 +212,9 @@ class ResendVerificationRequest(BaseModel):
 
 
 class TokenResponse(BaseModel):
-    access_token: str
-    refresh_token: str
+    # Absents (None, donc omis) pour un navigateur : cf. _reponse_jetons.
+    access_token: Optional[str] = None
+    refresh_token: Optional[str] = None
     token_type: str = "bearer"
     plan: str
     user_id: str
@@ -235,6 +285,12 @@ def _verify(password: str, hashed: str) -> bool:
     return pwd_ctx.verify(password, hashed)
 
 
+# Comparé quand le compte n'existe pas : sans bcrypt, la réponse « identifiants
+# incorrects » revenait en quelques ms au lieu de ~200, et le chronomètre disait
+# quelles adresses ont un compte.
+_HASH_FACTICE = pwd_ctx.hash(secrets.token_urlsafe(16))
+
+
 def _create_token(data: dict, expires_delta: timedelta) -> str:
     payload = data.copy()
     now = datetime.now(timezone.utc)
@@ -244,12 +300,15 @@ def _create_token(data: dict, expires_delta: timedelta) -> str:
 
 
 def create_tokens(user_id: str, plan: str) -> TokenResponse:
+    # `jti` : identifiant propre à CHAQUE jeton. Il permet de révoquer une session
+    # précise (déconnexion, refresh déjà consommé) sans toucher aux autres
+    # appareils — la révocation par `pwd_reset_at` coupe, elle, tout le compte.
     access = _create_token(
-        {"sub": user_id, "plan": plan, "type": "access"},
+        {"sub": user_id, "plan": plan, "type": "access", "jti": uuid.uuid4().hex},
         timedelta(minutes=settings.access_token_expire_minutes),
     )
     refresh = _create_token(
-        {"sub": user_id, "type": "refresh"},
+        {"sub": user_id, "type": "refresh", "jti": uuid.uuid4().hex},
         timedelta(days=settings.refresh_token_expire_days),
     )
     return TokenResponse(access_token=access, refresh_token=refresh, plan=plan, user_id=user_id)
@@ -281,8 +340,9 @@ async def get_current_user(
     # vivait 12 h tant que la variable n'atteignait pas le conteneur). Un jeton
     # émis avant un reset de mot de passe restait donc valable une heure entière
     # après ce reset : exactement ce que le reset est censé couper.
-    # Coût : un GET Redis par requête authentifiée, fail-open comme au refresh.
-    if await _refresh_revoked(user_id, payload.get("iat")):
+    # Coût : deux GET Redis par requête authentifiée (reset, puis `jti`), fail-open
+    # comme au refresh.
+    if await _refresh_revoked(user_id, payload.get("iat"), payload.get("jti")):
         raise credentials_exc
 
     result = await db.execute(select(User).where(User.user_id == user_id))
@@ -336,11 +396,17 @@ MESSAGE_NON_CONFIRME = (
 )
 
 
-async def _envoyer_lien_verification(user: User) -> bool:
+async def _envoyer_lien_verification(user: User, nonce: Optional[str] = None) -> bool:
+    return await _envoyer_verification(user.user_id, user.email, nonce)
+
+
+async def _envoyer_verification(user_id: str, email: str, nonce: Optional[str] = None) -> bool:
     """Pose un jeton à usage unique (24 h) et envoie le lien. False si l'envoi a échoué.
 
     Un seul endroit pour ce mail : l'inscription et le renvoi partageaient deux
-    copies du même HTML, qui avaient déjà divergé.
+    copies du même HTML, qui avaient déjà divergé. Valeurs brutes plutôt que
+    l'objet User : l'envoi tourne en tâche de fond, après la fin de la session SQL.
+    Le jeton porte le nonce du navigateur demandeur (cf. INSCRIPTION_COOKIE).
     """
     import redis.asyncio as aioredis
     from services.alerts import send_email
@@ -349,24 +415,45 @@ async def _envoyer_lien_verification(user: User) -> bool:
     try:
         r = aioredis.from_url(settings.redis_url)
         try:
-            await r.setex(f"email_verify:{token}", 86400, user.user_id)
+            await r.setex(f"email_verify:{token}", 86400, json.dumps({"uid": user_id, "n": nonce}))
         finally:
             await r.aclose()
         lien = f"{settings.frontend_url}/verifier-email?token={token}"
         from services.email_compte import verification_adresse
-        html, texte = verification_adresse(user.prenom, lien)
+        html, texte = verification_adresse(None, lien)
         await send_email(
-            to=user.email,
+            to=email,
             subject="BlackTurf — Confirmez votre adresse e-mail",
             html=html, text=texte,
         )
-        log.info("auth.verification.envoyee", user_id=user.user_id)
+        log.info("auth.verification.envoyee", user_id=user_id)
         return True
     except Exception as e:
         # L'inscription n'est PAS annulée pour autant : le compte existe, et le
         # bouton « renvoyer » de l'écran de connexion rattrape une panne d'envoi.
-        log.warning("auth.verification.envoi_echoue", user_id=user.user_id, error=str(e))
+        log.warning("auth.verification.envoi_echoue", user_id=user_id, error=str(e))
         return False
+
+
+def _poser_nonce_inscription(response: Response) -> str:
+    nonce = secrets.token_urlsafe(24)
+    response.set_cookie(
+        INSCRIPTION_COOKIE, nonce, max_age=2 * 86400,
+        httponly=True, secure=_cookie_secure(), samesite="lax", path=REFRESH_COOKIE_PATH,
+    )
+    return nonce
+
+
+def _lire_jeton_verification(brut) -> tuple[str, Optional[str]]:
+    """(user_id, nonce) ; les jetons émis avant le nonce valent un user_id nu."""
+    texte = brut.decode() if isinstance(brut, bytes) else str(brut)
+    try:
+        d = json.loads(texte)
+    except ValueError:
+        return texte, None
+    if isinstance(d, dict) and d.get("uid"):
+        return str(d["uid"]), d.get("n")
+    return texte, None
 
 
 # Compte non confirmé réécrit par une NOUVELLE inscription sur la même adresse. Le mot
@@ -399,6 +486,8 @@ async def _envoyer_lien_reinitialisation(user: User) -> None:
 
 @router.post("/register", response_model=RegisterResponse)
 async def register(body: RegisterRequest,
+                   response: Response,
+                   background: BackgroundTasks,
                    db: AsyncSession = Depends(get_db),
                    _rl: None = Depends(rate_limit_auth)):
     """Crée le compte et envoie le lien — SANS ouvrir de session.
@@ -412,7 +501,9 @@ async def register(body: RegisterRequest,
     """
     from services.adresse_email import AdresseRefusee, controler
     from services.email_verification import email_confirme
+    from services.garde_envoi import envoi_autorise
     from services.pseudo import PseudoRefuse, normaliser, verifier_disponible
+    from services.quota_classement import adresse_canonique
 
     try:
         email = await controler(body.email)
@@ -424,37 +515,62 @@ async def register(body: RegisterRequest,
         select(User).where(func.lower(User.email) == email)
     )).scalar_one_or_none()
 
+    # Boîte réelle : verrous d'envoi et jumeaux se calculent sur elle, sinon
+    # `nom+1@`, `nom+2@`… contournaient le délai entre deux liens.
+    canonique = adresse_canonique(email)
+    # Compte CONFIRMÉ qui détient déjà cette boîte (l'adresse même, ou un alias).
+    titulaire: Optional[User] = None
+    if existant is not None and (email_confirme(existant) or existant.google_id):
+        titulaire = existant
     if existant is None:
         # Même boîte mail sous un autre nom : `nom+2@gmail.com`, `n.o.m@gmail.com`,
         # `nom@googlemail.com` arrivent tous chez `nom@gmail.com`. Sans ce contrôle,
         # une seule boîte ouvrait des comptes à volonté (parrainages en série,
         # quotas gratuits multipliés). Seul un compte CONFIRMÉ réserve la boîte.
-        from services.quota_classement import adresse_canonique
-        canonique = adresse_canonique(email)
         domaine = canonique.rpartition("@")[2]
         domaines = ("gmail.com", "googlemail.com") if domaine == "gmail.com" else (domaine,)
         candidats = (await db.execute(
             select(User).where(or_(*[func.lower(User.email).like(f"%@{d}") for d in domaines]))
         )).scalars().all()
-        jumeau = next((u for u in candidats
-                       if adresse_canonique(u.email) == canonique and (email_confirme(u) or u.google_id)), None)
-        if jumeau is not None:
-            log.info("auth.register.alias_refuse", domaine=domaine)
-            raise HTTPException(status_code=400, detail="Email déjà utilisé")
+        titulaire = next((u for u in candidats
+                          if adresse_canonique(u.email) == canonique and (email_confirme(u) or u.google_id)), None)
+        if titulaire is None:
+            # Jumeau NON confirmé créé dans les dernières 24 h : on le reprend au
+            # lieu d'ouvrir un compte de plus. Sinon chaque alias créait un compte
+            # et envoyait son lien — de quoi inonder une boîte, et la base.
+            limite = datetime.now(timezone.utc) - timedelta(hours=24)
+            existant = next((u for u in candidats
+                             if adresse_canonique(u.email) == canonique and u.created_at is not None
+                             and (u.created_at if u.created_at.tzinfo else
+                                  u.created_at.replace(tzinfo=timezone.utc)) > limite), None)
 
     try:
         pseudo = normaliser(body.pseudo)
-        await verifier_disponible(db, pseudo, existant.user_id if existant else None)
+        # Le pseudo d'un compte confirmé n'est PAS exclu du contrôle : sinon
+        # « adresse + son propre pseudo » passerait là où une adresse libre
+        # prendrait un 409, et trahirait l'existence du compte.
+        exclu = existant.user_id if existant is not None and titulaire is None else None
+        await verifier_disponible(db, pseudo, exclu)
     except PseudoRefuse as e:
         raise HTTPException(status_code=e.code, detail=str(e))
+
+    if titulaire is not None:
+        # ANTI-ÉNUMÉRATION : « Email déjà utilisé » faisait du formulaire un
+        # annuaire des comptes BlackTurf. On répond comme pour une inscription
+        # neuve, et c'est le titulaire qui est prévenu, dans SA boîte. Le hachage
+        # est calculé pour rien : sans lui, la réponse rapide trahirait le compte.
+        _hash(body.password)
+        _poser_nonce_inscription(response)
+        if await envoi_autorise("inscription_existant", adresse_canonique(titulaire.email), 3600):
+            background.add_task(_prevenir_titulaire, titulaire.user_id, titulaire.email, titulaire.prenom)
+        log.info("auth.register.adresse_deja_inscrite", user_id=titulaire.user_id)
+        return _reponse_verification(email)
 
     if existant is not None:
         # Un compte jamais confirmé ne prouve RIEN : celui qui l'a ouvert n'a
         # pas montré qu'il relevait cette boîte. Le laisser réserver l'adresse
         # interdirait au véritable titulaire de s'inscrire un jour. On réécrit
         # donc la tentative en attente, et le lien repart — vers la vraie boîte.
-        if email_confirme(existant) or existant.google_id:
-            raise HTTPException(status_code=400, detail="Email déjà utilisé")
         existant.hashed_password = _hash(body.password)
         existant.nom = body.nom or existant.nom
         existant.prenom = body.prenom or existant.prenom
@@ -471,11 +587,11 @@ async def register(body: RegisterRequest,
             await r.setex(_cle_reprise(existant.user_id), 2 * 86400, "1")
         finally:
             await r.aclose()
-        # Un lien toutes les 2 min au plus par adresse : sinon réinscrire en boucle
+        # Un lien toutes les 2 min au plus par boîte : sinon réinscrire en boucle
         # la même adresse faisait de ce formulaire un canon à e-mails.
-        from services.garde_envoi import envoi_autorise
-        if await envoi_autorise("verif_inscription", email, 120):
-            await _envoyer_lien_verification(existant)
+        nonce = _poser_nonce_inscription(response)
+        if await envoi_autorise("verif_inscription", canonique, 120, plafond_heure=300):
+            background.add_task(_envoyer_verification, existant.user_id, existant.email, nonce)
         log.info("auth.register.reprise_non_confirme", user_id=existant.user_id)
         return _reponse_verification(email)
 
@@ -498,10 +614,30 @@ async def register(body: RegisterRequest,
         await db.rollback()
         raise HTTPException(status_code=409, detail="Ce pseudo est déjà pris.")
     await db.refresh(user)
-    log.info("auth.register", user_id=user.user_id, email=user.email)
+    log.info("auth.register", user_id=user.user_id, email=masquer_email(user.email))
 
-    await _envoyer_lien_verification(user)
+    # Envoi en tâche de fond : le temps de réponse ne dit plus si un compte
+    # existait (cf. branche `titulaire`).
+    nonce = _poser_nonce_inscription(response)
+    if await envoi_autorise("verif_inscription", canonique, 120, plafond_heure=300):
+        background.add_task(_envoyer_verification, user.user_id, user.email, nonce)
     return _reponse_verification(email)
+
+
+async def _prevenir_titulaire(user_id: str, email: str, prenom: Optional[str]) -> None:
+    """Prévient le titulaire qu'une inscription a été tentée avec son adresse. Ne
+    lève jamais : la réponse doit rester identique à une inscription neuve."""
+    try:
+        from services.alerts import send_email
+        from services.email_compte import inscription_adresse_existante
+        html, texte = inscription_adresse_existante(prenom)
+        await send_email(
+            to=email,
+            subject="BlackTurf — Vous avez déjà un compte",
+            html=html, text=texte,
+        )
+    except Exception as e:  # noqa: BLE001
+        log.warning("auth.register.avis_titulaire_echoue", user_id=user_id, error=str(e))
 
 
 async def _rattacher_parrain(user: User, code: Optional[str], db: AsyncSession) -> None:
@@ -524,8 +660,9 @@ def _reponse_verification(email: str) -> RegisterResponse:
     )
 
 
-@router.post("/login", response_model=TokenResponse)
+@router.post("/login", response_model=TokenResponse, response_model_exclude_none=True)
 async def login(
+    request: Request,
     response: Response,
     form: OAuth2PasswordRequestForm = Depends(),
     db: AsyncSession = Depends(get_db),
@@ -541,7 +678,10 @@ async def login(
         select(User).where(func.lower(User.email) == normaliser(form.username))
     )
     user = result.scalar_one_or_none()
-    if not user or not user.hashed_password or not _verify(form.password, user.hashed_password):
+    if not user or not user.hashed_password:
+        _verify(form.password, _HASH_FACTICE)  # même durée qu'un vrai compte
+        raise HTTPException(status_code=401, detail="Identifiants incorrects")
+    if not _verify(form.password, user.hashed_password):
         raise HTTPException(status_code=401, detail="Identifiants incorrects")
     if not user.is_active:
         raise HTTPException(status_code=403, detail="Compte désactivé")
@@ -560,18 +700,35 @@ async def login(
     log.info("auth.login", user_id=user.user_id)
     tokens = create_tokens(user.user_id, user.plan)
     _set_auth_cookies(response, tokens)
-    return tokens
+    return _reponse_jetons(request, tokens)
 
 
 @router.post("/logout")
-async def logout(response: Response):
-    """Efface les cookies de session. Le front ne peut pas le faire lui-même :
-    des cookies httpOnly sont, par construction, hors de portée de JavaScript."""
+async def logout(
+    request: Request,
+    response: Response,
+    header_token: Optional[str] = Depends(oauth2_scheme),
+):
+    """Efface les cookies de session ET révoque les jetons présentés.
+
+    Effacer les cookies ne suffisait pas : un jeton copié avant la déconnexion
+    (poste partagé, extension, sauvegarde du profil navigateur) restait valable
+    jusqu'à son expiration — 7 jours pour le refresh. On révoque ces jetons-là
+    seulement (par `jti`) : les autres appareils du compte restent connectés.
+    """
+    for jeton in (request.cookies.get(REFRESH_COOKIE), request.cookies.get(ACCESS_COOKIE), header_token):
+        if not jeton:
+            continue
+        try:
+            payload = jwt.decode(jeton, settings.secret_key, algorithms=[settings.jwt_algorithm])
+        except JWTError:
+            continue  # expiré ou falsifié : rien à révoquer
+        await _revoquer_jeton(payload, "1")
     _clear_auth_cookies(response)
     return {"ok": True}
 
 
-@router.post("/refresh", response_model=TokenResponse)
+@router.post("/refresh", response_model=TokenResponse, response_model_exclude_none=True)
 async def refresh(
     request: Request,
     response: Response,
@@ -596,20 +753,52 @@ async def refresh(
     # rejeté (un token volé ne survit pas au reset). Le même contrôle s'applique
     # désormais aussi aux jetons d'accès, dans `get_current_user` : les laisser
     # passer laissait survivre une session révoquée pendant toute leur durée de vie.
-    if await _refresh_revoked(user_id, payload.get("iat")):
+    if await _refresh_revoked(user_id, payload.get("iat"), payload.get("jti")):
         raise HTTPException(status_code=401, detail="Session expirée, reconnectez-vous")
 
     result = await db.execute(select(User).where(User.user_id == user_id))
     user = result.scalar_one_or_none()
     if not user or not user.is_active:
         raise HTTPException(status_code=401, detail="Utilisateur introuvable")
+    # ROTATION : le refresh présenté est consommé. Un jeton volé rejoué après le
+    # titulaire (ou l'inverse) ne rouvre plus de session — passé un court délai
+    # de grâce, pour que deux onglets qui rafraîchissent au même instant avec le
+    # même cookie ne se déconnectent pas l'un l'autre. `nx` : le délai part du
+    # PREMIER usage, rejouer le jeton ne le prolonge pas.
+    await _revoquer_jeton(payload, f"t{int(time.time())}", nx=True)
     tokens = create_tokens(user.user_id, user.plan)
     _set_auth_cookies(response, tokens)
-    return tokens
+    return _reponse_jetons(request, tokens)
 
 
-async def _refresh_revoked(user_id: Optional[str], iat) -> bool:
-    """True si le token (émis à `iat`) précède le dernier reset de mot de passe.
+# Révocation à l'unité (par `jti`) : « 1 » = révoqué tout de suite (déconnexion),
+# « t<horodatage> » = refresh consommé par rotation, encore accepté pendant
+# GRACE_ROTATION_S. Les jetons émis avant l'ajout du `jti` n'en ont pas : ils
+# restent valables jusqu'à leur expiration naturelle.
+CLE_JETON_REVOQUE = "jeton_revoque:{}"
+GRACE_ROTATION_S = 60
+
+
+async def _revoquer_jeton(payload: dict, valeur: str, nx: bool = False) -> None:
+    """Inscrit le `jti` du jeton dans Redis jusqu'à son expiration. Ne lève jamais :
+    une panne Redis laisse le jeton vivre, comme avant (fail-open assumé)."""
+    jti, exp = payload.get("jti"), payload.get("exp")
+    if not jti or not exp:
+        return
+    reste = int(exp) - int(time.time())
+    if reste <= 0:
+        return
+    from db.redis_client import get_redis
+    try:
+        r = await get_redis()
+        await r.set(CLE_JETON_REVOQUE.format(jti), valeur, ex=reste, nx=nx)
+    except Exception as e:  # noqa: BLE001
+        log.warning("auth.revocation_non_ecrite", error=str(e))
+
+
+async def _refresh_revoked(user_id: Optional[str], iat, jti: Optional[str] = None) -> bool:
+    """True si le jeton est révoqué : émis (à `iat`) avant le dernier reset de mot
+    de passe, ou révoqué à l'unité par son `jti` (déconnexion, rotation).
 
     Utilise le client Redis PARTAGÉ (`db.redis_client`) et non une connexion
     ouverte puis fermée à chaque appel : acceptable tant que seul le refresh
@@ -622,18 +811,31 @@ async def _refresh_revoked(user_id: Optional[str], iat) -> bool:
     try:
         r = await get_redis()
         ts = await r.get(f"pwd_reset_at:{user_id}")
-    except Exception:
-        return False  # fail-open : panne Redis ne bloque pas une session légitime
-    if not ts:
+        marque = await r.get(CLE_JETON_REVOQUE.format(jti)) if jti else None
+    except Exception as e:  # noqa: BLE001
+        # fail-open : une panne Redis ne doit pas déconnecter tous les abonnés.
+        log.warning("auth.revocation_illisible", error=str(e))
         return False
-    try:
-        return int(iat) < int(ts)
-    except (TypeError, ValueError):
-        return False
+    if ts:
+        try:
+            if int(iat) < int(ts):
+                return True
+        except (TypeError, ValueError):
+            pass
+    if isinstance(marque, bytes):
+        marque = marque.decode(errors="replace")
+    if marque == "1":
+        return True
+    if isinstance(marque, str) and marque.startswith("t"):
+        try:
+            return time.time() - int(marque[1:]) > GRACE_ROTATION_S
+        except ValueError:
+            return False
+    return False
 
 
-@router.post("/google", response_model=TokenResponse)
-async def google_oauth(body: GoogleCallbackRequest, response: Response,
+@router.post("/google", response_model=TokenResponse, response_model_exclude_none=True)
+async def google_oauth(body: GoogleCallbackRequest, request: Request, response: Response,
                        db: AsyncSession = Depends(get_db)):
     """Échange un code Google OAuth contre des tokens BlackTurf."""
     google_client_id = getattr(settings, "google_client_id", "")
@@ -702,10 +904,10 @@ async def google_oauth(body: GoogleCallbackRequest, response: Response,
     user.last_login_at = datetime.now(timezone.utc)
     await db.commit()
     await db.refresh(user)
-    log.info("auth.google", user_id=user.user_id, email=user.email)
+    log.info("auth.google", user_id=user.user_id, email=masquer_email(user.email))
     tokens = create_tokens(user.user_id, user.plan)
     _set_auth_cookies(response, tokens)
-    return tokens
+    return _reponse_jetons(request, tokens)
 
 
 @router.get("/me", response_model=UserMeResponse)
@@ -803,7 +1005,10 @@ async def update_me(
         else:  # nom / prenom
             if v is None:
                 continue
-            updates[k] = str(v).strip()[:100]
+            try:
+                updates[k] = valider_nom(v)
+            except ValueError as e:
+                raise HTTPException(status_code=422, detail=str(e))
     for k, v in updates.items():
         setattr(user, k, v)
     try:
@@ -819,6 +1024,7 @@ async def update_me(
 
 @router.post("/resend-verification")
 async def resend_verification(
+    response: Response,
     body: Optional[ResendVerificationRequest] = None,
     jeton: Optional[str] = Depends(_access_token),
     db: AsyncSession = Depends(get_db),
@@ -848,8 +1054,11 @@ async def resend_verification(
         except JWTError:
             user = None
 
+    # Nonce posé quoi qu'il arrive (réponse identique) : le nouveau lien n'ouvrira
+    # une session que dans CE navigateur, celui qui l'a demandé.
+    nonce = _poser_nonce_inscription(response)
     if user is not None and not user.email_verified and await _renvoi_autorise(user):
-        await _envoyer_lien_verification(user)
+        await _envoyer_lien_verification(user, nonce)
     return {"ok": True}
 
 
@@ -869,34 +1078,44 @@ async def _renvoi_autorise(user: User) -> bool:
 
 
 @router.get("/verify-email")
-async def verify_email(token: str, response: Response, db: AsyncSession = Depends(get_db)):
-    """Confirme l'adresse, puis OUVRE la session.
+async def verify_email(token: str, request: Request, response: Response,
+                       db: AsyncSession = Depends(get_db)):
+    """Confirme l'adresse, puis OUVRE la session — dans le navigateur qui s'est
+    inscrit seulement.
 
     L'inscription ne connecte plus : si ce clic ne connectait pas non plus, le
-    nouvel inscrit devrait ressaisir son mot de passe pour rien. Le jeton est à
-    usage unique et n'a pu être lu que dans la boîte visée — la preuve vaut bien
-    une saisie de mot de passe.
+    nouvel inscrit devrait ressaisir son mot de passe pour rien. Mais le jeton seul
+    ne prouve que la boîte, pas le mot de passe : un tiers pouvait inscrire
+    l'adresse d'une victime avec SON mot de passe, attendre le clic, puis se
+    connecter (pré-détournement) ; ou faire ouvrir à quelqu'un un lien de SON
+    compte à lui (connexion forcée). Hors du navigateur d'inscription (nonce
+    absent ou différent), l'adresse est confirmée, sans session, et un compte
+    jamais confirmé choisit son mot de passe par lien.
     """
     import redis.asyncio as aioredis
     r = aioredis.from_url(settings.redis_url)
     try:
-        user_id = await r.get(f"email_verify:{token}")
-        if not user_id:
+        brut = await r.get(f"email_verify:{token}")
+        if not brut:
             raise HTTPException(status_code=400, detail="Token expiré ou invalide")
         await r.delete(f"email_verify:{token}")
-        reprise = await r.get(_cle_reprise(user_id.decode()))
+        uid, nonce = _lire_jeton_verification(brut)
+        reprise = await r.get(_cle_reprise(uid))
     finally:
         await r.aclose()
 
-    result = await db.execute(select(User).where(User.user_id == user_id.decode()))
+    result = await db.execute(select(User).where(User.user_id == uid))
     user = result.scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=404, detail="Utilisateur introuvable")
 
+    cookie = request.cookies.get(INSCRIPTION_COOKIE)
+    meme_navigateur = bool(nonce) and bool(cookie) and secrets.compare_digest(str(nonce), cookie)
     deja_confirme = bool(user.email_verified)
-    if reprise and not deja_confirme:
-        # Inscrit plusieurs fois avant confirmation : on ne sait pas qui a choisi le
-        # mot de passe en base (cf. _cle_reprise). L'adresse est prouvée, pas le mot
+    if (reprise or not meme_navigateur) and not deja_confirme:
+        # Inscrit plusieurs fois avant confirmation, ou lien ouvert ailleurs que
+        # dans le navigateur d'inscription : on ne sait pas qui a choisi le mot de
+        # passe en base (cf. _cle_reprise). L'adresse est prouvée, pas le mot
         # de passe : on l'invalide et le titulaire en choisit un par lien.
         user.email_verified = True
         user.hashed_password = _hash(secrets.token_urlsafe(32))
@@ -917,20 +1136,24 @@ async def verify_email(token: str, response: Response, db: AsyncSession = Depend
                        "un lien vient de vous être envoyé par e-mail.",
         }
     user.email_verified = True
-    user.last_login_at = datetime.now(timezone.utc)
+    if meme_navigateur:
+        user.last_login_at = datetime.now(timezone.utc)
     await db.commit()
-    log.info("auth.email_verified", user_id=user.user_id)
+    log.info("auth.email_verified", user_id=user.user_id, session=meme_navigateur)
     if not deja_confirme:
         from services.parrainage import filleul_confirme
         await filleul_confirme(user, db)
-    if user.is_active:
+    # Adresse déjà confirmée et lien ouvert ailleurs : rien à faire, pas de session.
+    if user.is_active and meme_navigateur:
         _set_auth_cookies(response, create_tokens(user.user_id, user.plan))
+        response.delete_cookie(INSCRIPTION_COOKIE, path=REFRESH_COOKIE_PATH)
     return {"ok": True, "message": "Adresse e-mail confirmée"}
 
 
 @router.post("/forgot-password")
 async def forgot_password(
     body: dict,
+    background: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     _rl: None = Depends(rate_limit_auth),
 ):
@@ -951,7 +1174,10 @@ async def forgot_password(
     if not await envoi_autorise("pwd_reset", user.user_id, 900):
         return {"ok": True}
 
-    await _envoyer_lien_reinitialisation(user)
+    # En tâche de fond : le temps de réponse ne doit pas dire si le compte existe.
+    from types import SimpleNamespace
+    background.add_task(_envoyer_lien_reinitialisation,
+                        SimpleNamespace(user_id=user.user_id, email=user.email, prenom=user.prenom))
     log.info("auth.forgot_password", user_id=user.user_id)
     return {"ok": True}
 

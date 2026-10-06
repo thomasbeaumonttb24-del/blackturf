@@ -1,3 +1,4 @@
+import { apiServeurV1, initServeur } from "@/lib/apiServeur";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { ImageResponse } from "next/og";
@@ -21,7 +22,9 @@ import {
  */
 export const revalidate = 600;
 
-const API = (process.env.NEXT_PUBLIC_API_URL || "https://api.blackturf.fr") + "/api/v1";
+// Lecture serveur : réseau Docker + en-tête interne en production (cf. lib/apiServeur.ts),
+// pour ne plus partager le quota par IP de nginx avec tout le rendu serveur du site.
+const API = apiServeurV1();
 
 // Le plan d'ensemble fait 3104 × 2700. On le sert réduit : c'est un aperçu qu'on
 // regarde sur un écran, pas un fichier à publier.
@@ -56,7 +59,7 @@ async function donnees(semaine: string | null): Promise<DonneesMosaique> {
     const url = new URL(`${API}/stats/bilan-semaine`);
     if (semaine) url.searchParams.set("fin", semaine);
     // Sans cache : l'aperçu doit montrer ce qui PARTIRA, pas une réponse périmée.
-    const res = await fetch(url.toString(), { cache: "no-store" });
+    const res = await fetch(url.toString(), initServeur({ cache: "no-store" }));
     if (res.ok) {
       const d = await res.json();
       const a = d.analyse ?? {};

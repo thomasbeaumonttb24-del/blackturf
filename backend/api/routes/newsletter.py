@@ -162,8 +162,10 @@ async def inscription(
     # connexion et de paiement — pouvait être épuisé. La réponse reste identique
     # (règle 1) : rien ne dit à l'appelant qu'il a été freiné.
     from services.garde_envoi import envoi_autorise
+    from services.quota_classement import adresse_canonique
+    # Verrou sur la boîte réelle : les alias (`+x`, points Gmail) y arrivent tous.
     if not await _ip_autorisee(request) or not await envoi_autorise(
-        "newsletter_confirmation", email, 3600, plafond_heure=300,
+        "newsletter_confirmation", adresse_canonique(email), 3600, plafond_heure=300,
     ):
         await db.commit()
         return reponse

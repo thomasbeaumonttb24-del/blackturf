@@ -1,3 +1,4 @@
+import { apiServeurV1, initServeur } from "@/lib/apiServeur";
 import {
   fetchProgramme,
   fetchResultats,
@@ -44,7 +45,9 @@ export interface Publication {
   photos_restantes?: number;
 }
 
-const API = (process.env.NEXT_PUBLIC_API_URL || "https://api.blackturf.fr") + "/api/v1";
+// Lecture serveur : réseau Docker + en-tête interne en production (cf. lib/apiServeur.ts),
+// pour ne plus partager le quota par IP de nginx avec tout le rendu serveur du site.
+const API = apiServeurV1();
 
 interface BilanJour {
   totalRetour: number;
@@ -71,9 +74,9 @@ interface BilanJour {
  */
 async function bilanDuJour(jour: string): Promise<BilanJour | null> {
   try {
-    const res = await fetch(`${API}/stats/meilleurs-plans-jour?jour=${jour}`, {
+    const res = await fetch(`${API}/stats/meilleurs-plans-jour?jour=${jour}`, initServeur({
       next: { revalidate: 600 },
-    });
+    }));
     if (!res.ok) return null;
     const d = await res.json();
     const a = d.analyse ?? {};

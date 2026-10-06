@@ -1,10 +1,34 @@
 // Server-side SEO data fetchers (no axios, no window). Used by the sitemap routes + server
 // page wrappers (programme, course). Plain fetch + ISR cache so crawlers get real HTML
-// without hammering the API. Best-effort: any failure returns empty so a page never 500s
-// on SEO data.
+// without hammering the API. Best-effort for definitive answers (404, unreadable JSON):
+// those return empty. Transient API failures (429/5xx/unreachable) now THROW — see below.
 import type { Metadata } from "next";
+import {
+  apiServeurV1,
+  initServeur,
+  leverSiTransitoire,
+  relancerSiTransitoire,
+} from "@/lib/apiServeur";
 
-const API = (process.env.NEXT_PUBLIC_API_URL || "https://api.blackturf.fr") + "/api/v1";
+// Lectures SERVEUR : par le réseau Docker et avec l'en-tête interne en production (cf.
+// lib/apiServeur.ts). Les quelques composants client qui importent ce module n'y
+// prennent que des utilitaires de formatage : côté navigateur, l'adresse retombe sur
+// l'URL publique et aucun secret n'est joint.
+const API = apiServeurV1();
+
+/*
+ * 429, 5xx et API injoignable LÈVENT au lieu de rendre `null` / `[]` (les fetchers qui
+ * appellent `leverSiTransitoire` / `relancerSiTransitoire`). Renvoyer vide produisait une page vide que Next gardait ensuite en cache
+ * ISR toute la durée de revalidation — c'est ce qu'exploitait un client en boucle qui
+ * vidait le quota du rendu serveur. Une revalidation qui lève laisse Next servir la
+ * dernière bonne version. Les 404 gardent leur sens (« n'existe pas »), et pendant
+ * `next build` rien ne lève (cf. leverSiTransitoire).
+ *
+ * Restent volontairement best-effort : fetchCourseDetail / fetchCourseResult (leur état
+ * « error » rend déjà la coquille client, qui recharge les données dans le navigateur),
+ * fetchValueBetsCompteur (un compteur accessoire ne doit pas bloquer /programme) et
+ * fetchPalmaresPublic (rechargé côté client, et borné par son propre délai).
+ */
 
 /* ───────────────────────────── Open Graph ─────────────────────────────
  * Next ne FUSIONNE pas `openGraph` : dès qu'une page déclare cet objet, il REMPLACE
@@ -99,22 +123,26 @@ export interface SeoProgramme {
 export async function fetchProgramme(jour?: string): Promise<SeoProgramme | null> {
   try {
     const url = `${API}/programme${jour ? `?jour=${encodeURIComponent(jour)}` : ""}`;
-    const res = await fetch(url, { next: { revalidate: 300 } });
+    const res = await fetch(url, initServeur({ next: { revalidate: 300 } }));
+    leverSiTransitoire(res, url);
     if (!res.ok) return null;
     return (await res.json()) as SeoProgramme;
-  } catch {
+  } catch (e) {
+    relancerSiTransitoire(e);
     return null;
   }
 }
 
 export async function fetchCourse(id: string): Promise<SeoCourse | null> {
   try {
-    const res = await fetch(`${API}/courses/${encodeURIComponent(id)}`, {
+    const res = await fetch(`${API}/courses/${encodeURIComponent(id)}`, initServeur({
       next: { revalidate: 300 },
-    });
+    }));
+    leverSiTransitoire(res, `${API}/courses/${encodeURIComponent(id)}`);
     if (!res.ok) return null;
     return (await res.json()) as SeoCourse;
-  } catch {
+  } catch (e) {
+    relancerSiTransitoire(e);
     return null;
   }
 }
@@ -129,9 +157,9 @@ export type CourseFetch =
 
 export async function fetchCourseResult(id: string): Promise<CourseFetch> {
   try {
-    const res = await fetch(`${API}/courses/${encodeURIComponent(id)}`, {
+    const res = await fetch(`${API}/courses/${encodeURIComponent(id)}`, initServeur({
       next: { revalidate: 300 },
-    });
+    }));
     if (res.status === 404) return { status: "notfound" };
     if (!res.ok) return { status: "error" };
     return { status: "ok", course: (await res.json()) as SeoCourse };
@@ -412,9 +440,9 @@ export type CourseDetailFetch =
 /** Détail complet (avec partants) pour le rendu serveur de la fiche course. */
 export async function fetchCourseDetail(id: string): Promise<CourseDetailFetch> {
   try {
-    const res = await fetch(`${API}/courses/${encodeURIComponent(id)}`, {
+    const res = await fetch(`${API}/courses/${encodeURIComponent(id)}`, initServeur({
       next: { revalidate: 120 },
-    });
+    }));
     if (res.status === 404) return { status: "notfound" };
     if (!res.ok) return { status: "error" };
     return { status: "ok", course: (await res.json()) as SeoCourseDetail };
@@ -444,12 +472,14 @@ export interface SeoResultats {
 /** Arrivée officielle + rapports PMU. null = pas encore publiée (course non courue). */
 export async function fetchResultats(id: string): Promise<SeoResultats | null> {
   try {
-    const res = await fetch(`${API}/courses/${encodeURIComponent(id)}/resultats`, {
+    const res = await fetch(`${API}/courses/${encodeURIComponent(id)}/resultats`, initServeur({
       next: { revalidate: 120 },
-    });
+    }));
+    leverSiTransitoire(res, `${API}/courses/${encodeURIComponent(id)}/resultats`);
     if (!res.ok) return null;
     return (await res.json()) as SeoResultats;
-  } catch {
+  } catch (e) {
+    relancerSiTransitoire(e);
     return null;
   }
 }
@@ -490,13 +520,15 @@ export interface SeoApercuCourse {
 
 export async function fetchApercuCourse(id: string): Promise<SeoApercuCourse | null> {
   try {
-    const res = await fetch(`${API}/courses/${encodeURIComponent(id)}/apercu`, {
+    const res = await fetch(`${API}/courses/${encodeURIComponent(id)}/apercu`, initServeur({
       next: { revalidate: 120 },
-    });
+    }));
+    leverSiTransitoire(res, `${API}/courses/${encodeURIComponent(id)}/apercu`);
     if (!res.ok) return null;
     const d = (await res.json()) as SeoApercuCourse;
     return d?.disponible ? d : null;
-  } catch {
+  } catch (e) {
+    relancerSiTransitoire(e);
     return null;
   }
 }
@@ -511,9 +543,9 @@ export async function fetchValueBetsCompteur(
   niveauMin = 3,
 ): Promise<{ count: number; niveau_min: number } | null> {
   try {
-    const res = await fetch(`${API}/value-bets/compteur?niveau_min=${niveauMin}`, {
+    const res = await fetch(`${API}/value-bets/compteur?niveau_min=${niveauMin}`, initServeur({
       next: { revalidate: 60 },
-    });
+    }));
     if (!res.ok) return null;
     return (await res.json()) as { count: number; niveau_min: number };
   } catch {
@@ -549,9 +581,10 @@ export async function fetchSeoIndex(
   revalidate = 3600,
 ): Promise<{ courses: SeoIndexCourse[]; jours: string[]; derniereMaj: string | null }> {
   try {
-    const res = await fetch(`${API}/seo/index?debut=${debut}&fin=${fin}`, {
+    const res = await fetch(`${API}/seo/index?debut=${debut}&fin=${fin}`, initServeur({
       next: { revalidate },
-    });
+    }));
+    leverSiTransitoire(res, `${API}/seo/index?debut=${debut}&fin=${fin}`);
     if (!res.ok) return { courses: [], jours: [], derniereMaj: null };
     const d = (await res.json()) as {
       courses?: SeoIndexCourse[];
@@ -563,7 +596,8 @@ export async function fetchSeoIndex(
       jours: d.jours ?? [],
       derniereMaj: d.derniere_maj ?? null,
     };
-  } catch {
+  } catch (e) {
+    relancerSiTransitoire(e);
     return { courses: [], jours: [], derniereMaj: null };
   }
 }
@@ -581,11 +615,13 @@ export async function fetchArriveesDuJour(
   revalidate = 300,
 ): Promise<Record<string, SeoResultats> | null> {
   try {
-    const res = await fetch(`${API}/seo/arrivees?jour=${jour}`, { next: { revalidate } });
+    const res = await fetch(`${API}/seo/arrivees?jour=${jour}`, initServeur({ next: { revalidate } }));
+    leverSiTransitoire(res, `${API}/seo/arrivees?jour=${jour}`);
     if (!res.ok) return null;
     const d = (await res.json()) as { arrivees?: Record<string, SeoResultats> };
     return d.arrivees ?? {};
-  } catch {
+  } catch (e) {
+    relancerSiTransitoire(e);
     return null;
   }
 }
@@ -627,11 +663,13 @@ export async function fetchVerdictsDuJour(
   revalidate = 300,
 ): Promise<Record<string, SeoVerdict> | null> {
   try {
-    const res = await fetch(`${API}/seo/verdicts?jour=${jour}`, { next: { revalidate } });
+    const res = await fetch(`${API}/seo/verdicts?jour=${jour}`, initServeur({ next: { revalidate } }));
+    leverSiTransitoire(res, `${API}/seo/verdicts?jour=${jour}`);
     if (!res.ok) return null;
     const d = (await res.json()) as { verdicts?: Record<string, SeoVerdict> };
     return d.verdicts ?? {};
-  } catch {
+  } catch (e) {
+    relancerSiTransitoire(e);
     return null;
   }
 }
@@ -678,10 +716,12 @@ export async function fetchProfilLieux(): Promise<{
   disciplines: Record<string, ProfilDiscipline>;
 } | null> {
   try {
-    const res = await fetch(`${API}/seo/profil-lieux`, { next: { revalidate: 21600 } });
+    const res = await fetch(`${API}/seo/profil-lieux`, initServeur({ next: { revalidate: 21600 } }));
+    leverSiTransitoire(res, `${API}/seo/profil-lieux`);
     if (!res.ok) return null;
     return await res.json();
-  } catch {
+  } catch (e) {
+    relancerSiTransitoire(e);
     return null;
   }
 }
@@ -689,11 +729,13 @@ export async function fetchProfilLieux(): Promise<{
 /** Toutes les journées portant une arrivée, de la plus récente à la plus ancienne. */
 export async function fetchJoursResultats(): Promise<Array<{ jour: string; nb_courses: number }>> {
   try {
-    const res = await fetch(`${API}/seo/jours-resultats`, { next: { revalidate: 1800 } });
+    const res = await fetch(`${API}/seo/jours-resultats`, initServeur({ next: { revalidate: 1800 } }));
+    leverSiTransitoire(res, `${API}/seo/jours-resultats`);
     if (!res.ok) return [];
     const d = (await res.json()) as { jours?: Array<{ jour: string; nb_courses: number }> };
     return d.jours ?? [];
-  } catch {
+  } catch (e) {
+    relancerSiTransitoire(e);
     return [];
   }
 }
@@ -763,13 +805,16 @@ export interface SeoTrackRecord {
 }
 
 /** Chiffres du palmarès, servis par un cache « stale-while-revalidate » côté API
- *  (128 ms mesurés en prod). Best-effort : la page reste valable sans eux. */
+ *  (128 ms mesurés en prod). Best-effort sur une réponse définitive ; une panne
+ *  passagère (429/5xx/injoignable) LÈVE, pour garder en cache la dernière bonne page. */
 export async function fetchTrackRecord(): Promise<SeoTrackRecord | null> {
   try {
-    const res = await fetch(`${API}/stats/track-record`, { next: { revalidate: 60 } });
+    const res = await fetch(`${API}/stats/track-record`, initServeur({ next: { revalidate: 60 } }));
+    leverSiTransitoire(res, `${API}/stats/track-record`);
     if (!res.ok) return null;
     return (await res.json()) as SeoTrackRecord;
-  } catch {
+  } catch (e) {
+    relancerSiTransitoire(e);
     return null;
   }
 }
@@ -786,7 +831,7 @@ export async function fetchTrackRecord(): Promise<SeoTrackRecord | null> {
 export async function fetchPalmaresPublic(): Promise<Record<string, unknown> | null> {
   const lecture = (async () => {
     try {
-      const res = await fetch(`${API}/stats/palmares-public`, { next: { revalidate: 60 } });
+      const res = await fetch(`${API}/stats/palmares-public`, initServeur({ next: { revalidate: 60 } }));
       if (!res.ok) return null;
       return (await res.json()) as Record<string, unknown>;
     } catch {

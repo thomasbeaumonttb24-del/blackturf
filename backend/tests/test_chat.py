@@ -115,7 +115,12 @@ async def test_signalement_puis_bannissement(client, inscrire, admin_headers):
     ha = await _membre(inscrire, "g@blackturf.fr", "Fauteur", client)
     hb = await _membre(inscrire, "h@blackturf.fr", "Temoin", client)
     msg = (await client.post(f"{BASE}/messages", json={"contenu": "pub casino"}, headers=ha)).json()
-    auteur_id = msg["auteur"]["user_id"]
+    # Le salon ne voit qu'un alias opaque, jamais le user_id réel ; la modération
+    # bannit pourtant à partir de lui.
+    auteur_id = msg["auteur"]["id"]
+    assert "user_id" not in msg["auteur"]
+    moi = (await client.get(f"{BASE}/moi", headers=ha)).json()
+    assert moi["auteur_id"] == auteur_id and moi["user_id"] != auteur_id
 
     # Pas d'auto-signalement ; signaler deux fois ne crée qu'un signalement.
     assert (await client.post(f"{BASE}/messages/{msg['message_id']}/signaler", json={}, headers=ha)).status_code == 422
@@ -142,8 +147,9 @@ async def test_signalement_puis_bannissement(client, inscrire, admin_headers):
     assert (await client.get(f"{BASE}/moderation/signalements", headers=admin_headers)).json()["signalements"] == []
 
     bannis = (await client.get(f"{BASE}/moderation/bannis", headers=admin_headers)).json()["bannis"]
-    assert [b["user_id"] for b in bannis] == [auteur_id]
+    assert [b["user_id"] for b in bannis] == [moi["user_id"]]
 
-    r = await client.put(f"{BASE}/moderation/bannis/{auteur_id}", json={"banni": False}, headers=admin_headers)
+    # La levée part de la liste des bannis (admin), qui porte le user_id réel.
+    r = await client.put(f"{BASE}/moderation/bannis/{moi['user_id']}", json={"banni": False}, headers=admin_headers)
     assert r.status_code == 200
     assert (await client.get(f"{BASE}/messages", headers=ha)).status_code == 200

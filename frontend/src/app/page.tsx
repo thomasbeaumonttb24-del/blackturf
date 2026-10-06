@@ -21,6 +21,12 @@ import { DefiClassementLive } from "@/components/defi/DefiClassementLive";
 import { DefiConcept } from "@/components/defi/DefiConcept";
 import { HeroStats } from "@/components/home/HeroStats";
 import { fetchPalmaresPublic } from "@/lib/seo";
+import {
+  apiServeurOrigine,
+  initServeur,
+  leverSiTransitoire,
+  relancerSiTransitoire,
+} from "@/lib/apiServeur";
 import { NewsletterForm } from "@/components/newsletter/NewsletterForm";
 
 // Le canonical n'est plus hérité de la racine (il y désignait "/" pour TOUTES les pages) :
@@ -186,7 +192,8 @@ function buildFaq(tr: TrackRecord | null): Array<{ q: string; r: string }> {
 }
 
 async function fetchTrackRecord(): Promise<TrackRecord | null> {
-  const base = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+  // Lecture serveur (cf. lib/apiServeur.ts) : réseau Docker + en-tête interne en prod.
+  const base = apiServeurOrigine("http://localhost:8000");
   try {
     // 60 s, comme /track-record (`revalidate` de son layout). À 3 600 s, l'accueil
     // gardait pendant une heure les chiffres figés au build alors que le palmarès
@@ -195,7 +202,11 @@ async function fetchTrackRecord(): Promise<TrackRecord | null> {
     // phrase. L'API sert ce calcul depuis son propre cache Redis, le raccourcir ne
     // coûte donc rien à la base. L'API recalcule dans la minute qui suit chaque
     // course intégrée : garder la page plus longtemps annulerait ce gain.
-    const res = await fetch(`${base}/api/v1/stats/track-record`, { next: { revalidate: 60 } });
+    const url = `${base}/api/v1/stats/track-record`;
+    const res = await fetch(url, initServeur({ next: { revalidate: 60 } }));
+    // 429/5xx : lever plutôt que rendre un hero vide que l'ISR garderait en cache —
+    // la revalidation échoue et la dernière bonne page reste servie.
+    leverSiTransitoire(res, url);
     if (!res.ok) return null;
     const d = await res.json();
     const g = d?.global ?? {};
@@ -219,7 +230,10 @@ async function fetchTrackRecord(): Promise<TrackRecord | null> {
         .filter((x: Record<string, unknown>) => numOf(x?.nb_predictions) && (x.nb_predictions as number) > 0)
         .map((x: Record<string, unknown>) => ({ jour: String(x.jour ?? ""), accuracy_top3: numOf(x.accuracy_top3) ?? 0, nb_predictions: x.nb_predictions as number })),
     };
-  } catch { return null; }
+  } catch (e) {
+    relancerSiTransitoire(e);
+    return null;
+  }
 }
 
 /**

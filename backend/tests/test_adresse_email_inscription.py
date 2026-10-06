@@ -234,7 +234,8 @@ async def test_un_compte_confirme_reste_intouchable(
     resp = await client.post("/api/v1/auth/register", json={
         "email": "confirme@blackturf.fr", "password": "MotDePasseIntrus999", "pseudo": "Joueur13",
     })
-    assert resp.status_code == 400
+    # Même réponse qu'une adresse libre (anti-énumération), mais rien n'est réécrit.
+    assert resp.status_code == 200
 
     connexion = await client.post("/api/v1/auth/login", data={
         "username": "confirme@blackturf.fr", "password": "MotDePasse123",

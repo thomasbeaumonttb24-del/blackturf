@@ -41,7 +41,7 @@ empilés, tous corrigés ici :
 from typing import Any
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -317,7 +317,9 @@ async def count_unread(
 @router.get("")
 @router.get("/")
 async def list_notifications(
-    page: int = 1,
+    # Borne haute : une page démesurée faisait déborder l'OFFSET (entier 64 bits)
+    # côté PostgreSQL → 500 au lieu d'une page vide.
+    page: int = Query(default=1, ge=1, le=10000),
     limit: int = 50,
     categorie: str | None = None,
     db: AsyncSession = Depends(get_db),

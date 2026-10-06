@@ -294,11 +294,15 @@ async def test_requete_ouvre_l_acces_d_un_pass_qui_commence(client, db, inscrire
 
 # ── Inscription : une boîte mail = un compte ─────────────────────────────────
 @pytest.mark.parametrize("alias", ["nom+2@gmail.com", "n.o.m@gmail.com", "NOM@googlemail.com"])
-async def test_alias_d_une_boite_gmail_deja_inscrite_refuse(client, inscrire, alias):
+async def test_alias_d_une_boite_gmail_deja_inscrite_refuse(client, inscrire, alias, db):
+    from sqlalchemy import func, select
+    from db.models import User
     await inscrire(email="nom@gmail.com", pseudo="original")
     r = await client.post("/api/v1/auth/register", json={
         "email": alias, "password": "TestPassword123!", "pseudo": "alias01"})
-    assert r.status_code == 400
+    # Même réponse qu'une adresse libre (anti-énumération), mais aucun compte créé.
+    assert r.status_code == 200
+    assert (await db.execute(select(func.count()).select_from(User))).scalar() == 1
 
 
 async def test_boite_differente_acceptee(client, inscrire):

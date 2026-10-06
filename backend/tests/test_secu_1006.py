@@ -202,8 +202,9 @@ def test_pseudo_sosie_de_l_equipe_refuse():
     """« BIackTurf » (i majuscule), « 4dmin », « àdmin » imitaient l'équipe dans le chat."""
     import pytest as _pytest
     from services.pseudo import PseudoRefuse, normaliser
-    for sosie in ("BIackTurf", "4dmin", "àdmin", "Adm1n", "m0do", "Supp0rt", "St4ff", "black_turf"):
+    for sosie in ("BIackTurf", "4dmin", "àdmin", "Adm1n", "m0do", "Supp0rt", "St4ff", "black_turf",
+                  "Adrnin", "Rnodo", "Rnodérateur", "BIackTurf_rn", "Staff_vv"):
         with _pytest.raises(PseudoRefuse):
             normaliser(sosie)
-    for honnete in ("Joueur5", "Pilou", "Turfiste75", "Lilou"):
+    for honnete in ("Joueur5", "Pilou", "Turfiste75", "Lilou", "Bernard", "Fernando", "Wawa"):
         assert normaliser(honnete) == honnete

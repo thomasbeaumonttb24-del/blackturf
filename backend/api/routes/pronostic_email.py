@@ -111,9 +111,11 @@ async def _limite_ip(request: Request) -> None:
 
 def _boite(email: str) -> str:
     """Adresse ramenée à sa boîte : `nom+n'importe@x.fr` → `nom@x.fr`. Les alias
-    arrivent tous dans la même boîte ; le verrou doit porter sur elle."""
-    local, _, domaine = email.partition("@")
-    return f"{local.split('+', 1)[0]}@{domaine}"
+    arrivent tous dans la même boîte ; le verrou doit porter sur elle. Même règle
+    que partout ailleurs (casse, points Gmail, googlemail) : `N.om@gmail.com`
+    contournait le verrou de `nom@gmail.com`."""
+    from services.quota_classement import adresse_canonique
+    return adresse_canonique(email)
 
 
 class DemandeIn(BaseModel):

@@ -99,7 +99,9 @@ function InscriptionContent() {
     } catch (e: unknown) {
       const reponse = (e as { response?: { status?: number; data?: { detail?: unknown } } })?.response;
       const detail = reponse?.data?.detail;
-      // /auth/register ne renvoie 400 que pour « Email déjà utilisé ».
+      // 400 « Email déjà utilisé » : ancienne API. Elle répond désormais comme pour
+      // une inscription neuve (anti-énumération) et prévient le titulaire par mail ;
+      // la branche reste pour un front servi pendant le déploiement.
       if (reponse?.status === 400) {
         setDejaInscrit(data.email);
         return;
@@ -141,6 +143,12 @@ function InscriptionContent() {
         </p>
         <p className="text-xs text-muted-foreground mt-3">
           Rien reçu au bout de deux minutes ? Regardez dans les indésirables.
+        </p>
+        <p className="text-xs text-muted-foreground mt-3">
+          Déjà inscrit avec cette adresse ? Le mail reçu vous l&apos;indique :{" "}
+          <Link href="/login" className="font-medium text-brand-gold-dark underline underline-offset-2">connectez-vous</Link>
+          {" "}ou{" "}
+          <Link href="/mot-de-passe-oublie" className="font-medium text-brand-gold-dark underline underline-offset-2">choisissez un nouveau mot de passe</Link>.
         </p>
         <p className="text-xs text-muted-foreground mt-3">
           {parrain

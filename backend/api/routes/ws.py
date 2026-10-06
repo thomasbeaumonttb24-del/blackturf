@@ -13,7 +13,7 @@ import structlog
 from collections.abc import Mapping
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends, Query
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends
 from starlette.websockets import WebSocketState
 from jose import JWTError, jwt
 from sqlalchemy import select
@@ -146,7 +146,7 @@ async def _get_user_from_token(token: str) -> str | None:
         return None
     # Import local : auth.py tire les dépendances HTTP, inutile au chargement de ws.
     from api.routes.auth import _refresh_revoked
-    if await _refresh_revoked(user_id, payload.get("iat")):
+    if await _refresh_revoked(user_id, payload.get("iat"), payload.get("jti")):
         return None
     async with async_session_factory() as db:
         row = (await db.execute(
@@ -182,20 +182,19 @@ async def _get_user_plan(user_id: str) -> str | None:
         return row[0] if row else None
 
 
-async def _authenticate_ws(websocket: WebSocket, token_query: str) -> str | None:
+async def _authenticate_ws(websocket: WebSocket) -> str | None:
     """Authentifie une connexion WS SANS exposer le JWT dans l'URL.
 
     La socket DOIT déjà être acceptée (accept) avant l'appel.
-    - Voie privilégiée : le client envoie en 1er message {"type":"auth","token":"..."}.
-      Le token ne transite donc pas en query string (qui finit dans les access logs
-      des proxies = fuite de credential).
-    - Voie LEGACY (dépréciée) : token en query string — conservée le temps qu'un
-      ancien front en cache se reconnecte. À retirer une fois le front à jour partout.
+    - Voie hors navigateur : le client envoie en 1er message {"type":"auth","token":"..."}.
+    - Le jeton en query string n'est plus accepté : il finissait dans les access
+      logs des proxies (fuite de credential), et plus aucun front ne l'envoie
+      depuis le passage aux cookies.
 
     Depuis le passage aux cookies httpOnly, le jeton n'est plus lisible en
     JavaScript : le navigateur l'envoie de lui-même dans la poignée de main WS
-    (même site), c'est donc la voie NORMALE désormais — les deux autres ne servent
-    plus qu'aux clients non navigateur et aux onglets pas encore rechargés.
+    (même site), c'est donc la voie NORMALE désormais — le premier message ne sert
+    plus qu'aux clients non navigateur.
     """
     if _origine_refusee(websocket):
         log.warning("ws.origine_refusee", origin=str(websocket.headers.get("origin"))[:120])
@@ -205,8 +204,6 @@ async def _authenticate_ws(websocket: WebSocket, token_query: str) -> str | None
         user_id = await _get_user_from_token(cookie_token)
         if user_id:
             return user_id
-    if token_query:
-        return await _get_user_from_token(token_query)
     try:
         raw = await asyncio.wait_for(websocket.receive_text(), timeout=10)
         msg = json.loads(raw)
@@ -221,10 +218,10 @@ async def _authenticate_ws(websocket: WebSocket, token_query: str) -> str | None
 # Cotes live
 # ─────────────────────────────────────────────
 @router.websocket("/courses/{course_id}/cotes")
-async def ws_cotes_live(course_id: str, websocket: WebSocket, token: str = Query(default="")):
+async def ws_cotes_live(course_id: str, websocket: WebSocket):
     """Stream des cotes live pour une course. Refresh 30s + ping/pong heartbeat."""
     await websocket.accept()
-    user_id = await _authenticate_ws(websocket, token)
+    user_id = await _authenticate_ws(websocket)
     if not user_id:
         await fermer_ws(websocket, code=4401)
         return
@@ -310,7 +307,7 @@ async def ws_cotes_live(course_id: str, websocket: WebSocket, token: str = Query
 # Value bets stream
 # ─────────────────────────────────────────────
 @router.websocket("/value-bets")
-async def ws_value_bets(websocket: WebSocket, token: str = Query(default="")):
+async def ws_value_bets(websocket: WebSocket):
     """Stream des value bets actifs. Refresh 60s + ping/pong heartbeat.
 
     Réservé aux abonnés (même règle que GET /value-bets, cf. require_pro) : avant
@@ -320,7 +317,7 @@ async def ws_value_bets(websocket: WebSocket, token: str = Query(default="")):
     paywall REST (audit 2026-08-16).
     """
     await websocket.accept()
-    user_id = await _authenticate_ws(websocket, token)
+    user_id = await _authenticate_ws(websocket)
     if not user_id:
         await fermer_ws(websocket, code=4401)
         return
@@ -421,13 +418,17 @@ def _trame_diffusable(canal, data) -> bool:
 
 
 @router.websocket("/user/alertes")
-async def ws_user_alertes(websocket: WebSocket, token: str = Query(default="")):
+async def ws_user_alertes(websocket: WebSocket):
     """Canal d'alertes in-app personnalisées avec ping/pong heartbeat."""
     await websocket.accept()
-    user_id = await _authenticate_ws(websocket, token)
+    user_id = await _authenticate_ws(websocket)
     if not user_id:
         await fermer_ws(websocket, code=4401)
         return
+
+    # Import local, comme pour auth : chat.py tire les dépendances HTTP.
+    from api.routes.chat import alias_auteur
+    mon_alias = alias_auteur(user_id)
 
     await manager.connect(user_id, websocket)
     redis = await get_redis()
@@ -445,6 +446,13 @@ async def ws_user_alertes(websocket: WebSocket, token: str = Query(default="")):
                         data = json.loads(msg["data"])
                         if not _trame_diffusable(msg.get("channel"), data):
                             continue
+                        if isinstance(data, dict) and data.get("type") == "chat_message":
+                            # Ses propres messages ne font pas monter sa bulle. Le tri
+                            # se fait ici : l'alias de l'auteur n'a pas à partir chez
+                            # tous les comptes connectés.
+                            if data.get("auteur_id") == mon_alias:
+                                continue
+                            data = {"type": "chat_message"}
                         await websocket.send_json(data)
                     except Exception:
                         pass
@@ -552,7 +560,7 @@ async def ws_chat(websocket: WebSocket):
     ferme en 4403 les sockets ouvertes du membre visé, sur tous les workers.
     """
     await websocket.accept()
-    user_id = await _authenticate_ws(websocket, "")
+    user_id = await _authenticate_ws(websocket)
     if not user_id:
         await fermer_ws(websocket, code=4401)
         return

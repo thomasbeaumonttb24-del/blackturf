@@ -1,3 +1,4 @@
+import { apiServeurV1, initServeur } from "@/lib/apiServeur";
 import { jourParis, periodeCourte } from "@/lib/seo";
 import { MENTION_LEGALE, HASHTAGS } from "@/lib/visuels";
 
@@ -20,7 +21,9 @@ import { MENTION_LEGALE, HASHTAGS } from "@/lib/visuels";
 export const revalidate = 600;
 
 const SITE = "https://blackturf.fr";
-const API = (process.env.NEXT_PUBLIC_API_URL || "https://api.blackturf.fr") + "/api/v1";
+// Lecture serveur : réseau Docker + en-tête interne en production (cf. lib/apiServeur.ts),
+// pour ne plus partager le quota par IP de nginx avec tout le rendu serveur du site.
+const API = apiServeurV1();
 
 /** Les six angles, dans l'ordre de PUBLICATION. Chacun tient seul dans le fil. */
 const ANGLES: Record<string, { titre: string; intro: string }> = {
@@ -82,7 +85,7 @@ export async function GET(req: Request) {
   try {
     // Sans cache : c'est la légende qui PART dans le fil (cf. `story.jpg/route.tsx`,
     // incident du 2026-09-11 — une réponse périmée servie avant d'être rafraîchie).
-    const res = await fetch(url.toString(), { cache: "no-store" });
+    const res = await fetch(url.toString(), initServeur({ cache: "no-store" }));
     if (res.ok) d = await res.json();
   } catch {
     d = null;

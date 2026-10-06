@@ -58,6 +58,13 @@ class Settings(BaseSettings):
     anthropic_model: str = "claude-haiku-4-5-20251001"
     brightdata_proxy: str = ""
     betfair_ingest_token: str = ""   # secret partagé pour /admin/api/ingest-betfair
+    # Secret partagé avec le conteneur Next (en-tête `X-BT-Interne`). Le rendu
+    # serveur lit l'API depuis UNE seule adresse : sans exemption, n'importe qui
+    # vidait ce seau commun en bouclant sur une page publique, et toutes les pages
+    # rendues côté serveur sortaient vides pour tout le monde. Vide = exemption
+    # désactivée (comportement d'avant le 06/10). nginx efface l'en-tête entrant :
+    # seul un appel qui ne passe PAS par nginx (réseau Docker) peut le porter.
+    bt_secret_interne: str = ""
     stripe_secret_key: str = ""
     stripe_publishable_key: str = ""
     stripe_webhook_secret: str = ""
@@ -153,6 +160,16 @@ class Settings(BaseSettings):
             raise ValueError("SECRET_KEY doit faire au moins 32 caractères")
         if v.strip().lower() in _WEAK_SECRETS:
             raise ValueError("SECRET_KEY trivial interdit")
+        return v
+
+    @field_validator("bt_secret_interne")
+    @classmethod
+    def _secret_interne_robuste(cls, v: str) -> str:
+        # Il lève les quotas par IP : un secret court se devine par essais depuis
+        # n'importe quel conteneur du réseau. Vide reste permis (fonction coupée).
+        v = (v or "").strip()
+        if v and len(v) < 32:
+            raise ValueError("BT_SECRET_INTERNE doit faire au moins 32 caractères (ou rester vide)")
         return v
 
     @model_validator(mode="after")

@@ -1,3 +1,4 @@
+import { apiServeurV1, initServeur } from "@/lib/apiServeur";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { ImageResponse } from "next/og";
@@ -20,7 +21,9 @@ import {
 // qu'une fois et ne se corrige plus n'a rien à gagner d'un cache.
 export const dynamic = "force-dynamic";
 
-const API = (process.env.NEXT_PUBLIC_API_URL || "https://api.blackturf.fr") + "/api/v1";
+// Lecture serveur : réseau Docker + en-tête interne en production (cf. lib/apiServeur.ts),
+// pour ne plus partager le quota par IP de nginx avec tout le rendu serveur du site.
+const API = apiServeurV1();
 
 const PHOTO_L = STORY_L;
 
@@ -48,9 +51,9 @@ async function polices() {
 /** Ce que l'API dit de la journée, lu sans cache. `null` = API injoignable ou en erreur. */
 async function bilanDuJour(jour: string): Promise<Record<string, any> | null> {
   try {
-    const res = await fetch(`${API}/stats/meilleurs-plans-jour?jour=${jour}`, {
+    const res = await fetch(`${API}/stats/meilleurs-plans-jour?jour=${jour}`, initServeur({
       cache: "no-store",
-    });
+    }));
     return res.ok ? await res.json() : null;
   } catch {
     return null;

@@ -139,19 +139,64 @@ async def test_le_lien_de_confirmation_ouvre_directement_la_session(
         select(User).where(User.email == "lien-connecte@blackturf.fr")
     )).scalar_one()
 
+    # Même navigateur : le cookie posé à l'inscription accompagne le clic.
+    nonce = client.cookies.get("bt_inscription")
+    assert nonce, "l'inscription doit poser le nonce du navigateur"
+
     # Le jeton vit dans Redis (mocké) : on rejoue ce que la route y lit.
+    import json
     from unittest.mock import AsyncMock, patch
+    valeur = json.dumps({"uid": user.user_id, "n": nonce}).encode()
     faux_redis = AsyncMock()
     faux_redis.get = AsyncMock(side_effect=lambda cle: (
-        user.user_id.encode() if str(cle).startswith("email_verify:") else None))
+        valeur if str(cle).startswith("email_verify:") else None))
     faux_redis.delete = AsyncMock(return_value=1)
     with patch("redis.asyncio.from_url", return_value=faux_redis):
         resp = await client.get("/api/v1/auth/verify-email?token=peu-importe")
 
     assert resp.status_code == 200
+    assert "mot_de_passe_requis" not in resp.json()
     assert (await client.get("/api/v1/auth/me")).status_code == 200
     await db.refresh(user)
     assert user.email_verified is True
+
+
+@pytest.mark.parametrize("ancien_format", [False, True])
+async def test_le_lien_ouvert_dans_un_autre_navigateur_n_ouvre_pas_de_session(
+    client: AsyncClient, db: AsyncSession, ancien_format
+):
+    """Pré-détournement : un tiers inscrit l'adresse d'une victime avec SON mot de
+    passe ; la victime clique depuis sa boîte, ailleurs. L'adresse est confirmée,
+    mais pas de session, et le mot de passe du tiers ne vaut plus rien. Les liens
+    émis avant le nonce (user_id nu) suivent la même voie prudente."""
+    import json
+    from unittest.mock import AsyncMock, patch
+
+    await _inscrire(client, f"ailleurs{int(ancien_format)}@blackturf.fr")
+    user = (await db.execute(
+        select(User).where(User.email == f"ailleurs{int(ancien_format)}@blackturf.fr")
+    )).scalar_one()
+    nonce = client.cookies.get("bt_inscription")
+    client.cookies.clear()  # autre navigateur
+
+    valeur = (user.user_id if ancien_format else json.dumps({"uid": user.user_id, "n": nonce})).encode()
+    faux_redis = AsyncMock()
+    faux_redis.get = AsyncMock(side_effect=lambda cle: (
+        valeur if str(cle).startswith("email_verify:") else None))
+    faux_redis.delete = AsyncMock(return_value=1)
+    with patch("redis.asyncio.from_url", return_value=faux_redis):
+        resp = await client.get("/api/v1/auth/verify-email?token=peu-importe")
+
+    assert resp.status_code == 200
+    assert resp.json()["mot_de_passe_requis"] is True
+    assert "access_token" not in resp.cookies
+    assert (await client.get("/api/v1/auth/me")).status_code == 401
+    await db.refresh(user)
+    assert user.email_verified is True
+    connexion = await client.post("/api/v1/auth/login", data={
+        "username": user.email, "password": "MotDePasse123",
+    })
+    assert connexion.status_code == 401
 
 
 async def test_reinscription_avant_confirmation_ne_livre_pas_le_compte(

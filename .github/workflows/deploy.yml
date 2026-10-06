@@ -36,7 +36,9 @@ jobs:
 
     steps:
       - name: Deploy via SSH
-        uses: appleboy/ssh-action@v1.0.0
+        # Épinglée sur un SHA de commit : un tag se republie, et cette action tierce
+        # reçoit la clé SSH de production. Montée de version = nouveau SHA, vérifié.
+        uses: appleboy/ssh-action@55dabf81b49d4120609345970c91507e2d734799 # v1.0.0
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}

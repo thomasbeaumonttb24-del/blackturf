@@ -23,12 +23,30 @@ async def test_register_cree_le_compte_sans_ouvrir_de_session(client: AsyncClien
     assert (await client.get("/api/v1/auth/me")).status_code == 401
 
 
-async def test_register_duplicate_email(client: AsyncClient, auth_headers):
+async def test_register_duplicate_email(client: AsyncClient, auth_headers, monkeypatch):
+    """Anti-énumération : une adresse déjà inscrite reçoit la MÊME réponse qu'une
+    adresse libre ; c'est le titulaire qui est prévenu, dans sa boîte."""
+    from unittest.mock import AsyncMock
+    envoi = AsyncMock()
+    monkeypatch.setattr("services.alerts.send_email", envoi)
+
     resp = await client.post("/api/v1/auth/register", json={
         "email": "test@blackturf.fr",
         "password": "TestPass12!", "pseudo": "Joueur2",
     })
-    assert resp.status_code == 400
+    neuf = await client.post("/api/v1/auth/register", json={
+        "email": "libre@blackturf.fr",
+        "password": "TestPass12!", "pseudo": "Joueur5",
+    })
+    assert resp.status_code == neuf.status_code == 200
+    assert resp.json()["message"].replace("test@", "libre@") == neuf.json()["message"]
+    sujets = [(c.kwargs["to"], c.kwargs["subject"]) for c in envoi.await_args_list]
+    assert ("test@blackturf.fr", "BlackTurf — Vous avez déjà un compte") in sujets
+    # Le compte existant n'est pas touché : son mot de passe vaut toujours.
+    login = await client.post("/api/v1/auth/login", data={
+        "username": "test@blackturf.fr", "password": "TestPassword123!",
+    })
+    assert login.status_code == 200
 
 
 async def test_login_success(client: AsyncClient, auth_headers):

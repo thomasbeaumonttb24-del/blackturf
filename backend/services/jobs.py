@@ -1424,11 +1424,9 @@ async def job_publication_mosaique() -> None:
     import httpx
     from sqlalchemy import text as _text
 
-    from api.config import get_settings
     from db.database import AsyncSessionLocal
     from services.instagram import publier_image, publication_active, quota_restant
 
-    base = (get_settings().frontend_url or "https://blackturf.fr").rstrip("/")
     API_JOUR = "http://api:8000/api/v1/stats/meilleurs-plans-jour"
     ENTETE = {"Host": "api.blackturf.fr"}
 
@@ -1459,8 +1457,14 @@ async def job_publication_mosaique() -> None:
                 # 2. La légende et l'URL de l'image viennent du FRONT, qui les tient
                 #    déjà pour la page /studio. Deux rédactions de la même légende
                 #    finiraient par diverger, et c'est celle qui part qui aurait tort.
-                r = await client.get(f"{base}/visuels/mosaique/legendes.json",
-                                     params={"semaine": jour})
+                #    Lue EN INTERNE (frontend:3000), pas par le domaine public : nginx
+                #    limite /visuels/ par IP, et depuis un conteneur le domaine public
+                #    revient sous l'adresse de la passerelle Docker, partagée par tous
+                #    les jobs. Les URL d'image de la légende restent publiques (SITE
+                #    en dur côté front) : c'est Meta qui ira les chercher.
+                r = await client.get("http://frontend:3000/visuels/mosaique/legendes.json",
+                                     params={"semaine": jour},
+                                     headers={"Host": "blackturf.fr"})
                 r.raise_for_status()
                 legende = r.json()
         except Exception as e:  # noqa: BLE001

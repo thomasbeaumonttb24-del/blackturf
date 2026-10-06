@@ -68,3 +68,57 @@ def test_le_login_reste_strictement_limite():
     texte = _conf()
     assert _taux_par_seconde(texte, "auth") <= 1.0, (
         "la zone `auth` protège /auth/login : elle doit rester serrée")
+
+
+# --- Durcissement du 06/10 ----------------------------------------------------
+
+def _locations(texte: str) -> list[tuple[str, str]]:
+    """(chemin, corps) de chaque `location` — blocs indentés de 8 espaces."""
+    return [(m.group(1).strip(), m.group(2)) for m in re.finditer(
+        r"^        location ([^{]+)\{(.*?)^        \}", texte, re.S | re.M)]
+
+
+def test_l_entete_interne_est_efface_sur_toute_location_proxifiee():
+    """`X-BT-Interne` lève les quotas par IP de l'API (rendu serveur du frontend).
+
+    Il n'est légitime que par le réseau Docker. Une seule location qui le
+    relaierait depuis Internet offrirait le contournement à quiconque devine ou
+    vole le secret — et nginx n'hérite PAS des proxy_set_header du serveur dans
+    une location qui en déclare : il faut le répéter partout.
+    """
+    texte = _conf()
+    proxifiees = [(chemin, corps) for chemin, corps in _locations(texte) if "proxy_pass" in corps]
+    assert len(proxifiees) >= 7, "lecture des locations cassée : rien ne serait vérifié"
+    oublis = [chemin for chemin, corps in proxifiees
+              if not re.search(r'proxy_set_header\s+X-BT-Interne\s+""\s*;', corps)]
+    assert not oublis, f"X-BT-Interne relayé tel quel depuis Internet sur : {oublis}"
+
+
+def test_les_visuels_ont_leur_propre_quota():
+    """/visuels/ rend une image ou lit l'API SANS cache à chaque appel : sans
+    limite, un client en boucle occupe le CPU du frontend."""
+    texte = _conf()
+    zone = _zone_du_bloc(texte, "/visuels/")
+    assert zone and zone != "auth", "location /visuels/ sans limit_req propre"
+    assert _taux_par_seconde(texte, zone) <= 5, "quota /visuels/ trop large pour protéger quoi que ce soit"
+
+
+def test_les_poignees_de_main_websocket_sont_limitees():
+    texte = _conf()
+    assert _zone_du_bloc(texte, "/ws/"), "location /ws/ sans limit_req"
+    bloc = dict(_locations(texte))["/ws/"]
+    m = re.search(r"proxy_read_timeout\s+(\d+)s", bloc)
+    # Les canaux pinguent toutes les 30 s (api/routes/ws.py::PING_INTERVAL) :
+    # un timeout sous ~2 pings couperait des connexions saines.
+    assert m and 60 <= int(m.group(1)) <= 600, "proxy_read_timeout de /ws/ hors de [60 s, 10 min]"
+
+
+def test_les_hotes_inconnus_sont_coupes():
+    """Sans serveur par défaut, le premier bloc de chaque port servait n'importe
+    quel Host — IP nue comprise, certificat et noms hébergés avec."""
+    texte = _conf()
+    assert re.search(r"listen 80 default_server;\s*server_name _;\s*return 444;", texte), (
+        "pas de serveur par défaut en 444 sur le port 80")
+    assert re.search(r"listen 443 ssl(?: http2)? default_server;[^\n]*\s*server_name _;\s*ssl_reject_handshake on;", texte), (
+        "pas de refus de poignée de main TLS pour un SNI inconnu")
+    assert re.search(r"^\s*ssl_session_tickets off;", texte, re.M), "tickets de session TLS actifs"

@@ -112,11 +112,16 @@ app.add_middleware(
 
 if settings.environment == "production":
     # localhost/127.0.0.1 requis pour le healthcheck Docker (curl interne) + sondes.
+    # `api` : nom de service Docker. Le rendu serveur du frontend appelle
+    # `http://api:8000` en direct (API_URL_INTERNE) pour ne plus partager le quota
+    # par IP de nginx ; sans ce nom, chaque lecture SSR prenait un 400 « Invalid
+    # host header ». Aucun risque d'usurpation par l'extérieur : nginx ne relaie
+    # que ses server_name, et le serveur par défaut coupe tout autre Host.
     app.add_middleware(
         TrustedHostMiddleware,
         allowed_hosts=[
             "api.blackturf.fr", "blackturf.fr", "www.blackturf.fr",
-            "localhost", "127.0.0.1",
+            "localhost", "127.0.0.1", "api",
         ],
     )
 

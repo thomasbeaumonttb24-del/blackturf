@@ -4,6 +4,7 @@ import {
   fetchSeoIndex,
   jourParis,
 } from "@/lib/seo";
+import { ApiServeurIndisponible } from "@/lib/apiServeur";
 import { ARTICLES } from "@/lib/blog";
 import { HIPPODROMES } from "@/lib/hippodromes";
 import { DISCIPLINES } from "@/lib/disciplines";
@@ -73,6 +74,21 @@ function indisponible(quoi: string): Response {
   });
 }
 
+/**
+ * `fetchSeoIndex` / `fetchJoursResultats` LÈVENT désormais sur une panne passagère de
+ * l'API (429/5xx/injoignable) au lieu de rendre vide. Ici on retombe sur l'ancien
+ * contrat — liste vide — pour que la logique ci-dessous garde la main : 503
+ * `indisponible()` pour les listes, début de journée pour le lastmod de pages.xml.
+ */
+async function sansPanne<T>(lecture: Promise<T>, repli: T): Promise<T> {
+  try {
+    return await lecture;
+  } catch (e) {
+    if (e instanceof ApiServeurIndisponible) return repli;
+    throw e;
+  }
+}
+
 function rendre(entrees: Entree[]): Response {
   const xml =
     `<?xml version="1.0" encoding="UTF-8"?>\n` +
@@ -113,7 +129,11 @@ async function sitemapPages(): Promise<Response> {
    * `derniere_maj` est la dernière écriture RÉELLE en base sur une course du jour. Elle
    * bouge quand le contenu bouge, et seulement là. Repli sur le début de journée si l'API
    * ne répond pas — jamais sur l'heure courante. */
-  const { derniereMaj } = await fetchSeoIndex(aujourdhui, aujourdhui, 600);
+  const { derniereMaj } = await sansPanne(fetchSeoIndex(aujourdhui, aujourdhui, 600), {
+    courses: [],
+    jours: [],
+    derniereMaj: null,
+  });
   const majDuJour = derniereMaj ?? debutDeJournee;
 
   const entrees: Entree[] = [
@@ -166,7 +186,7 @@ async function sitemapPages(): Promise<Response> {
  */
 async function sitemapResultats(): Promise<Response> {
   const aujourdhui = jourParis();
-  const jours = await fetchJoursResultats();
+  const jours = await sansPanne(fetchJoursResultats(), []);
   if (!jours.length) return indisponible("des résultats");
 
   return rendre(
@@ -195,7 +215,11 @@ async function sitemapCourses(): Promise<Response> {
   const aujourdhui = jourParis();
   const debut = decalerJours(aujourdhui, -FENETRE_COURSES_JOURS);
   const fin = decalerJours(aujourdhui, 1);
-  const { courses } = await fetchSeoIndex(debut, fin, 600);
+  const { courses } = await sansPanne(fetchSeoIndex(debut, fin, 600), {
+    courses: [],
+    jours: [],
+    derniereMaj: null,
+  });
   if (!courses.length) return indisponible("des courses");
 
   return rendre(

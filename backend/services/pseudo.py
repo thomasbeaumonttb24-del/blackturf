@@ -49,6 +49,8 @@ def _reserve(p: str) -> bool:
     s = _squelette(p)
     # « I » majuscule et « l » se confondent à l'écran : on teste les deux lectures.
     variantes = {s, s.replace("i", "l"), s.replace("l", "i")}
+    # Paires qui se lisent comme une seule lettre : « Adrnin », « Rnodo », « vv » = w.
+    variantes |= {v.replace("rn", "m").replace("vv", "w") for v in variantes}
     return any(m in v for v in variantes for m in MOTS_RESERVES)
 
 

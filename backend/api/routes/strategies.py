@@ -330,7 +330,8 @@ async def backtest_strategy(
 
 @router.get("/strategies/communaute")
 async def communaute_strategies(
-    limit: int = Query(default=20, le=50),
+    # ge=1 : une limite négative partait telle quelle en SQL (LIMIT -5 → 500).
+    limit: int = Query(default=20, ge=1, le=50),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):

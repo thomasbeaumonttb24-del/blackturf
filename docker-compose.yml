@@ -43,7 +43,22 @@ services:
     # ne signale la bascule. Une variable absente du .env doit faire ECHOUER le
     # demarrage — c'est deja arrive sur ce projet (ACCESS_TOKEN_EXPIRE_MINUTES
     # n'atteignait pas le conteneur, sans le moindre message).
-    command: redis-server --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD absent du .env}
+    # Liste : les `""` de rename-command doivent arriver comme argument VIDE.
+    # FLUSHALL/DEBUG désactivés : cf. docker-compose.prod.yml (service redis).
+    command:
+      - redis-server
+      - --requirepass
+      - ${REDIS_PASSWORD:?REDIS_PASSWORD absent du .env}
+      - --rename-command
+      - FLUSHALL
+      - ""
+      - --rename-command
+      - DEBUG
+      - ""
+    # Mot de passe du healthcheck par l'environnement (lu par redis-cli), pas par
+    # `-a` : en argument il apparaissait dans `ps` sur l'hôte toutes les 10 s.
+    environment:
+      - REDISCLI_AUTH=${REDIS_PASSWORD:?REDIS_PASSWORD absent du .env}
     ports:
     # Lie a la boucle locale, JAMAIS a 0.0.0.0. Docker publie ses ports en
     # ecrivant des regles DNAT en amont des chaines que ufw manipule : un
@@ -56,7 +71,7 @@ services:
     volumes:
       - redis_data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "--no-auth-warning", "-a", "${REDIS_PASSWORD:?REDIS_PASSWORD absent du .env}", "ping"]
+      test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5

@@ -2981,7 +2981,8 @@ async def get_suspensions_actives(db: AsyncSession = Depends(get_db)):
 async def recherche(
     q: str = Query(..., min_length=2, max_length=100),
     type: str = Query(default="all"),   # all / cheval / jockey / hippodrome / course
-    limit: int = Query(default=10, le=20),
+    # ge=1 : une limite négative partait telle quelle en SQL (LIMIT -5 → 500).
+    limit: int = Query(default=10, ge=1, le=20),
     db: AsyncSession = Depends(get_db),
 ):
     """

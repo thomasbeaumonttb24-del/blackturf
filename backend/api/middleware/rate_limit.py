@@ -100,6 +100,10 @@ async def rate_limit_backtest(
 #     unique — celui du conteneur. Toutes les pages rendues côté serveur, pour
 #     tous les visiteurs et tous les robots, partagent alors UNE seule IP.
 #
+# Depuis le 06/10, le rendu serveur appelle l'API en direct (`http://api:8000`)
+# avec l'en-tête secret `X-BT-Interne` et n'est plus compté du tout (cf.
+# `est_appel_interne`) : le plafond ne s'applique plus qu'aux vrais clients.
+#
 # Ces endpoints sont en lecture seule et servis depuis un cache Redis (120 s à
 # 10 min) : un appel de plus coûte presque rien, alors qu'un 429 sur une page
 # publique se lit comme un site en panne. Le garde-fou reste là pour l'aspiration
@@ -112,7 +116,12 @@ async def rate_limit_public(
     redis: aioredis.Redis = Depends(get_redis),
 ) -> None:
     """Rate limit par IP des endpoints publics (cf. PUBLIC_PAR_MINUTE)."""
-    from api.middleware.throttle import _client_ip
+    from api.middleware.throttle import _client_ip, est_appel_interne
+    # Rendu serveur du frontend : une seule adresse pour toutes les pages de tous
+    # les visiteurs. Le compter ici, c'est laisser un seul client en boucle vider
+    # ce seau et faire sortir vides les pages de tout le monde.
+    if est_appel_interne(request):
+        return
     ip = _client_ip(request)
     key = f"rl:public:min:{ip}"
     pipe = redis.pipeline()

@@ -79,7 +79,10 @@ def confirmation_newsletter(lien: str) -> tuple[str, str]:
 
 
 def verification_adresse(prenom: Optional[str], lien: str) -> tuple[str, str]:
-    nom = e(prenom or "parieur")
+    # `prenom` volontairement ignoré : ce mail part AVANT toute preuve que
+    # l'inscrit relève la boîte. Le prénom saisi par un tiers servait à écrire
+    # le texte de son choix dans la boîte d'un inconnu, sous la marque BlackTurf.
+    del prenom
     avantages = _avantages([
         ("ia", "Le classement de l’algorithme", "Chaque course notée, du plus probable au moins probable, avec la cote juste de chaque cheval."),
         ("etoile", "Les valeurs du jour", "Les chevaux dont la cote dépasse le prix estimé par le modèle, en étoiles de 1 à 4."),
@@ -87,7 +90,7 @@ def verification_adresse(prenom: Optional[str], lien: str) -> tuple[str, str]:
     ])
     rangees = (
         D.barre_logo("Bienvenue")
-        + D.entete("bienvenue", "Votre compte BlackTurf", f"Bienvenue, {nom}&nbsp;!",
+        + D.entete("bienvenue", "Votre compte BlackTurf", "Bienvenue sur BlackTurf&nbsp;!",
                    "Plus qu’une étape : confirmez votre adresse e-mail pour activer votre compte.")
         + _action("Confirmer mon adresse", lien, "Lien valable 24 heures. Sans confirmation, le compte reste inactif.")
         + _carte_claire(D.surtitre("Ce qui vous attend sur BlackTurf") + avantages)
@@ -96,7 +99,7 @@ def verification_adresse(prenom: Optional[str], lien: str) -> tuple[str, str]:
         + D.pied("Message envoyé suite à la création d’un compte sur blackturf.fr.", avis=False)
     )
     texte = (
-        f"Bienvenue sur BlackTurf, {prenom or 'parieur'} !\n\n"
+        "Bienvenue sur BlackTurf !\n\n"
         f"Confirmez votre adresse e-mail pour activer votre compte :\n{lien}\n\n"
         "Lien valable 24 heures. Sans confirmation, le compte reste inactif.\n"
         "Si vous n'êtes pas à l'origine de cette inscription, ignorez ce message.\n\n"
@@ -124,6 +127,39 @@ def reinitialisation_mot_de_passe(prenom: Optional[str], lien: str) -> tuple[str
         f"{D.RESPONSABLE}"
     )
     return D.document("Réinitialisation du mot de passe", "Lien valable 1 heure pour choisir un nouveau mot de passe.", rangees), texte
+
+
+def inscription_adresse_existante(prenom: Optional[str]) -> tuple[str, str]:
+    """Quelqu'un a tenté d'ouvrir un compte avec une adresse déjà inscrite.
+
+    L'inscription répond désormais la même chose que l'adresse soit libre ou non
+    (sinon le formulaire sert d'annuaire des comptes) : c'est donc ce mail qui
+    prévient le titulaire, et lui donne la marche à suivre si c'était lui.
+    """
+    connexion = SITE + "/login"
+    oubli = SITE + "/mot-de-passe-oublie"
+    rangees = (
+        D.barre_logo("Sécurité du compte")
+        + D.entete(None, "Vous avez déjà un compte", "Une inscription a été tentée avec votre adresse",
+                   f"Bonjour {e(prenom or 'parieur')}, quelqu’un vient d’essayer de créer un compte BlackTurf avec cette adresse, "
+                   "qui en possède déjà un.",
+                   icone="cle")
+        + _action("Me connecter", connexion,
+                  "Mot de passe oublié ? Choisissez-en un nouveau depuis l’écran de connexion.")
+        + _securite("Si ce n’était pas vous, ignorez cet e-mail : rien n’a été modifié sur votre compte. "
+                    "BlackTurf ne vous demandera jamais votre mot de passe par e-mail.")
+        + D.fermeture()
+        + D.pied("Message de sécurité lié à votre compte blackturf.fr.", avis=False)
+    )
+    texte = (
+        f"Bonjour {prenom or 'parieur'},\n\n"
+        "Quelqu'un vient d'essayer de créer un compte BlackTurf avec cette adresse, qui en possède déjà un.\n\n"
+        f"Si c'était vous, connectez-vous : {connexion}\n"
+        f"Mot de passe oublié : {oubli}\n\n"
+        "Si ce n'était pas vous, ignorez cet e-mail : rien n'a été modifié sur votre compte.\n\n"
+        f"{D.RESPONSABLE}"
+    )
+    return D.document("Vous avez déjà un compte", "Une inscription a été tentée avec votre adresse.", rangees), texte
 
 
 def resiliation(via_stripe: bool) -> tuple[str, str]:

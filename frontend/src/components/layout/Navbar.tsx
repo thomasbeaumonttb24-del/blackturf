@@ -173,15 +173,17 @@ export function Navbar() {
   // sondage recale le chiffre), plutôt que de faire relire le compteur à chaque
   // membre connecté pour chaque message posté.
   const onAlerte = useCallback((data: unknown) => {
-    const trame = data as { type?: string; auteur_id?: string } | null;
+    const trame = data as { type?: string } | null;
     if (trame?.type === "chat_message") {
-      if (!surChat && trame.auteur_id !== user?.user_id) {
+      // Ses propres messages sont écartés par le serveur (ws.py) : la trame ne
+      // porte plus l'identité de l'auteur.
+      if (!surChat) {
         mutateChat((d) => ({ non_lus: (d?.non_lus ?? 0) + 1 }), { revalidate: false });
       }
       return;
     }
     mutateNotifCount();
-  }, [surChat, user?.user_id, mutateChat, mutateNotifCount]);
+  }, [surChat, mutateChat, mutateNotifCount]);
   useWebSocket("/user/alertes", !!user, { onMessage: onAlerte });
 
   const nbNonLues = notifData?.count ?? 0;

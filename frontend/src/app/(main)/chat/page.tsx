@@ -267,7 +267,7 @@ function PanneauModeration({
           {sig?.map((s) => (
             <li key={s.signalement_id} className="rounded-2xl border border-gray-200 bg-white p-3.5 shadow-sm">
               <div className="flex items-center gap-2">
-                <Avatar pseudo={s.message.auteur.pseudo} userId={s.message.auteur.user_id} />
+                <Avatar pseudo={s.message.auteur.pseudo} userId={s.message.auteur.id} />
                 <div className="min-w-0 text-xs text-gray-600">
                   <div className="font-semibold text-gray-900">{s.message.auteur.pseudo}</div>
                   Signalé par {s.signale_par}{s.motif ? ` · « ${s.motif} »` : ""}
@@ -284,7 +284,7 @@ function PanneauModeration({
                 {!s.auteur_banni && (
                   <button className={cn(bouton, "border-red-200 bg-red-50 text-red-700 hover:bg-red-100")}
                     onClick={async () => {
-                      await onBannir(s.message.auteur.user_id, s.message.auteur.pseudo);
+                      await onBannir(s.message.auteur.id, s.message.auteur.pseudo);
                       mutateSig(); mutateBannis();
                     }}>
                     <Ban className="h-3.5 w-3.5" /> Bannir l&apos;auteur
@@ -544,7 +544,7 @@ function Salon({ moi, onBanni, onPseudoModifie }: {
     if (e.type === "message") {
       const inedit = !connus.current.has(e.message.message_id);
       fusionner([e.message]);
-      if (inedit && e.message.auteur.user_id !== moi.user_id && !collerEnBas.current) setNonLus((n) => n + 1);
+      if (inedit && e.message.auteur.id !== moi.auteur_id && !collerEnBas.current) setNonLus((n) => n + 1);
       if (inedit) marquerLu();
     } else if (e.type === "suppression") {
       setMessages((prev) => prev.filter((m) => !e.message_ids.includes(m.message_id)));
@@ -553,7 +553,7 @@ function Salon({ moi, onBanni, onPseudoModifie }: {
     } else if (e.type === "banni") {
       onBanni();
     }
-  }, [fusionner, onBanni, moi.user_id, marquerLu]);
+  }, [fusionner, onBanni, moi.auteur_id, marquerLu]);
 
   const dejaOuvert = useRef(false);
   const onOpen = useCallback(() => {
@@ -730,13 +730,13 @@ function Salon({ moi, onBanni, onPseudoModifie }: {
         {editionPseudo && moi.pseudo && (
           <ModalPseudo
             actuel={moi.pseudo}
-            userId={moi.user_id}
+            userId={moi.auteur_id}
             onFermer={() => setEditionPseudo(false)}
             onEnregistre={(p) => {
               // Les messages déjà affichés prennent le nouveau nom tout de suite ; les
               // autres membres le verront à leur prochain chargement.
               setMessages((prev) => prev.map((m) =>
-                m.auteur.user_id === moi.user_id ? { ...m, auteur: { ...m.auteur, pseudo: p } } : m));
+                m.auteur.id === moi.auteur_id ? { ...m, auteur: { ...m.auteur, pseudo: p } } : m));
               onPseudoModifie(p);
               setEditionPseudo(false);
             }}
@@ -801,9 +801,9 @@ function Salon({ moi, onBanni, onPseudoModifie }: {
               {messages.map((m, i) => {
                 const prec = messages[i - 1];
                 const nouveauJour = !prec || libelleJour(prec.created_at) !== libelleJour(m.created_at);
-                const suite = !nouveauJour && prec?.auteur.user_id === m.auteur.user_id
+                const suite = !nouveauJour && prec?.auteur.id === m.auteur.id
                   && Date.parse(m.created_at) - Date.parse(prec.created_at) < 5 * 60_000;
-                const estMoi = m.auteur.user_id === moi.user_id;
+                const estMoi = m.auteur.id === moi.auteur_id;
                 const peutSupprimer = estMoi || moi.is_admin;
                 const peutBannir = moi.is_admin && !estMoi && m.auteur.role !== "admin";
                 const heure = format(parseISO(m.created_at), "HH:mm");
@@ -819,7 +819,7 @@ function Salon({ moi, onBanni, onPseudoModifie }: {
                       </div>
                     )}
                     <div className={cn("group flex items-end gap-2.5", estMoi && "flex-row-reverse")}>
-                      {suite ? <div className="w-9 shrink-0" /> : <Avatar pseudo={m.auteur.pseudo} userId={m.auteur.user_id} />}
+                      {suite ? <div className="w-9 shrink-0" /> : <Avatar pseudo={m.auteur.pseudo} userId={m.auteur.id} />}
                       <div className={cn("flex min-w-0 max-w-[82%] flex-col sm:max-w-[70%]", estMoi && "items-end")}>
                         {!suite && (
                           <div className={cn("mb-1 flex items-center gap-1.5 px-1 text-xs", estMoi && "flex-row-reverse")}>
@@ -868,7 +868,7 @@ function Salon({ moi, onBanni, onPseudoModifie }: {
                               </button>
                             )}
                             {peutBannir && (
-                              <button onClick={() => bannir(m.auteur.user_id, m.auteur.pseudo)}
+                              <button onClick={() => bannir(m.auteur.id, m.auteur.pseudo)}
                                 className={cn(actionIcone, "hover:bg-red-50 hover:text-red-700")}
                                 aria-label={`Bannir ${m.auteur.pseudo}`} title="Bannir du salon">
                                 <Ban className="h-3.5 w-3.5" />
@@ -1078,7 +1078,7 @@ export default function ChatPage() {
       </div>
     );
   }
-  if (!moi.pseudo) return <ChoixPseudo userId={moi.user_id} onChoisi={() => mutate()} />;
+  if (!moi.pseudo) return <ChoixPseudo userId={moi.auteur_id} onChoisi={() => mutate()} />;
   return (
     <Salon
       moi={moi}

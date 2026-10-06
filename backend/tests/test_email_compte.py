@@ -17,11 +17,13 @@ def test_confirmation_newsletter():
     assert "instagram.com/blackturf.fr" in html and "aucune lettre" in texte
 
 
-def test_verification_echappe_le_prenom():
+def test_verification_n_insere_pas_le_prenom():
+    """Le mail part avant toute preuve de la boîte : un prénom saisi par un tiers
+    ne doit pas y écrire son texte (lien, arnaque) sous la marque BlackTurf."""
     lien = "https://blackturf.fr/verifier-email?token=abc"
-    html, texte = ec.verification_adresse("<script>", lien)
+    html, texte = ec.verification_adresse("<script>Gagnez", lien)
     _commun(html, texte, lien)
-    assert "<script>" not in html and "&lt;script&gt;" in html
+    assert "Gagnez" not in html and "Gagnez" not in texte
     assert "24 heures" in html
 
 

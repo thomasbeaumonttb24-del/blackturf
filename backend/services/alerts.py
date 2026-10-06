@@ -19,6 +19,7 @@ from api.config import get_settings
 from db.models import User, AlerteLog
 from services.valuebets_visibilite import filtres_sql as _vb_filtres_sql
 from services.email_verification import clause_email_utilisable
+from services.journal import masquer_email
 
 settings = get_settings()
 log = structlog.get_logger()
@@ -143,7 +144,7 @@ async def send_email(
         return ResultatEnvoi(False, "RESEND_API_KEY absente")
 
     if "PYTEST_CURRENT_TEST" in os.environ:
-        log.info("alerts.email.bloque_en_test", to=to, subject=subject[:80])
+        log.info("alerts.email.bloque_en_test", to=masquer_email(to), subject=subject[:80])
         return ResultatEnvoi(False, "envoi bloqué sous pytest")
 
     payload = {
@@ -173,7 +174,7 @@ async def send_email(
             resp.raise_for_status()
             return ResultatEnvoi(True, provider_id=resp.json().get("id"))
     except Exception as e:
-        log.error("alerts.email.failed", to=to, error=str(e))
+        log.error("alerts.email.failed", to=masquer_email(to), error=str(e))
         return ResultatEnvoi(False, f"{type(e).__name__}: {e}"[:400])
 
 

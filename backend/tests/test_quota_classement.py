@@ -185,7 +185,10 @@ async def test_alias_d_inscription_ne_donnent_pas_un_second_classement(client, d
     h1 = await inscrire(email="malin@gmail.com")
     r = await client.post("/api/v1/auth/register", json={
         "email": "malin+bis@gmail.com", "password": "TestPassword123!", "pseudo": "malinbis"})
-    assert r.status_code == 400
+    # Réponse identique à une inscription neuve (anti-énumération), mais AUCUN
+    # compte n'est créé pour l'alias.
+    assert r.status_code == 200
+    assert (await db.execute(select(User).where(User.email == "malin+bis@gmail.com"))).scalar_one_or_none() is None
     # Alias hérité (créé avant la règle) : on le pose en base et on s'y connecte.
     db.add(User(user_id=str(uuid.uuid4()), email="malin+bis@gmail.com", hashed_password=_hash("TestPassword123!"),
                 plan="free", email_verified=True, pseudo="malinbis"))

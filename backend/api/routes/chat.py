@@ -10,6 +10,8 @@ Accès : tout compte connecté (gratuit compris) — un salon vide ne crée aucu
 Écrire exige un pseudo et une adresse confirmée. La modération (suppression,
 bannissement, signalements) est réservée à l'admin.
 """
+import hashlib
+import hmac
 import json
 import re
 from datetime import datetime, timezone
@@ -23,6 +25,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
+from api.config import get_settings
 from api.routes.auth import get_current_user, require_admin
 from db import redis_client
 from db.database import get_db
@@ -61,13 +64,26 @@ def _iso(dt: Optional[datetime]) -> Optional[str]:
     return dt.isoformat()
 
 
+def alias_auteur(user_id: str) -> str:
+    """Identifiant PUBLIC d'un membre dans le salon, stable mais opaque.
+
+    Le `user_id` réel partait dans chaque message, donc chez tous les membres
+    connectés : c'est la clé de toutes les routes d'administration et de
+    support. Le salon n'a besoin que de reconnaître un auteur (« c'est moi »,
+    regroupement, couleur d'avatar) : une empreinte HMAC suffit, et elle ne se
+    remonte pas jusqu'au compte sans la clé du serveur.
+    """
+    cle = get_settings().secret_key.encode()
+    return hmac.new(cle, f"chat:{user_id}".encode(), hashlib.sha256).hexdigest()[:16]
+
+
 def _serialiser(msg: ChatMessage, auteur: User) -> dict:
     return {
         "message_id": msg.message_id,
         "contenu": msg.contenu,
         "created_at": _iso(msg.created_at),
         "auteur": {
-            "user_id": auteur.user_id,
+            "id": alias_auteur(auteur.user_id),
             "pseudo": auteur.pseudo or "Membre",
             "role": _role(auteur),
         },
@@ -144,6 +160,8 @@ class SignalementIn(BaseModel):
 async def chat_moi(user: User = Depends(get_current_user)):
     return {
         "user_id": user.user_id,
+        # Son propre alias : c'est lui que portent les messages (cf. alias_auteur).
+        "auteur_id": alias_auteur(user.user_id),
         "pseudo": user.pseudo,
         "banni": user.chat_banni_at is not None,
         "email_confirme": email_confirme(user),
@@ -273,7 +291,7 @@ async def envoyer_message(
     await db.commit()
 
     await publier({"type": "message", "message": payload})
-    await signaler_aux_barres_de_navigation(payload["auteur"]["user_id"])
+    await signaler_aux_barres_de_navigation(payload["auteur"]["id"])
     return payload
 
 
@@ -418,8 +436,15 @@ async def bannir(
     db: AsyncSession = Depends(get_db),
 ):
     cible = await db.get(User, user_id)
+    if cible is None:
+        # Bannissement depuis un message : l'écran ne connaît que l'alias public
+        # de l'auteur. Seuls ceux qui ont écrit peuvent être visés par ce chemin.
+        auteurs = (await db.execute(select(ChatMessage.user_id).distinct())).scalars().all()
+        reel = next((u for u in auteurs if hmac.compare_digest(alias_auteur(u), user_id)), None)
+        cible = await db.get(User, reel) if reel else None
     if not cible:
         raise HTTPException(status_code=404, detail="Membre introuvable.")
+    user_id = cible.user_id
     if body.banni and cible.is_admin:
         raise HTTPException(status_code=422, detail="Un administrateur ne peut pas être banni.")
 

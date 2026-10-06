@@ -1,3 +1,4 @@
+import { apiServeurV1, initServeur } from "@/lib/apiServeur";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { ImageResponse } from "next/og";
@@ -12,7 +13,9 @@ import {
 // cache suffit et évite de recomposer un plan de 3104 × 2700 à chaque appel.
 export const revalidate = 900;
 
-const API = (process.env.NEXT_PUBLIC_API_URL || "https://api.blackturf.fr") + "/api/v1";
+// Lecture serveur : réseau Docker + en-tête interne en production (cf. lib/apiServeur.ts),
+// pour ne plus partager le quota par IP de nginx avec tout le rendu serveur du site.
+const API = apiServeurV1();
 
 /**
  * Les polices sont EMBARQUÉES, pas référencées.
@@ -52,7 +55,7 @@ async function donnees(semaine: string | null): Promise<DonneesMosaique> {
     // Sans cache : ce visuel est publié dans le fil le dimanche. Le cache de données
     // sert la réponse PÉRIMÉE d'abord — c'est ce qui a fait partir la story du
     // 2026-09-10 à « 0 € rendu ». Cf. `visuels/story.jpg/route.tsx`.
-    const res = await fetch(url.toString(), { cache: "no-store" });
+    const res = await fetch(url.toString(), initServeur({ cache: "no-store" }));
     if (res.ok) {
       const d = await res.json();
       const a = d.analyse ?? {};

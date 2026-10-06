@@ -8,6 +8,19 @@ services:
   db:
     image: timescale/timescaledb:latest-pg16
     container_name: blackturf_db
+    # Plafond de processus/threads (pids cgroup). Sans lui, chaque conteneur peut
+    # créer jusqu'à la limite de l'HÔTE : une fork-bomb ou une fuite de threads
+    # dans un seul service (les 282 zombies du scraper le 09/09 en sont une
+    # version lente) épuise les PID de toute la machine et bloque aussi sshd.
+    # PostgreSQL = un processus par connexion (max_connections=50) + les workers
+    # parallèles et ceux de TimescaleDB : 1024 laisse une marge large.
+    # Interdit tout gain de privilège par setuid/setcap APRÈS le démarrage.
+    # L'entrypoint de l'image (chown du PGDATA puis bascule root → postgres par
+    # gosu) n'en a pas besoin : gosu abaisse des privilèges, il n'en acquiert pas.
+    # PAS de cap_drop ALL ici : ce même entrypoint a besoin de CHOWN, SETUID et
+    # SETGID au démarrage.
+    security_opt:
+      - no-new-privileges:true
     # /dev/shm : Docker plafonne à 64 Mo par défaut, et PostgreSQL y alloue la
     # mémoire partagée DYNAMIQUE de ses workers parallèles (~8 Mo par segment).
     # Sous 64 Mo, tout plan parallèle sur une grosse table meurt en
@@ -57,6 +70,7 @@ services:
     deploy:
       resources:
         limits:
+          pids: 1024   # plafond de PID (fork bomb) ; pids_limit est refusé à côté de deploy.resources.limits
           memory: 1.5G
         reservations:
           memory: 512M
@@ -64,18 +78,58 @@ services:
   redis:
     image: redis:7-alpine
     container_name: blackturf_redis
-    command: >
-      redis-server
-      --requirepass ${REDIS_PASSWORD}
-      --maxmemory 256mb
-      --maxmemory-policy allkeys-lru
-      --save 900 1
-      --save 300 10
-      --loglevel warning
+    # cf. service db. Même raison de ne pas retirer les capacités : l'entrypoint
+    # de l'image fait un chown de /data puis bascule sur l'utilisateur redis.
+    security_opt:
+      - no-new-privileges:true
+    # Forme LISTE (et non scalaire replié) : les `""` de rename-command doivent
+    # arriver comme argument VIDE, sans dépendre du découpage façon shell de compose.
+    # Une valeur par élément (« 900 », « 1 ») : redis-server cite chaque argument,
+    # un « 900 1 » d'un bloc deviendrait UN paramètre de save, refusé au démarrage.
+    #
+    # volatile-lru et non allkeys-lru : sous pression mémoire, allkeys-lru pouvait
+    # évincer N'IMPORTE QUELLE clé — files et jobs RQ, verrous (retrain, jobs du
+    # scheduler), compteurs de quota. Une éviction de verrou relance un retrain en
+    # double ; une éviction de compteur lève un quota. volatile-lru n'évince que
+    # les clés à TTL (les caches). Contrepartie assumée : si la mémoire se remplit
+    # de clés SANS TTL, Redis refuse les écritures (erreur OOM visible dans les
+    # journaux) au lieu de jeter des données en silence.
+    #
+    # FLUSHALL et DEBUG désactivés (renommés en chaîne vide) : aucun code du dépôt
+    # ne les appelle (vérifié le 06/10, tests compris). Un mot de passe volé ne
+    # permettra ni d'effacer toute la base d'un coup, ni de faire planter ou de
+    # sonder le processus (DEBUG SEGFAULT, DEBUG RELOAD…).
+    command:
+      - redis-server
+      - --requirepass
+      - ${REDIS_PASSWORD}
+      - --maxmemory
+      - 256mb
+      - --maxmemory-policy
+      - volatile-lru
+      - --save
+      - "900"
+      - "1"
+      - --save
+      - "300"
+      - "10"
+      - --loglevel
+      - warning
+      - --rename-command
+      - FLUSHALL
+      - ""
+      - --rename-command
+      - DEBUG
+      - ""
+    # Mot de passe du healthcheck passé par l'ENVIRONNEMENT (REDISCLI_AUTH, lu
+    # nativement par redis-cli) et non par `-a` : en argument, il s'affichait dans
+    # `ps` sur l'hôte toutes les 10 s, pour tout utilisateur de la machine.
+    environment:
+      - REDISCLI_AUTH=${REDIS_PASSWORD}
     volumes:
       - redis_data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "--no-auth-warning", "-a", "${REDIS_PASSWORD}", "ping"]
+      test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -83,6 +137,7 @@ services:
     deploy:
       resources:
         limits:
+          pids: 512   # plafond de PID (fork bomb) ; pids_limit est refusé à côté de deploy.resources.limits
           memory: 384M
         reservations:
           memory: 128M
@@ -131,6 +186,10 @@ services:
       # « scraper muet » une source volontairement mise en sommeil.
       - SCRAPER_DISABLED_SOURCES=${SCRAPER_DISABLED_SOURCES:-}
       - SECRET_KEY=${SECRET_KEY}
+      # Secret partage avec le frontend (en-tete X-BT-Interne) : exempte le rendu
+      # serveur des quotas par IP (cf. api/config.py::bt_secret_interne). Vide =
+      # exemption coupee. nginx efface cet en-tete sur tout ce qui vient d'Internet.
+      - BT_SECRET_INTERNE=${BT_SECRET_INTERNE:-}
       # Duree de vie des jetons. ABSENTE de ce bloc jusqu'au 19/08 : le .env
       # declarait ACCESS_TOKEN_EXPIRE_MINUTES=60 mais la variable n'atteignait
       # jamais le conteneur, qui retombait sur le defaut du code (720 min). Un
@@ -218,6 +277,7 @@ services:
     deploy:
       resources:
         limits:
+          pids: 512   # plafond de PID (fork bomb) ; pids_limit est refusé à côté de deploy.resources.limits
           memory: 1536M
         reservations:
           memory: 256M
@@ -227,6 +287,17 @@ services:
       context: ./backend
       dockerfile: Dockerfile.scraper
     container_name: blackturf_scraper
+    # 1024 et non 512 : chromium (Playwright) compte un PID par THREAD, et un seul
+    # navigateur ouvert sur quelques pages en porte déjà plusieurs centaines
+    # (processus navigateur, GPU, réseau, un renderer par page), plus le driver
+    # node et les threads python. Le défaut de l'hôte (8039 mesuré le 09/09) n'a
+    # jamais été une protection : c'est lui que les zombies remplissaient.
+    # Sans risque pour le navigateur : chromium est lancé en --no-sandbox (pas de
+    # binaire setuid chrome-sandbox à exécuter). PAS de cap_drop ALL : non mesuré
+    # sur les navigateurs headless, et le gain est faible pour un processus qui
+    # tourne déjà en uid 1001 (USER du Dockerfile.scraper).
+    security_opt:
+      - no-new-privileges:true
     # Le scraper tournait en root, seul des huit conteneurs dans ce cas, parce que
     # Playwright installait chromium sous /root/.cache/ms-playwright — inaccessible
     # à un utilisateur non privilégié. Dockerfile.scraper l'installe désormais dans
@@ -307,6 +378,7 @@ services:
     deploy:
       resources:
         limits:
+          pids: 1024   # plafond de PID (fork bomb) ; pids_limit est refusé à côté de deploy.resources.limits
           memory: 1.5G
         reservations:
           memory: 512M
@@ -400,6 +472,7 @@ services:
     deploy:
       resources:
         limits:
+          pids: 512   # plafond de PID (fork bomb) ; pids_limit est refusé à côté de deploy.resources.limits
           # 4G : au-dessus du pic réel du retrain 3 mois une fois le dataset
           # streamé et les arènes rendues au noyau (cf. logs `pipeline.rss`).
           # Le point n'est PAS d'accorder le maximum possible : c'est de faire
@@ -427,10 +500,26 @@ services:
         # pendant que 22 349 tentatives d'envoi étaient journalisées en échec.
         - NEXT_PUBLIC_VAPID_PUBLIC_KEY=${VAPID_PUBLIC_KEY}
     container_name: blackturf_frontend
+    # Le serveur Next tourne en uid 1001 (USER nextjs du Dockerfile) sur le port
+    # 3000 : il n'a besoin d'AUCUNE capacité, ni pour démarrer ni pour écrire son
+    # cache ISR (.next/cache lui appartient). D'où cap_drop ALL, sans exception.
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     environment:
       - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
       - NEXT_PUBLIC_WS_URL=${NEXT_PUBLIC_WS_URL}
       - NEXT_PUBLIC_VAPID_PUBLIC_KEY=${VAPID_PUBLIC_KEY}
+      # Rendu serveur → API par le réseau Docker, sans repasser par nginx et son
+      # quota par IP (partagé par TOUTES les pages rendues côté serveur). Variables
+      # de RUNTIME, volontairement absentes des `build.args` : hors du préfixe
+      # NEXT_PUBLIC_, Next ne les inline jamais dans le bundle navigateur, et le
+      # secret n'a rien à faire dans une couche d'image. Lues par
+      # frontend/src/lib/apiServeur.ts. Le frontend et l'api partagent le réseau
+      # par défaut du projet compose (aucun `networks:` déclaré).
+      - API_URL_INTERNE=http://api:8000
+      - BT_SECRET_INTERNE=${BT_SECRET_INTERNE:-}
       - NEXTAUTH_SECRET=${NEXTAUTH_SECRET}
       - NEXTAUTH_URL=${NEXTAUTH_URL}
       - NODE_ENV=production
@@ -438,11 +527,17 @@ services:
     deploy:
       resources:
         limits:
+          pids: 512   # plafond de PID (fork bomb) ; pids_limit est refusé à côté de deploy.resources.limits
           memory: 512M
 
   nginx:
     image: nginx:alpine
     container_name: blackturf_nginx
+    # cf. service db. PAS de cap_drop ALL : le maître nginx démarre en root pour
+    # écouter sur 80/443 (NET_BIND_SERVICE) puis bascule ses workers sur
+    # l'utilisateur nginx (SETUID/SETGID) ; l'entrypoint fait aussi des chown.
+    security_opt:
+      - no-new-privileges:true
     ports:
       - "80:80"
       - "443:443"
@@ -475,6 +570,7 @@ services:
     deploy:
       resources:
         limits:
+          pids: 512   # plafond de PID (fork bomb) ; pids_limit est refusé à côté de deploy.resources.limits
           memory: 128M
 
   scheduler:
@@ -570,7 +666,11 @@ services:
     deploy:
       resources:
         limits:
-          memory: 512M
+          pids: 512   # plafond de PID (fork bomb) ; pids_limit est refusé à côté de deploy.resources.limits
+          # 512M → 1G : le conteneur était tué par l'OOM killer de son cgroup
+          # chaque nuit vers 03:00, quand les jobs lourds de la nuit se
+          # superposent. Un scheduler tué perd les jobs en cours sans les rejouer.
+          memory: 1G
         reservations:
           memory: 128M
 

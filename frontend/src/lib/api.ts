@@ -401,11 +401,15 @@ export type ChatMessage = {
   message_id: string;
   contenu: string;
   created_at: string;
-  auteur: { user_id: string; pseudo: string; role: "admin" | "abonne" | "membre" };
+  // `id` : alias opaque de l'auteur (jamais son user_id réel), stable d'un message
+  // à l'autre. Sert à reconnaître ses propres messages et à colorer l'avatar.
+  auteur: { id: string; pseudo: string; role: "admin" | "abonne" | "membre" };
 };
 
 export type ChatMoi = {
   user_id: string;
+  /** Son propre alias de salon, à comparer à `ChatMessage.auteur.id`. */
+  auteur_id: string;
   pseudo: string | null;
   banni: boolean;
   email_confirme: boolean;
@@ -449,6 +453,7 @@ export const chatApi = {
   signalements: () => api.get<{ signalements: ChatSignalement[] }>("/chat/moderation/signalements"),
   classerSignalement: (id: string) => api.post(`/chat/moderation/signalements/${id}/classer`),
   bannis: () => api.get<{ bannis: ChatBanni[] }>("/chat/moderation/bannis"),
+  // `userId` : user_id réel (liste des bannis) ou alias d'auteur (depuis un message).
   bannir: (userId: string, banni: boolean, effacerMessages = false) =>
     api.put(`/chat/moderation/bannis/${userId}`, { banni, effacer_messages: effacerMessages }),
 };

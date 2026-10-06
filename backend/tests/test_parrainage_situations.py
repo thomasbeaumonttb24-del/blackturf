@@ -302,7 +302,8 @@ async def test_client_existant_ne_peut_pas_se_faire_parrainer(client, db, monkey
     ancien = await _compte(db, "Ancien")
     r = await client.post("/api/v1/auth/register", json={
         "email": ancien.email, "password": "motdepasse123", "pseudo": "Ancien", "code_parrain": await P.code_de(paul, db)})
-    assert r.status_code == 400
+    # Réponse identique à une inscription neuve (anti-énumération), sans effet.
+    assert r.status_code == 200
     await db.refresh(ancien)
     assert ancien.parraine_par_id is None
     assert (await db.execute(select(Parrainage))).first() is None

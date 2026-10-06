@@ -596,6 +596,15 @@ async def delete_user(
     return {"ok": True, "email": email, "supprime": supprime}
 
 
+def cellule_csv(v):
+    """Neutralise l'injection de formule : un nom saisi « =HYPERLINK(...) » ou
+    « +cmd|... » s'exécutait à l'ouverture de l'export dans Excel / LibreOffice.
+    L'apostrophe de tête force le tableur à lire du texte. Nombres intacts."""
+    if isinstance(v, str) and v[:1] in ("=", "+", "-", "@", "\t", "\r"):
+        return "'" + v
+    return v
+
+
 @router.get("/users-export")
 async def export_users_csv(
     db: AsyncSession = Depends(get_db),
@@ -628,7 +637,7 @@ async def export_users_csv(
                 f"Defi {mois} solde (pts)", "Rang", "Paris", "Gagnes", "ROI %"])
     for u in users:
         d = defi_par_user.get(u.user_id) or {}
-        w.writerow([u.email, u.nom or "", u.prenom or "", u.plan, u.profil_risque,
+        w.writerow([cellule_csv(c) for c in [u.email, u.nom or "", u.prenom or "", u.plan, u.profil_risque,
                     "google" if u.google_id else "email", "oui" if u.email_verified else "non",
                     "oui" if u.is_active else "non", "oui" if u.is_admin else "non",
                     u.created_at.strftime("%Y-%m-%d %H:%M") if u.created_at else "",
@@ -637,7 +646,7 @@ async def export_users_csv(
                     sub_status.get(u.user_id) or ("checkout abandonne" if u.stripe_customer_id else ""),
                     d.get("solde", _defi.CAPITAL_MENSUEL), d.get("rang") or "",
                     d.get("nb_paris", 0), d.get("nb_gagnes", 0),
-                    "" if d.get("roi") is None else d["roi"]])
+                    "" if d.get("roi") is None else d["roi"]]])
     out.seek(0)
     return StreamingResponse(iter([out.getvalue()]), media_type="text/csv",
                              headers={"Content-Disposition": "attachment; filename=blackturf_comptes.csv"})

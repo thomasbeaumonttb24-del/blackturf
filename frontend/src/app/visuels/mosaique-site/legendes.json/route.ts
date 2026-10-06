@@ -1,9 +1,12 @@
+import { apiServeurV1, initServeur } from "@/lib/apiServeur";
 import { MENTION_LEGALE } from "@/lib/visuels";
 
 export const revalidate = 3600;
 
 const SITE = "https://blackturf.fr";
-const API = (process.env.NEXT_PUBLIC_API_URL || "https://api.blackturf.fr") + "/api/v1";
+// Lecture serveur : réseau Docker + en-tête interne en production (cf. lib/apiServeur.ts),
+// pour ne plus partager le quota par IP de nginx avec tout le rendu serveur du site.
+const API = apiServeurV1();
 
 const nb = (n: number) => n.toLocaleString("fr-FR").replace(/[  ]/g, " ");
 const pct = (n: number) => `${n.toLocaleString("fr-FR", { maximumFractionDigits: 1 })} %`;
@@ -58,7 +61,7 @@ export async function GET() {
   let favoriGagnant: number | null = null;
   let coursesMesurees = 0;
   try {
-    const res = await fetch(`${API}/stats/chiffres-site`, { next: { revalidate: 3600 } });
+    const res = await fetch(`${API}/stats/chiffres-site`, initServeur({ next: { revalidate: 3600 } }));
     if (res.ok) {
       const d = await res.json();
       coursesEnBase = Number(d.courses_en_base ?? 0);

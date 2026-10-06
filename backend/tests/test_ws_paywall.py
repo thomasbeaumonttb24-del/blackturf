@@ -118,7 +118,7 @@ async def test_le_cookie_authentifie_la_socket(db, monkeypatch):
     ws = _make_ws()
     ws.cookies = {"access_token": _token_for(user_id)}
 
-    await ws_value_bets(ws, token="")
+    await ws_value_bets(ws)
 
     # Plan gratuit → refus 4403 : la socket a bien été AUTHENTIFIÉE par le cookie
     # (sans cela le refus serait 4401, faute d'identité).
@@ -158,8 +158,9 @@ async def test_plan_gratuit_rejette_avec_4403(db, monkeypatch, plan):
     user_id = await _create_user(db, plan)
     token = _token_for(user_id)
     ws = _make_ws()
+    ws.cookies = {"access_token": token}
 
-    await ws_value_bets(ws, token=token)
+    await ws_value_bets(ws)
 
     assert ws.closed_with == [4403]
     assert ws.sent == [], "aucune donnée value bet ne doit fuiter avant le close"
@@ -172,8 +173,9 @@ async def test_plan_abonne_recoit_le_flux(db, monkeypatch, plan):
     user_id = await _create_user(db, plan)
     token = _token_for(user_id)
     ws = _make_ws()
+    ws.cookies = {"access_token": token}
 
-    await ws_value_bets(ws, token=token)
+    await ws_value_bets(ws)
 
     assert 4403 not in ws.closed_with, f"plan={plan} devrait passer le paywall"
     assert len(ws.sent) >= 1
@@ -186,8 +188,9 @@ async def test_token_invalide_rejette_avec_4401_pas_4403(db, monkeypatch):
     paywall (4403) — les deux codes ne doivent jamais se confondre."""
     _patch_session_factory(monkeypatch, db)
     ws = _make_ws()
+    ws.cookies = {"access_token": "token-invalide"}
 
-    await ws_value_bets(ws, token="token-invalide")
+    await ws_value_bets(ws)
 
     assert ws.closed_with == [4401]
 
@@ -219,7 +222,8 @@ async def test_plan_standard_applique_le_delai_15min(db, monkeypatch):
     await db.commit()
 
     ws = _make_ws()
-    await ws_value_bets(ws, token=token)
+    ws.cookies = {"access_token": token}
+    await ws_value_bets(ws)
 
     assert ws.sent[0]["data"] == [], "value bet détecté < 15 min doit être masqué pour Standard"
 
@@ -248,7 +252,8 @@ async def test_plan_expert_ne_subit_pas_le_delai(db, monkeypatch):
     await db.commit()
 
     ws = _make_ws()
-    await ws_value_bets(ws, token=token)
+    ws.cookies = {"access_token": token}
+    await ws_value_bets(ws)
 
     assert len(ws.sent[0]["data"]) == 1, "Expert doit voir le value bet immédiatement"
 
