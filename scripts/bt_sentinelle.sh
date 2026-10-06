@@ -97,7 +97,9 @@ if [ -f "$ETAT/ports" ]; then
   nouveaux=$(comm -13 "$ETAT/ports" <(echo "$PORTS") | tr '\n' ' ')
   [ -n "${nouveaux// /}" ] && alerte "ports_$nouveaux" "Nouveau port en ecoute sur le serveur : <b>$nouveaux</b>"
 fi
-echo "$PORTS" > "$ETAT/ports"
+# Union de tout ce qui a deja ete vu : un deploiement recree db/redis, leurs ports
+# disparaissent une minute puis reviennent — ce n'est pas un « nouveau » port.
+{ cat "$ETAT/ports" 2>/dev/null; echo "$PORTS"; } | grep -v '^$' | sort -u > "$ETAT/ports.tmp" && mv "$ETAT/ports.tmp" "$ETAT/ports"
 CONTENEURS=$(docker ps --format '{{.Names}}' | sort)
 inconnus=$(echo "$CONTENEURS" | grep -vE '^blackturf_(api|frontend|worker|scheduler|scraper|db|redis|nginx)$' | grep -v '^$' | grep -vE '^(gate|test|verif|tmp)' | tr '\n' ' ')
 [ -n "${inconnus// /}" ] && alerte "conteneur_$inconnus" "Conteneur inconnu en marche : <b>$inconnus</b>"
