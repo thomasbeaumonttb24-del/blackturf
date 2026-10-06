@@ -7,7 +7,7 @@ déduplique pas les essais par client. Un même utilisateur pouvait donc
 enchaîner : essai 7 jours → annulation automatique faute de carte → nouveau
 checkout → 7 jours de plus, indéfiniment.
 
-Ce n'est pas théorique : le compte ``mahbouba504@yahoo.com`` cumulait
+Ce n'est pas théorique : un compte client cumulait
 3 abonnements ``trialing`` simultanés (2 Standard + 1 Expert) ouverts en 24 h,
 tous sans moyen de paiement.
 

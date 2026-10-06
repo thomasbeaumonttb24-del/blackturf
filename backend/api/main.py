@@ -94,6 +94,9 @@ app = FastAPI(
     version="1.0.0",
     docs_url="/api/docs" if settings.environment != "production" else None,
     redoc_url="/api/redoc" if settings.environment != "production" else None,
+    # Le schéma décrit chaque route et chaque paramètre : en production il ne sert
+    # qu'à cartographier l'API. nginx le masquait ; l'app ne le sert plus non plus.
+    openapi_url="/api/openapi.json" if settings.environment != "production" else None,
     lifespan=lifespan,
 )
 

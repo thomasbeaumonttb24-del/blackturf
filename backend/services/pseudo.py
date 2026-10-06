@@ -31,11 +31,32 @@ class PseudoRefuse(ValueError):
         self.code = code
 
 
+# Caractères qui se lisent comme une lettre réservée : « BIackTurf » (i majuscule),
+# « 4dmin », « m0do », « àdmin » passaient le contrôle et imitaient l'équipe.
+_SOSIES = str.maketrans({"0": "o", "1": "l", "3": "e", "4": "a", "5": "s", "7": "t",
+                         "8": "b", "_": "", ".": "", "-": ""})
+
+
+def _squelette(p: str) -> str:
+    """Forme ramenée à ses lettres de base, pour comparer aux mots réservés."""
+    import unicodedata
+    sans_accents = "".join(c for c in unicodedata.normalize("NFKD", p)
+                           if not unicodedata.combining(c))
+    return sans_accents.lower().translate(_SOSIES)
+
+
+def _reserve(p: str) -> bool:
+    s = _squelette(p)
+    # « I » majuscule et « l » se confondent à l'écran : on teste les deux lectures.
+    variantes = {s, s.replace("i", "l"), s.replace("l", "i")}
+    return any(m in v for v in variantes for m in MOTS_RESERVES)
+
+
 def normaliser(pseudo: Optional[str], *, admin: bool = False) -> str:
     p = (pseudo or "").strip()
     if not PSEUDO_RE.match(p):
         raise PseudoRefuse(MSG_FORMAT)
-    if not admin and any(m in p.lower() for m in MOTS_RESERVES):
+    if not admin and _reserve(p):
         raise PseudoRefuse(MSG_RESERVE)
     return p
 

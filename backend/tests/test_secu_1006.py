@@ -196,3 +196,14 @@ async def test_ws_refuse_compte_desactive_et_jeton_revoque(db, monkeypatch):
     u.is_active = False
     await db.commit()
     assert await wsmod._get_user_from_token(jeton) is None
+
+
+def test_pseudo_sosie_de_l_equipe_refuse():
+    """« BIackTurf » (i majuscule), « 4dmin », « àdmin » imitaient l'équipe dans le chat."""
+    import pytest as _pytest
+    from services.pseudo import PseudoRefuse, normaliser
+    for sosie in ("BIackTurf", "4dmin", "àdmin", "Adm1n", "m0do", "Supp0rt", "St4ff", "black_turf"):
+        with _pytest.raises(PseudoRefuse):
+            normaliser(sosie)
+    for honnete in ("Joueur5", "Pilou", "Turfiste75", "Lilou"):
+        assert normaliser(honnete) == honnete

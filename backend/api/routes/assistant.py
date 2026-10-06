@@ -226,7 +226,9 @@ async def _execute_tool(
 
     except Exception as e:
         log.error("assistant.tool_error", tool=tool_name, error=str(e))
-        return json.dumps({"error": str(e)})
+        # Jamais le texte brut de l'exception : il peut contenir du SQL ou des noms
+        # de tables, que le modèle recopierait tel quel dans sa réponse.
+        return json.dumps({"error": "Donnée momentanément indisponible"})
     return json.dumps({"error": "Tool inconnu"})
 
 

@@ -152,10 +152,18 @@ if deux_fois "dispo" "$([ "$code_site" != 200 ] || [ "$code_api" != 200 ] && ech
 fi
 
 # ── 8. Charge machine (minage, saturation) ──────────────────────────────────
+# Un deploiement (docker compose build) monte la charge a 16-18 pendant plusieurs
+# minutes : pas une attaque. On ne juge que hors build, et sur 5 passages (10 min).
 charge=$(awk '{print int($1)}' /proc/loadavg); coeurs=$(nproc)
-if deux_fois "charge" "$([ "$charge" -gt $((coeurs * 3)) ] && echo 1 || echo 0)"; then
+en_build=0
+pgrep -f "^/usr/libexec/docker/cli-plugins/docker-compose" >/dev/null && en_build=1
+pgrep -x "docker-buildx" >/dev/null && en_build=1
+n=$(cat "$ETAT/charge_n" 2>/dev/null || echo 0)
+if [ "$en_build" = 0 ] && [ "$charge" -gt $((coeurs * 3)) ]; then n=$((n + 1)); else n=0; fi
+echo "$n" > "$ETAT/charge_n"
+if [ "$n" -ge 5 ]; then
   proc=$(ps -eo pcpu,comm --sort=-pcpu | sed -n 2,4p | tr -s ' ' | tr '\n' ';')
-  alerte "charge" "Serveur sature : charge <b>$charge</b> pour $coeurs coeurs. Processus en tete : $proc"
+  alerte "charge" "Serveur sature depuis 10 min (hors deploiement) : charge <b>$charge</b> pour $coeurs coeurs. Processus en tete : $proc"
 fi
 
 # ── Envoi ───────────────────────────────────────────────────────────────────
