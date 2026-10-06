@@ -40,7 +40,7 @@ from sqlalchemy import select, text
 from db.database import AsyncSessionLocal
 from db.models import ModelVersion
 
-DEST = os.getenv("RETRAIN_REPORT_TO", "thomas.beaumont.tb24@gmail.com")
+DEST = os.getenv("RETRAIN_REPORT_TO") or os.getenv("ADMIN_EMAIL") or "contact@blackturf.fr"
 WORKER_CONTAINER = os.getenv("BT_WORKER_CONTAINER", "blackturf_worker")
 
 # Fenêtre de LECTURE DES LOGS, en heures. Même valeur que le `--since` du wrapper

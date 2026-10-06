@@ -47,7 +47,9 @@ db() { docker exec blackturf_db sh -c "psql -U \"\$POSTGRES_USER\" -d \"\$POSTGR
 # changeantes : une connexion suivie d'un `reset: moving to origin/main` dans les
 # 5 min est un deploiement. On juge donc les connexions vieilles de 6 a 30 min.
 CONNUES="$ETAT/ip_connues"
-[ -f "$CONNUES" ] || printf '37.67.80.149\n81.65.152.46\n90.61.184.236\n127.0.0.1\n' > "$CONNUES"
+# Liste tenue SUR LE SERVEUR uniquement (le depot est public). Absente = toute
+# connexion hors deploiement alerte, ce qui est le cote sur.
+[ -f "$CONNUES" ] || printf '127.0.0.1\n' > "$CONNUES"
 VUES="$ETAT/ssh_vues"; touch "$VUES"
 RESETS=$(cd "$DEPOT" && git reflog --date=unix -50 2>/dev/null | grep "reset: moving to origin" | sed -E 's/.*HEAD@\{([0-9]+)\}.*/\1/')
 journalctl -u ssh --since "-30 min" --until "-6 min" -o short-unix --no-pager 2>/dev/null \

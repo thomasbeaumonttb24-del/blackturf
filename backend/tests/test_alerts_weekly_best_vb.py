@@ -22,6 +22,7 @@ from services.alerts import (
     notify_value_bets, send_morning_digest, _digest_email_html,
 )
 from api.routes.auth import _hash
+from services import email_campaigns
 
 pytestmark = pytest.mark.asyncio
 
@@ -375,7 +376,7 @@ async def test_digest_quotidien_idempotent(db: AsyncSession, monkeypatch):
     await send_morning_digest(db)  # relance manuelle / restart le même jour
 
     assert mock_email.await_count == 2
-    assert {call.kwargs["to"] for call in mock_email.await_args_list} == {user.email, "thomas.beaumont.tb24@gmail.com"}
+    assert {call.kwargs["to"] for call in mock_email.await_args_list} == {user.email, email_campaigns.CONTROL_ADDRESS}
     assert "Cheval DIGEST1" in mock_email.await_args_list[0].kwargs["html"]
     logs = (await db.execute(
         select(AlerteLog).where(

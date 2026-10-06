@@ -482,10 +482,14 @@ async def seed(reset: bool = False):
 
         # ── 6. Users ────────────────────────────────────────────────────────
         print("[seed] Users...")
+        # Jamais de mot de passe admin connu d'avance : le dépôt est public, un mot
+        # de passe écrit ici serait le premier essai de n'importe quel attaquant.
+        import secrets as _secrets
+        mdp_admin = os.getenv("SEED_ADMIN_PASSWORD") or _secrets.token_urlsafe(12)
         admin = User(
             user_id=str(uuid.uuid4()),
             email="admin@blackturf.fr",
-            hashed_password=_hash("Admin123!"),
+            hashed_password=_hash(mdp_admin),
             nom="Admin", prenom="BlackTurf",
             plan="expert", is_admin=True, email_verified=True,
             bankroll_initiale=1000.0,
@@ -562,7 +566,7 @@ async def seed(reset: bool = False):
     print(f"  Courses      : 18 (6 terminees / 12 a venir)")
     print(f"  Participations: ~{len(CHEVAUX_DATA) * 18 // 3} estimees")
     print("  Comptes de test :")
-    print("    admin@blackturf.fr     / Admin123!  [admin, expert]")
+    print(f"    admin@blackturf.fr     / {mdp_admin}  [admin, expert]")
     print("    expert@blackturf.fr    / Expert123! [expert]")
     print("    demo@blackturf.fr      / Demo123!   [free]")
     print("=" * 55)

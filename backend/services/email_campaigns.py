@@ -26,7 +26,9 @@ def editorial_enabled():
     return os.getenv("EMAIL_EDITORIAL_ENABLED", "0") == "1"
 
 
-CONTROL_ADDRESS = "thomas.beaumont.tb24@gmail.com"
+# Lue dans l'environnement (ADMIN_EMAIL du .env, présente dans api/worker/scheduler) :
+# le dépôt est public, une adresse personnelle n'a rien à y faire.
+CONTROL_ADDRESS = (os.getenv("ADMIN_EMAIL") or "contact@blackturf.fr").strip().lower()
 
 
 async def send_control_copy(session, campaign, subject, html, plain, now):

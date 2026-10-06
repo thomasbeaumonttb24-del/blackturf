@@ -103,3 +103,13 @@ blackturf-deploy-*.tar
 # Journaux nginx persistants (montes dans le conteneur) — jamais versionnes.
 nginx/logs/*
 !nginx/logs/.gitkeep
+
+# Notes internes (passations, audits, reste a faire) : jamais dans le depot public.
+# Copies dans Desktop/BlackTurf/_docs_prives.
+/HANDOFF_*.md
+/RESTE_A_FAIRE.md
+/DIAGNOSTIC.md
+/GO_LIVE.md
+/ALGO_FIXES_*.md
+/AUDIT_*.md
+/PROMPT_*.md
