@@ -2,6 +2,8 @@
 const nextConfig = {
   output: "standalone",
   compress: true,
+  // N'annonce pas la techno (et donc les failles connues à essayer) à qui scanne le site.
+  poweredByHeader: false,
   // Fenêtre de péremption des pages ISR. Par défaut Next annonce
   // `stale-while-revalidate=31535940`, soit un an : le cache du navigateur a alors le
   // droit de resservir un HTML vieux d'une journée entière et de ne le rafraîchir qu'en

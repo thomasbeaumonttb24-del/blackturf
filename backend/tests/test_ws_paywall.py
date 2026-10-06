@@ -45,6 +45,12 @@ def _patch_session_factory(monkeypatch, db):
     async def _ctx():
         yield db
     monkeypatch.setattr(wsmod, "async_session_factory", _ctx)
+    # L'authentification WS vérifie la révocation (Redis). Sans ce faux client,
+    # `get_redis` créerait le client RÉEL partagé hors du patch de conftest, et
+    # les tests suivants hériteraient d'un Redis injoignable.
+    fake = AsyncMock()
+    fake.get = AsyncMock(return_value=None)
+    monkeypatch.setattr("db.redis_client.get_redis", AsyncMock(return_value=fake))
 
 
 def _make_ws():

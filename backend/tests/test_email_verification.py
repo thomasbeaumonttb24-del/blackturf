@@ -142,7 +142,8 @@ async def test_le_lien_de_confirmation_ouvre_directement_la_session(
     # Le jeton vit dans Redis (mocké) : on rejoue ce que la route y lit.
     from unittest.mock import AsyncMock, patch
     faux_redis = AsyncMock()
-    faux_redis.get = AsyncMock(return_value=user.user_id.encode())
+    faux_redis.get = AsyncMock(side_effect=lambda cle: (
+        user.user_id.encode() if str(cle).startswith("email_verify:") else None))
     faux_redis.delete = AsyncMock(return_value=1)
     with patch("redis.asyncio.from_url", return_value=faux_redis):
         resp = await client.get("/api/v1/auth/verify-email?token=peu-importe")
@@ -151,6 +152,41 @@ async def test_le_lien_de_confirmation_ouvre_directement_la_session(
     assert (await client.get("/api/v1/auth/me")).status_code == 200
     await db.refresh(user)
     assert user.email_verified is True
+
+
+async def test_reinscription_avant_confirmation_ne_livre_pas_le_compte(
+    client: AsyncClient, db: AsyncSession
+):
+    """Un tiers réinscrit l'adresse d'une victime avec SON mot de passe avant que
+    la victime ne clique. Le clic confirme l'adresse mais n'ouvre pas de session,
+    et le mot de passe du tiers ne vaut plus rien."""
+    from unittest.mock import AsyncMock, patch
+
+    await _inscrire(client, "victime@blackturf.fr")
+    resp = await client.post("/api/v1/auth/register", json={
+        "email": "victime@blackturf.fr", "password": "Attaquant1234", "pseudo": "Joueur6",
+    })
+    assert resp.status_code == 200, resp.text
+    user = (await db.execute(
+        select(User).where(User.email == "victime@blackturf.fr")
+    )).scalar_one()
+
+    faux_redis = AsyncMock()
+    faux_redis.get = AsyncMock(side_effect=lambda cle: (
+        user.user_id.encode() if str(cle).startswith("email_verify:") else b"1"))
+    faux_redis.delete = AsyncMock(return_value=1)
+    with patch("redis.asyncio.from_url", return_value=faux_redis):
+        resp = await client.get("/api/v1/auth/verify-email?token=peu-importe")
+
+    assert resp.status_code == 200
+    assert resp.json()["mot_de_passe_requis"] is True
+    assert (await client.get("/api/v1/auth/me")).status_code == 401
+    await db.refresh(user)
+    assert user.email_verified is True
+    connexion = await client.post("/api/v1/auth/login", data={
+        "username": "victime@blackturf.fr", "password": "Attaquant1234",
+    })
+    assert connexion.status_code == 401
 
 
 async def test_un_mot_de_passe_reinitialise_vaut_preuve_de_l_adresse(

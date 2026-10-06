@@ -230,6 +230,41 @@ def _digest_email_html(courses: list[dict], unsubscribe_url: str) -> str:
 # ─────────────────────────────────────────────
 # Web Push (VAPID)
 # ─────────────────────────────────────────────
+# Services push des navigateurs. L'endpoint vient du client : sans liste, un
+# abonnement forgé ferait poster le serveur vers n'importe quelle URL (SSRF) ou
+# vers un hôte qui ne répond jamais.
+_PUSH_HOTES_EXACTS = frozenset({
+    "fcm.googleapis.com",
+    "android.googleapis.com",
+    "updates.push.services.mozilla.com",
+    "web.push.apple.com",
+})
+_PUSH_SUFFIXES = (".push.apple.com", ".notify.windows.com", ".wns.windows.com")
+
+# Délai par envoi : un service push qui ne répond pas ne doit pas tenir un
+# thread (ni un worker) indéfiniment.
+_PUSH_TIMEOUT_S = 10
+
+
+def endpoint_push_autorise(url: str) -> bool:
+    """Vrai si `url` est un endpoint https d'un service push connu."""
+    from urllib.parse import urlsplit
+
+    if not isinstance(url, str):
+        return False
+    try:
+        parts = urlsplit(url.strip())
+        hote = (parts.hostname or "").lower().rstrip(".")
+        port = parts.port
+    except ValueError:
+        return False
+    if parts.scheme != "https" or not hote or parts.username or parts.password:
+        return False
+    if port not in (None, 443):
+        return False
+    return hote in _PUSH_HOTES_EXACTS or hote.endswith(_PUSH_SUFFIXES)
+
+
 async def send_web_push(subscription: dict, title: str, body: str,
                         data: Optional[dict] = None) -> ResultatEnvoi:
     """Envoie une notification Web Push via pywebpush."""
@@ -239,14 +274,25 @@ async def send_web_push(subscription: dict, title: str, body: str,
         log.warning("alerts.push.no_vapid_key")
         return ResultatEnvoi(False, "VAPID_PRIVATE_KEY absente")
 
+    # Les abonnements déjà stockés n'ont jamais été filtrés : on revérifie ici.
+    endpoint = (subscription or {}).get("endpoint", "")
+    if not endpoint_push_autorise(endpoint):
+        log.warning("alerts.push.endpoint_refuse", endpoint=str(endpoint)[:120])
+        return ResultatEnvoi(False, "endpoint push hors liste autorisée")
+
     try:
+        import asyncio
         from pywebpush import webpush, WebPushException
         payload = json.dumps({"title": title, "body": body, "data": data or {}})
-        webpush(
+        # pywebpush est synchrone (requests) : appelé tel quel, il bloquait la
+        # boucle d'événements du scheduler le temps de la requête — sans limite.
+        await asyncio.to_thread(
+            webpush,
             subscription_info=subscription,
             data=payload,
             vapid_private_key=settings.vapid_private_key,
             vapid_claims={"sub": settings.vapid_subject},
+            timeout=_PUSH_TIMEOUT_S,
         )
         return ResultatEnvoi(True)
     except Exception as e:

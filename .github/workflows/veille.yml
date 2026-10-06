@@ -1,0 +1,47 @@
+# Veille extérieure : le site vu depuis Internet, hors du serveur.
+#
+# La sentinelle (scripts/bt_sentinelle.sh) et la sonde de santé tournent SUR le
+# VPS : si la machine entière tombe ou devient injoignable, elles se taisent avec
+# elle. Ce contrôle tourne chez GitHub ; un échec déclenche l'e-mail « Run failed »
+# que GitHub envoie au propriétaire du dépôt.
+name: Veille exterieure
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: veille
+  cancel-in-progress: false
+
+jobs:
+  site:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Accueil et API répondent
+        run: |
+          echec=0
+          for url in https://blackturf.fr/ https://api.blackturf.fr/api/v1/health; do
+            ok=0
+            # 3 essais espacés : un redémarrage de conteneur pendant un déploiement
+            # ne doit pas réveiller quelqu'un pour rien.
+            for essai in 1 2 3; do
+              code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "$url" || true)
+              echo "$url essai $essai : HTTP $code"
+              if [ "$code" = "200" ]; then ok=1; break; fi
+              sleep 40
+            done
+            [ "$ok" = 1 ] || { echo "::error::$url injoignable (HTTP $code)"; echec=1; }
+          done
+          exit $echec
+      - name: Certificat TLS valide encore 14 jours
+        run: |
+          fin=$(echo | openssl s_client -servername blackturf.fr -connect blackturf.fr:443 2>/dev/null \
+            | openssl x509 -noout -enddate | cut -d= -f2)
+          reste=$(( ( $(date -d "$fin" +%s) - $(date +%s) ) / 86400 ))
+          echo "Certificat valable encore $reste jours ($fin)"
+          [ "$reste" -ge 14 ] || { echo "::error::certificat TLS expire dans $reste jours"; exit 1; }

@@ -17,7 +17,7 @@ function VerifierEmailContent() {
   const params = useSearchParams();
   const token = params.get("token");
   const { user, refreshUser } = useAuth();
-  const [status, setStatus] = useState<"loading" | "success" | "error">("loading");
+  const [status, setStatus] = useState<"loading" | "success" | "mdp" | "error">("loading");
   // Le lien n'est valable que 24 h. Celui qui arrive trop tard ne peut pas se
   // connecter pour en redemander un : le renvoi doit donc être ici même.
   const [email, setEmail] = useState("");
@@ -43,7 +43,13 @@ function VerifierEmailContent() {
       return;
     }
     api.get(`/auth/verify-email?token=${token}`)
-      .then(async () => {
+      .then(async (res) => {
+        // Compte inscrit plusieurs fois avant confirmation : l'adresse est prouvée,
+        // pas le mot de passe — le serveur l'a invalidé et envoyé un lien pour en choisir un.
+        if (res?.data?.mot_de_passe_requis) {
+          setStatus("mdp");
+          return;
+        }
         // Le profil d'abord : l'écran de succès décide d'après lui s'il propose les formules.
         try { await refreshUser(); } catch { /* ignore */ }
         setIntention(lireIntention());
@@ -139,6 +145,20 @@ function VerifierEmailContent() {
               </p>
               <Button variant="brand" asChild>
                 <Link href={suite}>{intention.suite ? "Reprendre où j'en étais" : "Accéder au programme"}</Link>
+              </Button>
+            </div>
+          )}
+
+          {status === "mdp" && (
+            <div className="py-4">
+              <CheckCircle className="h-12 w-12 text-brand-emerald-dark mx-auto mb-4" />
+              <h1 className="text-xl font-bold mb-2">Adresse confirmée</h1>
+              <p className="text-sm text-muted-foreground mb-6">
+                Par sécurité, choisissez votre mot de passe : un lien vient de vous être
+                envoyé par e-mail (pensez aux indésirables).
+              </p>
+              <Button variant="brand" asChild>
+                <Link href="/login">Retour à la connexion</Link>
               </Button>
             </div>
           )}

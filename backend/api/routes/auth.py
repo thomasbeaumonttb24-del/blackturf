@@ -369,6 +369,34 @@ async def _envoyer_lien_verification(user: User) -> bool:
         return False
 
 
+# Compte non confirmé réécrit par une NOUVELLE inscription sur la même adresse. Le mot
+# de passe en base est alors celui du dernier venu, qui n'a rien prouvé : un tiers
+# pouvait s'inscrire avec l'adresse d'une victime en cours d'inscription, la victime
+# cliquait son lien (session ouverte, compte confirmé), et le tiers se connectait
+# ensuite avec SON mot de passe. Marqué ici, le compte est confirmé au clic mais sans
+# session, et son mot de passe est remplacé par un lien de réinitialisation envoyé à
+# la boîte — seul le vrai titulaire peut alors le choisir.
+def _cle_reprise(user_id: str) -> str:
+    return f"email_verify_reprise:{user_id}"
+
+
+async def _envoyer_lien_reinitialisation(user: User) -> None:
+    """Pose un jeton de réinitialisation (1 h, usage unique) et envoie le lien."""
+    import redis.asyncio as aioredis
+    from services.alerts import send_email
+    from services.email_compte import reinitialisation_mot_de_passe
+
+    token = secrets.token_urlsafe(32)
+    r = aioredis.from_url(settings.redis_url)
+    try:
+        await r.setex(f"pwd_reset:{token}", 3600, user.user_id)
+    finally:
+        await r.aclose()
+    reset_url = f"{settings.frontend_url}/reinitialiser-mot-de-passe?token={token}"
+    html, texte = reinitialisation_mot_de_passe(user.prenom, reset_url)
+    await send_email(to=user.email, subject="BlackTurf — Réinitialisation de mot de passe", html=html, text=texte)
+
+
 @router.post("/register", response_model=RegisterResponse)
 async def register(body: RegisterRequest,
                    db: AsyncSession = Depends(get_db),
@@ -437,7 +465,17 @@ async def register(body: RegisterRequest,
         except IntegrityError:
             await db.rollback()
             raise HTTPException(status_code=409, detail="Ce pseudo est déjà pris.")
-        await _envoyer_lien_verification(existant)
+        import redis.asyncio as aioredis
+        r = aioredis.from_url(settings.redis_url)
+        try:
+            await r.setex(_cle_reprise(existant.user_id), 2 * 86400, "1")
+        finally:
+            await r.aclose()
+        # Un lien toutes les 2 min au plus par adresse : sinon réinscrire en boucle
+        # la même adresse faisait de ce formulaire un canon à e-mails.
+        from services.garde_envoi import envoi_autorise
+        if await envoi_autorise("verif_inscription", email, 120):
+            await _envoyer_lien_verification(existant)
         log.info("auth.register.reprise_non_confirme", user_id=existant.user_id)
         return _reponse_verification(email)
 
@@ -846,6 +884,7 @@ async def verify_email(token: str, response: Response, db: AsyncSession = Depend
         if not user_id:
             raise HTTPException(status_code=400, detail="Token expiré ou invalide")
         await r.delete(f"email_verify:{token}")
+        reprise = await r.get(_cle_reprise(user_id.decode()))
     finally:
         await r.aclose()
 
@@ -855,6 +894,28 @@ async def verify_email(token: str, response: Response, db: AsyncSession = Depend
         raise HTTPException(status_code=404, detail="Utilisateur introuvable")
 
     deja_confirme = bool(user.email_verified)
+    if reprise and not deja_confirme:
+        # Inscrit plusieurs fois avant confirmation : on ne sait pas qui a choisi le
+        # mot de passe en base (cf. _cle_reprise). L'adresse est prouvée, pas le mot
+        # de passe : on l'invalide et le titulaire en choisit un par lien.
+        user.email_verified = True
+        user.hashed_password = _hash(secrets.token_urlsafe(32))
+        await db.commit()
+        r = aioredis.from_url(settings.redis_url)
+        try:
+            await r.delete(_cle_reprise(user.user_id))
+        finally:
+            await r.aclose()
+        log.info("auth.email_verified.reprise", user_id=user.user_id)
+        from services.parrainage import filleul_confirme
+        await filleul_confirme(user, db)
+        await _envoyer_lien_reinitialisation(user)
+        return {
+            "ok": True,
+            "mot_de_passe_requis": True,
+            "message": "Adresse confirmée. Par sécurité, choisissez votre mot de passe : "
+                       "un lien vient de vous être envoyé par e-mail.",
+        }
     user.email_verified = True
     user.last_login_at = datetime.now(timezone.utc)
     await db.commit()
@@ -874,10 +935,9 @@ async def forgot_password(
     _rl: None = Depends(rate_limit_auth),
 ):
     """Génère un token de reset et envoie un email. Anti-énumération : répond toujours 200."""
-    import redis.asyncio as aioredis
-    from services.alerts import send_email
+    from services.garde_envoi import envoi_autorise
 
-    email = body.get("email", "").strip().lower()
+    email = str(body.get("email") or "").strip().lower()
     if not email:
         return {"ok": True}
 
@@ -886,17 +946,12 @@ async def forgot_password(
     if not user:
         return {"ok": True}  # Anti-enumeration
 
-    token = secrets.token_urlsafe(32)
-    r = aioredis.from_url(settings.redis_url)
-    try:
-        await r.setex(f"pwd_reset:{token}", 3600, user.user_id)
-    finally:
-        await r.aclose()
+    # Un lien par compte toutes les 15 min : le quota par IP ne protégeait pas la
+    # boîte visée, qu'une poignée de machines pouvait inonder.
+    if not await envoi_autorise("pwd_reset", user.user_id, 900):
+        return {"ok": True}
 
-    reset_url = f"{settings.frontend_url}/reinitialiser-mot-de-passe?token={token}"
-    from services.email_compte import reinitialisation_mot_de_passe
-    html, texte = reinitialisation_mot_de_passe(user.prenom, reset_url)
-    await send_email(to=email, subject="BlackTurf — Réinitialisation de mot de passe", html=html, text=texte)
+    await _envoyer_lien_reinitialisation(user)
     log.info("auth.forgot_password", user_id=user.user_id)
     return {"ok": True}
 
@@ -961,6 +1016,12 @@ async def save_push_subscription(
     endpoint = body.get("endpoint")
     keys = body.get("keys")
     if not isinstance(endpoint, str) or not endpoint.startswith("https://") or not isinstance(keys, dict):
+        raise HTTPException(status_code=422, detail="Souscription push invalide")
+    # Seuls les vrais services push des navigateurs : une adresse quelconque faisait
+    # POSTer le serveur vers n'importe quel hôte, et un hôte qui ne répond jamais
+    # gelait le planificateur au moment d'envoyer les notifications.
+    from services.alerts import endpoint_push_autorise
+    if not endpoint_push_autorise(endpoint):
         raise HTTPException(status_code=422, detail="Souscription push invalide")
     exp = body.get("expirationTime")
     user.push_subscription = {

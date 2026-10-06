@@ -13,6 +13,7 @@ import { Loader2, MailWarning } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/useAuth";
 import { authApi } from "@/lib/api";
+import { cheminInterne } from "@/lib/intentionEssai";
 
 const schema = z.object({
   email: z.string().email("E-mail invalide"),
@@ -31,7 +32,9 @@ function LoginContent() {
   const { login } = useAuth();
   const router = useRouter();
   const params = useSearchParams();
-  const redirect = params.get("redirect") || "/programme";
+  // Seul un chemin du site est accepté : `?redirect=https://autre-site` envoyait
+  // l'utilisateur, à peine connecté, vers une copie de la page de connexion.
+  const redirect = cheminInterne(params.get("redirect")) ?? "/programme";
 
   const {
     register,

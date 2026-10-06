@@ -11,9 +11,11 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_, desc
+from sqlalchemy import select, and_, desc, text
+from sqlalchemy.exc import DBAPIError
 
 from api.routes.auth import get_current_user
+from api.middleware.rate_limit import rate_limit_backtest
 from db.database import get_db
 from db.models import User, Strategie, Course, PredictionEvaluation, Participation, Cheval, Resultat
 
@@ -186,6 +188,7 @@ async def backtest_strategy(
     mise_fixe: float = Query(default=10.0, ge=1.0, le=1000.0),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
+    _rl: None = Depends(rate_limit_backtest),
 ):
     """Simule l'application de la stratégie sur les N derniers jours."""
     if user.plan not in ("standard", "expert"):
@@ -234,7 +237,20 @@ async def backtest_strategy(
     if filtres.get("est_quinte"):
         q = q.where(Course.est_quinte == True)
 
-    rows = (await db.execute(q.limit(2000))).all()
+    # La vue prediction_evaluation coûte 7 à 19 s : sans plafond, une requête
+    # lourde tenait une connexion du pool aussi longtemps qu'elle voulait.
+    # SET LOCAL ne vaut que pour la transaction en cours (la route ne commit pas).
+    if db.get_bind().dialect.name == "postgresql":
+        await db.execute(text("SET LOCAL statement_timeout = '15s'"))
+    try:
+        rows = (await db.execute(q.limit(2000))).all()
+    except DBAPIError as e:
+        if "statement timeout" not in str(e) and "canceling statement" not in str(e):
+            raise
+        await db.rollback()
+        log.warning("strategies.backtest.timeout", strategie_id=strategie_id, jours=jours)
+        raise HTTPException(status_code=503,
+                            detail="Backtest trop long : réessayez sur une période plus courte.")
 
     # Simuler les paris selon les indicateurs
     proba_min = indicateurs.get("proba_top3_min", 0.5)

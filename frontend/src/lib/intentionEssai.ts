@@ -28,7 +28,10 @@ export interface IntentionInscription {
 
 /** Chemin interne uniquement : un `?suite=https://…` ne doit jamais faire sortir du site. */
 export function cheminInterne(valeur: string | null | undefined): string | null {
+  // Les navigateurs retirent tabulations et retours ligne d'une URL : « /<tab>/site.fr »
+  // deviendrait « //site.fr ». Tout caractère de contrôle ou espace est donc refusé.
   if (!valeur || !valeur.startsWith("/") || valeur.startsWith("//") || valeur.includes("\\")) return null;
+  if (/[\u0000- \u007f]/.test(valeur)) return null;
   return valeur;
 }
 

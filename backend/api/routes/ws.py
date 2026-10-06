@@ -10,6 +10,7 @@ import json
 import time
 import uuid
 import structlog
+from collections.abc import Mapping
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends, Query
@@ -128,14 +129,49 @@ manager = ConnectionManager()
 
 
 async def _get_user_from_token(token: str) -> str | None:
-    """Extrait user_id depuis le JWT (pour WS auth)."""
+    """Extrait user_id depuis le JWT (pour WS auth).
+
+    Mêmes contrôles que `get_current_user` côté HTTP : sans eux, un jeton émis
+    avant un reset de mot de passe, ou celui d'un compte désactivé, ouvrait
+    encore les flux temps réel jusqu'à son expiration.
+    """
     try:
         payload = jwt.decode(token, settings.secret_key, algorithms=[settings.jwt_algorithm])
         if payload.get("type") != "access":
             return None
-        return payload.get("sub")
+        user_id = payload.get("sub")
     except JWTError:
         return None
+    if not user_id:
+        return None
+    # Import local : auth.py tire les dépendances HTTP, inutile au chargement de ws.
+    from api.routes.auth import _refresh_revoked
+    if await _refresh_revoked(user_id, payload.get("iat")):
+        return None
+    async with async_session_factory() as db:
+        row = (await db.execute(
+            select(User.is_active).where(User.user_id == user_id)
+        )).first()
+    if not row or not row[0]:
+        return None
+    return user_id
+
+
+def _origine_refusee(websocket: WebSocket) -> bool:
+    """True si la poignée de main vient d'un site tiers.
+
+    Le cookie httpOnly part avec TOUTE poignée de main vers notre domaine, CORS
+    ne s'applique pas aux WebSocket : sans ce contrôle, n'importe quelle page
+    pouvait ouvrir un flux au nom du visiteur (CSWSH). Un client hors navigateur
+    n'envoie pas d'Origin : on le laisse passer, il doit fournir son jeton.
+    """
+    headers = getattr(websocket, "headers", None)
+    if not isinstance(headers, Mapping):
+        return False
+    origine = headers.get("origin")
+    if not origine:
+        return False
+    return origine.rstrip("/") not in {o.rstrip("/") for o in settings.allowed_origins}
 
 
 async def _get_user_plan(user_id: str) -> str | None:
@@ -161,6 +197,9 @@ async def _authenticate_ws(websocket: WebSocket, token_query: str) -> str | None
     (même site), c'est donc la voie NORMALE désormais — les deux autres ne servent
     plus qu'aux clients non navigateur et aux onglets pas encore rechargés.
     """
+    if _origine_refusee(websocket):
+        log.warning("ws.origine_refusee", origin=str(websocket.headers.get("origin"))[:120])
+        return None
     cookie_token = websocket.cookies.get("access_token")
     if cookie_token:
         user_id = await _get_user_from_token(cookie_token)

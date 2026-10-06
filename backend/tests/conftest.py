@@ -161,10 +161,11 @@ async def client(db):
 
     # pipeline() est SYNCHRONE côté redis-py : renvoie un pipe dont incr/expire
     # sont synchrones (mise en file) et execute() est async. Compteur=1 → pas de 429.
+    # Quatre résultats : `_check` (quotas par compte) lit minute ET jour.
     _pipe = MagicMock()
     _pipe.incr = MagicMock(return_value=_pipe)
     _pipe.expire = MagicMock(return_value=_pipe)
-    _pipe.execute = AsyncMock(return_value=[1, True])
+    _pipe.execute = AsyncMock(return_value=[1, True, 1, True])
     mock_redis.pipeline = MagicMock(return_value=_pipe)
 
     with (

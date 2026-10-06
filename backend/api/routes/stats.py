@@ -17,6 +17,7 @@ from sqlalchemy import bindparam, select, func, text
 
 from api.model_metrics import real_model_metrics, plausible_auc
 from api.profil_backtest import backtest_profils
+from api.middleware.rate_limit import rate_limit_public
 from api.routes.auth import get_current_user, require_admin
 from db.database import get_db
 from db.redis_client import get_redis
@@ -2001,6 +2002,18 @@ async def stats_bet_plan_performance(
     return perf
 
 
+# Bornes des dates acceptées par les routes publiques à paramètre de date : avant,
+# aucune donnée (le site n'existait pas) ; au-delà de demain, rien n'est programmé.
+# Sans elles, chaque date fantaisiste était une requête lourde de plus, pour rien.
+DATE_MIN_PUBLIQUE = date(2026, 1, 1)
+
+
+def _verifier_date_publique(d: date) -> None:
+    from services.temps_courses import jour_courses
+    if d < DATE_MIN_PUBLIQUE or d > jour_courses() + timedelta(days=1):
+        raise HTTPException(status_code=400, detail="Date hors de la période disponible")
+
+
 @router.get("/stats/meilleurs-plans-jour")
 async def stats_meilleurs_plans_jour(
     jour: Optional[str] = Query(
@@ -2008,6 +2021,8 @@ async def stats_meilleurs_plans_jour(
         description="Journée présentée, au format AAAA-MM-JJ. Par défaut : aujourd'hui à Paris.",
     ),
     db: AsyncSession = Depends(get_db),
+    redis: aioredis.Redis = Depends(get_redis),
+    _rl: None = Depends(rate_limit_public),
 ):
     """
     Les meilleurs plans d'une journée, pour les visuels de communication.
@@ -2046,16 +2061,35 @@ async def stats_meilleurs_plans_jour(
     # Le PMU écrit le jour en JJMMAAAA en tête du `course_id`. On le construit ici une
     # seule fois, et les DEUX requêtes s'en servent : elles doivent parler du même jour,
     # sans quoi le nombre de courses annoncé ne serait pas celui des plans montrés.
-    from services.bet_plan_snapshots import CTE_PLAN_PUBLIE
     from services.temps_courses import jour_courses
 
     if jour:
         try:
-            jjmmaaaa = date.fromisoformat(jour).strftime("%d%m%Y")
+            d = date.fromisoformat(jour)
         except ValueError:
             raise HTTPException(status_code=422, detail="jour attendu au format AAAA-MM-JJ")
+        _verifier_date_publique(d)
     else:
-        jjmmaaaa = jour_courses().strftime("%d%m%Y")
+        d = jour_courses()
+    jjmmaaaa = d.strftime("%d%m%Y")
+
+    # Route publique, ~1-2 s de SQL par appel, et `?jour=` en fait autant de clés
+    # qu'on veut : sans cache, une boucle sur les dates suffisait à occuper la base.
+    cle = f"stats:meilleurs-plans-jour:{jjmmaaaa}"
+    cached = await _cache_get(redis, cle)
+    if cached:
+        return cached
+    result = await _calcul_meilleurs_plans_jour(jjmmaaaa, db)
+    # Une heure seulement pour une journée PASSÉE ET complète : tant qu'il reste des
+    # courses à régler (les sud-américaines finissent après minuit), la mosaïque
+    # attend `journee_complete` et ne doit pas lire un « pas encore » figé 1 h.
+    ttl = 3600 if d < jour_courses() and result.get("journee_complete") else 120
+    await _cache_set(redis, cle, result, ttl=ttl)
+    return result
+
+
+async def _calcul_meilleurs_plans_jour(jjmmaaaa: str, db: AsyncSession) -> dict:
+    from services.bet_plan_snapshots import CTE_PLAN_PUBLIE
 
     # `c.hippodrome_nom` et SURTOUT PAS `reunions → hippodromes` : `reunions` ne
     # compte que quinze lignes recyclées d'une journée à l'autre, et son
@@ -2334,6 +2368,8 @@ async def stats_bilan_semaine(
                     "Par defaut : le dernier samedi revolu.",
     ),
     db: AsyncSession = Depends(get_db),
+    redis: aioredis.Redis = Depends(get_redis),
+    _rl: None = Depends(rate_limit_public),
 ):
     """
     Le bilan d'une SEMAINE de courses, pour la publication du dimanche.
@@ -2352,7 +2388,6 @@ async def stats_bilan_semaine(
     `total_mise` est servi à côté : un retour sans sa mise ne dit pas si la semaine a
     gagné ou perdu, et le chiffre deviendrait invérifiable.
     """
-    from services.bet_plan_snapshots import CTE_PLAN_PUBLIE
     from services.temps_courses import jour_courses
 
     if fin:
@@ -2360,8 +2395,26 @@ async def stats_bilan_semaine(
             samedi = date.fromisoformat(fin)
         except ValueError:
             raise HTTPException(status_code=422, detail="fin attendu au format AAAA-MM-JJ")
+        _verifier_date_publique(samedi)
     else:
         samedi = _samedi_precedent(jour_courses())
+
+    # Même raison que `meilleurs-plans-jour` : sept jours de plans réglés par appel,
+    # sur une route publique dont le paramètre multiplie les clés.
+    cle = f"stats:bilan-semaine:{samedi.isoformat()}"
+    cached = await _cache_get(redis, cle)
+    if cached:
+        return cached
+    result = await _calcul_bilan_semaine(samedi, db)
+    # Semaine close depuis plus d'un jour = réglée : 1 h. Sinon (semaine en cours, ou
+    # dimanche matin de publication, courses du samedi soir encore à régler) : 2 min.
+    ttl = 3600 if samedi < jour_courses() - timedelta(days=1) else 120
+    await _cache_set(redis, cle, result, ttl=ttl)
+    return result
+
+
+async def _calcul_bilan_semaine(samedi: date, db: AsyncSession) -> dict:
+    from services.bet_plan_snapshots import CTE_PLAN_PUBLIE
 
     debut = samedi - timedelta(days=6)
     jours = [(debut + timedelta(days=i)).strftime("%d%m%Y") for i in range(7)]

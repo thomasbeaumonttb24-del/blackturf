@@ -25,7 +25,7 @@ from typing import Optional
 from zoneinfo import ZoneInfo
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -40,6 +40,7 @@ from db.models import (
 from services.alerts import send_email, JEU_RESPONSABLE_TXT
 from services.cote_juste import cote_juste as _cote_juste
 from services import email_pronostic
+from services.garde_envoi import envoi_autorise
 
 log = structlog.get_logger()
 router = APIRouter()
@@ -71,6 +72,48 @@ CONSENTEMENT = (
     "Je souhaite recevoir par e-mail le pronostic IA de cette course. Envoi unique, "
     "pas d'abonnement, désinscription en un clic."
 )
+
+
+# Garde-fous anti-relais. Le formulaire est ANONYME par nature (aimant à prospects :
+# exiger un compte le viderait de son sens), donc n'importe qui peut y taper
+# n'importe quelle adresse. Le verrou « 1 par adresse et par jour » ne protège ni la
+# boîte visée (alias `nom+1@…`, `nom+2@…`) ni le compte Resend partagé avec les
+# e-mails de compte (confirmation, mot de passe) : un script pouvait en faire un canon
+# à e-mails signé blackturf.fr. D'où trois verrous en plus :
+#   - par IP : 5 demandes par heure — un visiteur réel en fait une par jour ;
+#   - par BOÎTE (alias `+…` retirés) : une par 24 h, dans Redis ;
+#   - plafond global : 60 envois par heure, tous visiteurs confondus.
+DEMANDES_PAR_HEURE_IP = 5
+PLAFOND_ENVOIS_HEURE = 60
+
+
+async def _limite_ip(request: Request) -> None:
+    """5 demandes / heure / IP. Panne Redis → on laisse passer (cf. garde_envoi)."""
+    from api.middleware.throttle import _client_ip
+    from db.redis_client import get_redis
+    cle = f"rl:pronoemail:ip:{_client_ip(request)}"
+    try:
+        r = await get_redis()
+        pipe = r.pipeline()
+        pipe.incr(cle)
+        pipe.expire(cle, 3600, nx=True)  # fenêtre fixe, cf. rate_limit_public
+        n = (await pipe.execute())[0]
+    except Exception as exc:  # noqa: BLE001 — dépend de Redis
+        log.warning("pronostic_email.limite_ip_indisponible", erreur=str(exc)[:120])
+        return
+    if n > DEMANDES_PAR_HEURE_IP:
+        raise HTTPException(
+            status_code=429,
+            detail="Trop de demandes depuis cette connexion — réessayez dans une heure.",
+            headers={"Retry-After": "3600"},
+        )
+
+
+def _boite(email: str) -> str:
+    """Adresse ramenée à sa boîte : `nom+n'importe@x.fr` → `nom@x.fr`. Les alias
+    arrivent tous dans la même boîte ; le verrou doit porter sur elle."""
+    local, _, domaine = email.partition("@")
+    return f"{local.split('+', 1)[0]}@{domaine}"
 
 
 class DemandeIn(BaseModel):
@@ -273,7 +316,7 @@ def _mail_texte(course: Course, chevaux: list[dict], lien_course: str, lien_desi
 @router.post(
     "/courses/{course_id}/envoyer-pronostic",
     response_model=DemandeOut,
-    dependencies=[Depends(rate_limit_public)],
+    dependencies=[Depends(rate_limit_public), Depends(_limite_ip)],
 )
 async def envoyer_pronostic(
     course_id: str,
@@ -346,6 +389,13 @@ async def envoyer_pronostic(
             message="Votre envoi gratuit de la journée vous a déjà été envoyé aujourd'hui — revenez demain.",
         )
 
+    # Verrou Redis par boîte + plafond global, posé au dernier moment (après les
+    # refus qui ne partent pas). Refus → même réponse générique : ne pas dire à un
+    # inconnu si cette adresse a déjà reçu quelque chose.
+    if not await envoi_autorise("pronostic_email", _boite(email), 86400,
+                                plafond_heure=PLAFOND_ENVOIS_HEURE):
+        return reponse
+
     if envoi is None:
         envoi = PronosticEmailEnvoi(
             email=email,
@@ -369,6 +419,14 @@ async def envoyer_pronostic(
         envoi.envoye_at = datetime.now(timezone.utc)
     else:
         log.warning("pronostic_email.echec_envoi", course_id=course_id, raison=getattr(resultat, "erreur", None))
+        # Rien n'est parti : on rend le verrou de la boîte, sinon le nouvel essai
+        # promis par le 503 ci-dessous serait refusé 24 h en silence.
+        try:
+            from db.redis_client import get_redis
+            from services.garde_envoi import _empreinte
+            await (await get_redis()).delete(f"garde_envoi:pronostic_email:{_empreinte(_boite(email))}")
+        except Exception:  # noqa: BLE001 — dépend de Redis
+            pass
 
     await db.commit()
     if not resultat:

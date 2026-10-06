@@ -85,6 +85,24 @@ INSTAGRAM_PSEUDO = "@blackturf.fr"
 INSTAGRAM_URL = "https://www.instagram.com/blackturf.fr/"
 
 
+INSCRIPTIONS_PAR_HEURE_ET_IP = 10
+
+
+async def _ip_autorisee(request: Request) -> bool:
+    """10 demandes d'inscription par heure et par IP. Panne Redis → on laisse passer."""
+    from api.middleware.throttle import _client_ip
+    from db.redis_client import get_redis
+    try:
+        r = await get_redis()
+        cle = f"rl:newsletter:ip:{_client_ip(request)}"
+        n = await r.incr(cle)
+        if n == 1:
+            await r.expire(cle, 3600)
+        return n <= INSCRIPTIONS_PAR_HEURE_ET_IP
+    except Exception:
+        return True
+
+
 def _mail_confirmation_html(lien: str) -> str:
     from services.email_compte import confirmation_newsletter
     return confirmation_newsletter(lien)[0]
@@ -100,7 +118,9 @@ def _mail_confirmation_texte(lien: str) -> str:
     response_model=InscriptionOut,
     dependencies=[Depends(rate_limit_public)],
 )
-async def inscription(payload: InscriptionIn, db: AsyncSession = Depends(get_db)) -> InscriptionOut:
+async def inscription(
+    payload: InscriptionIn, request: Request, db: AsyncSession = Depends(get_db),
+) -> InscriptionOut:
     """Demande d'inscription. Réponse identique quel que soit l'état de l'adresse."""
     reponse = InscriptionOut(
         message="Si cette adresse peut recevoir la lettre, un e-mail de confirmation vient de partir.",
@@ -135,6 +155,18 @@ async def inscription(payload: InscriptionIn, db: AsyncSession = Depends(get_db)
         abonne.source = payload.source or abonne.source
         abonne.consentement_texte = CONSENTEMENT
         abonne.relance_confirmation_at = _maintenant()
+
+    # Sans ces deux verrous, le formulaire était un canon à e-mails : chaque appel sur
+    # une adresse en attente renvoyait un message, 240 fois par minute et par IP. Une
+    # boîte visée se faisait inonder, et le quota Resend — partagé avec les mails de
+    # connexion et de paiement — pouvait être épuisé. La réponse reste identique
+    # (règle 1) : rien ne dit à l'appelant qu'il a été freiné.
+    from services.garde_envoi import envoi_autorise
+    if not await _ip_autorisee(request) or not await envoi_autorise(
+        "newsletter_confirmation", email, 3600, plafond_heure=300,
+    ):
+        await db.commit()
+        return reponse
 
     lien = f"{SITE}/newsletter/confirmer?jeton={abonne.token_confirmation}"
     envoi = await send_email(

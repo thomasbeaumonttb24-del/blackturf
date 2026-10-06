@@ -19,6 +19,7 @@ from db.database import get_db
 from db.models import CarteConnue, Subscription, User
 from services import parrainage
 from services.abonnements import journaliser
+from services.garde_envoi import envoi_autorise
 
 settings = get_settings()
 log = structlog.get_logger()
@@ -1003,6 +1004,11 @@ async def cancel_subscription(
       enregistrée et notifiée par email ; l'accès reste ouvert jusqu'à traitement.
     """
     cancelled_via_stripe = False
+    # Vrai seulement si CET appel a changé l'état d'un abonnement. Les e-mails en
+    # dépendent : envoyés à chaque appel, la route était un bouton « m'envoyer un
+    # e-mail » (et en écrire un à contact@) actionnable en boucle par tout compte.
+    a_change = False
+    subs = await _subs_vivantes(user.user_id, db)
     # 1) Essai Stripe si configuré + abonnement connu.
     #
     # On boucle sur TOUS les abonnements vivants. L'ancien `scalar_one_or_none()`
@@ -1011,7 +1017,6 @@ async def cancel_subscription(
     # le `except` ci-dessous : le client recevait « demande enregistrée » et RIEN
     # n'était résilié chez Stripe (constaté le 2026-08-20).
     if settings.stripe_secret_key and user.stripe_customer_id:
-        subs = await _subs_vivantes(user.user_id, db)
         for sub in subs:
             if not sub.stripe_subscription_id:
                 continue
@@ -1034,6 +1039,7 @@ async def cancel_subscription(
                                         error=str(e)[:120])
                     sub.statut = "canceled"
                     cancelled_via_stripe = True
+                    a_change = True
                     user.plan = await _plan_effectif(user.user_id, db,
                                                      sauf_stripe_id=sub.stripe_subscription_id)
                     await journaliser(db, "resilie", user, sub,
@@ -1048,6 +1054,7 @@ async def cancel_subscription(
                                            cancel_at_period_end=True)
                 sub.statut = "cancel_at_period_end"
                 cancelled_via_stripe = True
+                a_change = True
                 await journaliser(db, "resiliation_demandee", user, sub)
             except Exception as e:  # noqa: BLE001
                 log.warning("stripe.cancel.api_failed", user_id=user.user_id,
@@ -1055,26 +1062,25 @@ async def cancel_subscription(
         if cancelled_via_stripe:
             await db.commit()
 
-    # 2) Toujours notifier (preuve de la demande) — sans dépendre de Stripe
+    # Rien à résilier : ni abonnement vivant, ni formule payante (accordée à la main,
+    # que seul l'exploitant peut retirer). 400 plutôt qu'un « enregistré » mensonger.
+    if not cancelled_via_stripe and not subs and (user.plan or "free") == "free":
+        raise HTTPException(status_code=400, detail="Aucun abonnement actif")
+
+    # 2) Notifier (preuve de la demande) — sans dépendre de Stripe, mais seulement
+    # quand il y a quelque chose à prouver : une résiliation faite à l'instant, ou une
+    # demande à traiter à la main (formule hors Stripe, ou Stripe en échec). Un
+    # double clic sur un abonnement déjà résilié ne renvoie rien. Délai de 10 min
+    # par compte en plus : la demande manuelle reste rejouable, pas les e-mails.
+    envoyer = a_change or not cancelled_via_stripe
     try:
-        from services.alerts import send_email
-        await send_email(
-            to="contact@blackturf.fr",
-            subject=f"[BlackTurf] Demande de résiliation — {user.email}",
-            html=f"<p>Demande de résiliation.</p><p>User: {user.email} ({user.user_id})</p>"
-                 f"<p>Plan: {user.plan} — via Stripe: {cancelled_via_stripe}</p>",
-        )
-        from services.email_compte import resiliation
-        html, texte = resiliation(cancelled_via_stripe)
-        await send_email(
-            to=user.email,
-            subject="BlackTurf — Votre demande de résiliation",
-            html=html, text=texte,
-        )
+        if envoyer and await envoi_autorise("stripe_cancel", str(user.user_id), 600):
+            await _mails_resiliation(user, cancelled_via_stripe)
     except Exception as e:  # noqa: BLE001
         log.warning("stripe.cancel.email_failed", user_id=user.user_id, error=str(e)[:120])
 
-    log.info("stripe.cancel.requested", user_id=user.user_id, via_stripe=cancelled_via_stripe)
+    log.info("stripe.cancel.requested", user_id=user.user_id, via_stripe=cancelled_via_stripe,
+             a_change=a_change)
     return {
         "ok": True,
         "via_stripe": cancelled_via_stripe,
@@ -1082,6 +1088,23 @@ async def cancel_subscription(
                     if cancelled_via_stripe else
                     "Demande de résiliation enregistrée. Traitée sous 72h, accès maintenu jusque-là."),
     }
+
+
+async def _mails_resiliation(user: User, cancelled_via_stripe: bool) -> None:
+    from services.alerts import send_email
+    await send_email(
+        to="contact@blackturf.fr",
+        subject=f"[BlackTurf] Demande de résiliation — {user.email}",
+        html=f"<p>Demande de résiliation.</p><p>User: {user.email} ({user.user_id})</p>"
+             f"<p>Plan: {user.plan} — via Stripe: {cancelled_via_stripe}</p>",
+    )
+    from services.email_compte import resiliation
+    html, texte = resiliation(cancelled_via_stripe)
+    await send_email(
+        to=user.email,
+        subject="BlackTurf — Votre demande de résiliation",
+        html=html, text=texte,
+    )
 
 
 @router.post("/stripe/webhook")
@@ -1169,16 +1192,99 @@ async def _traiter_evenement(event_type: str, data: dict, db: AsyncSession) -> N
         if data.get("refunded"):
             from services.passes import retirer_par_paiement
             await retirer_par_paiement(db, _payment_intent_id(data), "paiement_rembourse")
+        # Idem pour un abonnement : remboursé en entier = plus rien n'est payé.
+        if _remboursement_total(data):
+            await _clore_abonnement_du_paiement(data, db, "paiement_rembourse")
     elif event_type == "charge.dispute.created":
         await parrainage.sur_remboursement(data, db, "paiement_conteste")
         from services.passes import retirer_par_paiement
         await retirer_par_paiement(db, _payment_intent_id(data), "paiement_conteste")
+        await _clore_abonnement_du_paiement(data, db, "paiement_conteste")
     elif event_type == "customer.subscription.trial_will_end":
         await _handle_trial_will_end(data, db)
     elif event_type in ("payment_method.attached", "customer.updated",
                         "setup_intent.succeeded"):
         # Une carte vient d'arriver : débloquer les essais mis en attente.
         await _handle_moyen_paiement_ajoute(data, db)
+
+
+def _remboursement_total(charge: dict) -> bool:
+    """Un geste commercial (remboursement partiel) laisse l'abonnement courir."""
+    montant = charge.get("amount") or 0
+    return bool(charge.get("refunded")) or (montant > 0 and (charge.get("amount_refunded") or 0) >= montant)
+
+
+def _sub_id_du_paiement(objet: dict) -> Optional[str]:
+    """Abonnement payé par ce paiement (charge) ou visé par cette contestation.
+
+    Le compte tourne en 2026-05-27.dahlia : dans le webhook, ni `charge.invoice` ni
+    `invoice.subscription` n'existent plus. La bibliothèque, elle, appelle l'API dans
+    SA version (2024-04-10), où les deux champs sont encore là : on relit donc la
+    charge puis la facture par l'API plutôt que de se fier au corps du webhook.
+    """
+    charge = objet
+    if objet.get("object") == "dispute":
+        cible = objet.get("charge")
+        charge = cible if isinstance(cible, dict) else {"id": cible}
+    facture = charge.get("invoice")
+    if not facture and charge.get("id") and _stripe_joignable():
+        facture = stripe.Charge.retrieve(charge["id"]).get("invoice")
+    if isinstance(facture, dict):
+        return _sub_id_facture(facture)
+    if not facture or not _stripe_joignable():
+        return None
+    return _sub_id_facture(stripe.Invoice.retrieve(facture))
+
+
+async def _clore_abonnement_du_paiement(objet: dict, db: AsyncSession, motif: str) -> None:
+    """Paiement d'abonnement contesté ou remboursé en entier : l'abonnement est clos
+    TOUT DE SUITE, chez Stripe et ici. Avant, seuls les pass et le crédit de
+    parrainage étaient repris : une contestation bancaire gardait l'accès Expert
+    jusqu'à la fin de la période — et Stripe aurait même retenté le mois suivant.
+
+    Idempotent (déjà clos → rien), et ne lève jamais : le webhook doit répondre 200,
+    sinon Stripe relivre et rejoue les reprises de pass/parrainage déjà faites.
+    """
+    # Les reprises déjà faites dans ce webhook (parrainage, pass) sont validées
+    # d'abord : un échec ici ne doit pas les annuler par le `rollback` plus bas.
+    await db.commit()
+    try:
+        sub_id = _sub_id_du_paiement(objet)
+        if not sub_id:
+            return
+        abo = (await db.execute(
+            select(Subscription).where(Subscription.stripe_subscription_id == sub_id)
+        )).scalar_one_or_none()
+        if abo is not None and abo.statut == "canceled":
+            return
+        if _stripe_joignable():
+            try:
+                stripe.Subscription.delete(sub_id)
+            except stripe.error.InvalidRequestError as e:
+                # Déjà supprimé chez Stripe : on aligne simplement la base.
+                log.info("stripe.litige.deja_clos_chez_stripe", sub=sub_id, error=str(e)[:120])
+        if abo is None:
+            log.warning("stripe.litige.abonnement_inconnu", sub=sub_id, motif=motif)
+            return
+        statut_precedent = abo.statut
+        abo.statut = "canceled"
+        user = await db.get(User, abo.user_id)
+        if user is not None:
+            user.plan = await _plan_effectif(user.user_id, db, sauf_stripe_id=sub_id)
+            # `customer.subscription.deleted` qui suivra verra « canceled » et ne
+            # journalisera pas une seconde fois.
+            await journaliser(db, "resilie", user, abo, stripe_subscription_id=sub_id,
+                              detail={"statut_precedent": statut_precedent, "motif": motif})
+        await db.commit()
+        log.warning("stripe.litige.abonnement_clos", sub=sub_id, motif=motif,
+                    user_id=abo.user_id, plan_restant=user.plan if user else None)
+    except Exception as e:  # noqa: BLE001
+        log.error("stripe.litige.cloture_echouee", motif=motif, objet=objet.get("id"),
+                  error=str(e)[:200])
+        try:
+            await db.rollback()
+        except Exception:  # noqa: BLE001
+            pass
 
 
 def _payment_intent_id(obj: dict) -> Optional[str]:

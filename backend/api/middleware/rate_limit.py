@@ -80,6 +80,15 @@ async def rate_limit_predictions(
     await _check(user, "predictions", 30, 500, redis)
 
 
+async def rate_limit_backtest(
+    user: User = Depends(get_current_user),
+    redis: aioredis.Redis = Depends(get_redis),
+) -> None:
+    """2 req/min, 20 req/jour — chaque backtest lit la vue prediction_evaluation
+    (7 à 19 s) : quelques clics répétés suffisaient à occuper le pool PostgreSQL."""
+    await _check(user, "backtest", 2, 20, redis)
+
+
 # Plafond par IP des endpoints publics, par minute.
 #
 # Il valait 60. Deux situations réelles le faisaient tomber sur des lectures

@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 
 from api.config import get_settings
 from api.routes.auth import _access_token
+from api.middleware.rate_limit import rate_limit_public
 from services import presence
 
 settings = get_settings()
@@ -43,6 +44,9 @@ def _compte_du_jeton(token: Optional[str]) -> Optional[str]:
 async def signal_presence(
     body: Signal,
     token: Optional[str] = Depends(_access_token),
+    # Route anonyme qui écrit dans Redis : sans plafond, un script pouvait gonfler
+    # le compteur « en ligne » de l'admin de faux visiteurs à volonté.
+    _rl: None = Depends(rate_limit_public),
 ) -> Response:
     if VISITEUR_RE.match(body.v):
         # Seul le chemin est gardé : une query string peut porter un jeton de

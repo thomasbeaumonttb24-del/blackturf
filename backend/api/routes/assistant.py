@@ -457,6 +457,82 @@ class ChatRequest(BaseModel):
     stream: bool = True
 
 
+# L'historique vient du client : sans borne, chaque question pouvait renvoyer
+# 20 × 4 000 caractères au modèle — le coût d'une requête se réglait côté navigateur.
+HISTORIQUE_MAX_TOURS = 20
+HISTORIQUE_MAX_CHARS = 20_000
+MESSAGE_MAX_CHARS = 4_000
+# Tours d'outils par question. La boucle n'avait pas de fin : un modèle qui
+# redemande un outil à chaque réponse enchaînait les appels payants sans limite.
+MAX_TOURS_OUTILS = 4
+MSG_TROP_D_OUTILS = ("\n\nJe n'ai pas pu terminer l'analyse en un nombre raisonnable "
+                     "d'étapes. Reformule ta question de façon plus précise.")
+
+
+def _historique_borne(bruts: list) -> list[dict]:
+    """Rôles user/assistant seulement, plus anciens tours retirés au-delà du budget."""
+    messages = [
+        {"role": m["role"], "content": str(m["content"])[:MESSAGE_MAX_CHARS]}
+        for m in bruts[-HISTORIQUE_MAX_TOURS:]
+        if isinstance(m, dict) and m.get("role") in ("user", "assistant") and m.get("content")
+    ]
+    while len(messages) > 1 and sum(len(m["content"]) for m in messages) > HISTORIQUE_MAX_CHARS:
+        messages.pop(0)
+    # L'API exige un premier message `user` : retirer une réponse orpheline en tête.
+    while messages and messages[0]["role"] != "user":
+        messages.pop(0)
+    return messages
+
+
+async def _dialogue(client, model: str, messages: list[dict], db, user) -> AsyncIterator[str]:
+    """Textes de la réponse, outils exécutés au passage (MAX_TOURS_OUTILS au plus).
+
+    La réponse finale est celle du dernier appel : elle était auparavant
+    REGÉNÉRÉE par un second appel en streaming, soit deux réponses payées pour
+    une seule montrée.
+    """
+    current_messages = messages[:]
+    response = await client.messages.create(
+        model=model, max_tokens=1500, system=SYSTEM_PROMPT,
+        tools=TOOLS, messages=current_messages,
+    )
+    tours = 0
+    while response.stop_reason == "tool_use":
+        if tours >= MAX_TOURS_OUTILS:
+            log.warning("assistant.trop_de_tours_outils", tours=tours)
+            for block in response.content:
+                if getattr(block, "type", None) == "text" and block.text:
+                    yield block.text
+            yield MSG_TROP_D_OUTILS
+            return
+        tours += 1
+        tool_results = []
+        for block in response.content:
+            if getattr(block, "type", None) == "text":
+                if block.text:
+                    yield block.text
+            elif block.type == "tool_use":
+                result = await _execute_tool(block.name, block.input, db, user)
+                tool_results.append({
+                    "type": "tool_result",
+                    "tool_use_id": block.id,
+                    "content": result,
+                })
+        current_messages = current_messages + [
+            {"role": "assistant", "content": response.content},
+            {"role": "user", "content": tool_results},
+        ]
+        response = await client.messages.create(
+            model=model, max_tokens=1500, system=SYSTEM_PROMPT,
+            tools=TOOLS, messages=current_messages,
+        )
+
+    for block in response.content:
+        if getattr(block, "type", None) == "text" and block.text:
+            for morceau in _stream_chunks(block.text):
+                yield morceau
+
+
 @router.post("/assistant/chat")
 async def chat(
     body: ChatRequest,
@@ -470,12 +546,7 @@ async def chat(
     if user.plan != "expert":
         raise HTTPException(status_code=403, detail="Assistant IA réservé au plan Expert")
 
-    # Valider et nettoyer les messages
-    messages = [
-        {"role": m["role"], "content": str(m["content"])[:4000]}
-        for m in body.messages[-20:]  # max 20 tours de contexte
-        if m.get("role") in ("user", "assistant") and m.get("content")
-    ]
+    messages = _historique_borne(body.messages)
 
     if not messages:
         raise HTTPException(status_code=400, detail="Messages vides")
@@ -500,64 +571,8 @@ async def chat(
 
     async def generate() -> AsyncIterator[str]:
         try:
-            # Premier appel avec tools (non-streaming pour gérer le tool_use)
-            _model = settings.anthropic_model
-            current_messages = messages[:]
-            response = await client.messages.create(
-                model=_model,
-                max_tokens=1500,
-                system=SYSTEM_PROMPT,
-                tools=TOOLS,
-                messages=current_messages,
-            )
-
-            # Traiter tool calls si besoin (boucle pour les multi-tours)
-            while response.stop_reason == "tool_use":
-                tool_results = []
-                text_so_far = ""
-
-                for block in response.content:
-                    if hasattr(block, "text"):
-                        text_so_far += block.text
-                    elif block.type == "tool_use":
-                        result = await _execute_tool(block.name, block.input, db, user)
-                        tool_results.append({
-                            "type": "tool_result",
-                            "tool_use_id": block.id,
-                            "content": result,
-                        })
-
-                if text_so_far:
-                    yield f"data: {json.dumps({'type': 'text', 'text': text_so_far})}\n\n"
-
-                # Continuer avec les résultats — accumuler le contexte
-                current_messages = current_messages + [
-                    {"role": "assistant", "content": response.content},
-                    {"role": "user", "content": tool_results},
-                ]
-                response = await client.messages.create(
-                    model=_model,
-                    max_tokens=1500,
-                    system=SYSTEM_PROMPT,
-                    tools=TOOLS,
-                    messages=current_messages,
-                )
-
-            # Réponse finale — stream si demandé avec le contexte complet
-            if body.stream:
-                async with client.messages.stream(
-                    model=_model,
-                    max_tokens=1500,
-                    system=SYSTEM_PROMPT,
-                    messages=current_messages,  # contexte avec tool results inclus
-                ) as stream:
-                    async for text in stream.text_stream:
-                        yield f"data: {json.dumps({'type': 'text', 'text': text})}\n\n"
-            else:
-                for block in response.content:
-                    if hasattr(block, "text"):
-                        yield f"data: {json.dumps({'type': 'text', 'text': block.text})}\n\n"
-
+            async for texte in _dialogue(client, settings.anthropic_model, messages, db, user):
+                yield f"data: {json.dumps({'type': 'text', 'text': texte})}\n\n"
             yield "data: [DONE]\n\n"
 
         except anthropic.RateLimitError:
