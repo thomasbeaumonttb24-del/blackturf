@@ -273,6 +273,7 @@ async def _envoi_smtp(to, subject, html, text, *, unsubscribe_url, relais: dict)
     import asyncio
     import re
     import smtplib
+    import ssl
     from email.message import EmailMessage
     from email.utils import formataddr, make_msgid
 
@@ -293,35 +294,42 @@ async def _envoi_smtp(to, subject, html, text, *, unsubscribe_url, relais: dict)
     msg.set_content(text)
     msg.add_alternative(html, subtype="html")
 
+    # Contexte TLS qui VÉRIFIE le certificat du serveur : celui de smtplib par
+    # défaut ne le fait pas, et un intermédiaire pourrait lire les identifiants.
+    contexte = ssl.create_default_context()
+    etat = {"transmis": False}
+
     def _envoyer() -> None:
         port = int(relais.get("port") or 587)
         if port == 465:
-            serveur = smtplib.SMTP_SSL(relais["host"], port, timeout=20)
+            serveur = smtplib.SMTP_SSL(relais["host"], port, timeout=20, context=contexte)
         else:
             serveur = smtplib.SMTP(relais["host"], port, timeout=20)
         with serveur:
             if port != 465:
-                serveur.starttls()
+                serveur.starttls(context=contexte)
             serveur.login(relais["user"], relais["password"])
+            etat["transmis"] = True
             serveur.send_message(msg)
 
     try:
         await asyncio.to_thread(_envoyer)
         log.info("alerts.email.smtp_ok", to=masquer_email(to), relais=relais["nom"])
         return ResultatEnvoi(True, provider_id=f"{relais['nom']}:{msg['Message-ID']}")
-    except (TimeoutError, smtplib.SMTPServerDisconnected) as e:
-        # Ambigu : le serveur a peut-être accepté le mail avant de couper.
-        log.error("alerts.email.smtp_failed", to=masquer_email(to), relais=relais["nom"], error=str(e))
-        return ResultatEnvoi(False, f"SMTP {type(e).__name__}: {e}"[:400])
-    except (smtplib.SMTPException, OSError) as e:
-        # Refus du serveur ou connexion impossible : rien n'est parti, le
-        # fournisseur suivant peut prendre le relais.
-        texte = str(e).lower()
-        if any(m in texte for m in ("quota", "limit", "exceeded", "too many")):
-            _mettre_en_pause(relais["nom"])
-        log.error("alerts.email.smtp_refus", to=masquer_email(to), relais=relais["nom"], error=str(e))
-        return ResultatEnvoi(False, f"SMTP-REFUS {type(e).__name__}: {e}"[:400])
     except Exception as e:
+        texte = str(e).lower()
+        # Refus explicite (code SMTP renvoyé) ou échec AVANT la transmission
+        # (connexion, TLS, authentification) : rien n'est parti, le fournisseur
+        # suivant peut prendre le relais. Une coupure ou un délai PENDANT la
+        # transmission reste ambigu : le mail est peut-être parti.
+        explicite = isinstance(e, (smtplib.SMTPResponseException,
+                                   smtplib.SMTPRecipientsRefused,
+                                   smtplib.SMTPSenderRefused))
+        if explicite or not etat["transmis"]:
+            if explicite and any(m in texte for m in ("quota", "exceeded", "daily limit", "limit reached")):
+                _mettre_en_pause(relais["nom"])
+            log.error("alerts.email.smtp_refus", to=masquer_email(to), relais=relais["nom"], error=str(e))
+            return ResultatEnvoi(False, f"SMTP-REFUS {type(e).__name__}: {e}"[:400])
         log.error("alerts.email.smtp_failed", to=masquer_email(to), relais=relais["nom"], error=str(e))
         return ResultatEnvoi(False, f"SMTP {type(e).__name__}: {e}"[:400])
 

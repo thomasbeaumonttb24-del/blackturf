@@ -91,3 +91,67 @@ async def test_sans_relais_tout_passe_par_resend(env, monkeypatch):
     monkeypatch.setattr(alerts.settings, "smtp2_host", "")
     assert await alerts.send_email("a@b.fr", "s", "<p>x</p>")
     assert appels == ["resend"]
+
+
+# ── _envoi_smtp : TLS vérifié, refus avant transmission vs coupure ambiguë ──
+import smtplib  # noqa: E402
+
+_RELAIS = {"nom": "smtp:h", "host": "h", "port": 587, "user": "u", "password": "p", "from": ""}
+
+
+def _faux_smtp(monkeypatch, echec_a=None, exc=None):
+    vu = {}
+
+    class F:
+        def __init__(self, *a, **k): pass
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+
+        def starttls(self, context=None):
+            vu["contexte"] = context
+            if echec_a == "tls":
+                raise exc
+
+        def login(self, u, p):
+            if echec_a == "login":
+                raise exc
+
+        def send_message(self, m):
+            if echec_a == "envoi":
+                raise exc
+    monkeypatch.setattr(smtplib, "SMTP", F)
+    monkeypatch.setattr(alerts, "_pauses", {})
+    return vu
+
+
+@pytest.mark.asyncio
+async def test_smtp_verifie_le_certificat(monkeypatch):
+    import ssl
+    vu = _faux_smtp(monkeypatch)
+    r = await alerts._envoi_smtp("a@b.fr", "s", "<p>x</p>", None, unsubscribe_url=None, relais=_RELAIS)
+    assert r
+    assert vu["contexte"] is not None and vu["contexte"].verify_mode == ssl.CERT_REQUIRED
+
+
+@pytest.mark.asyncio
+async def test_echec_authentification_est_un_refus(monkeypatch):
+    _faux_smtp(monkeypatch, "login", smtplib.SMTPAuthenticationError(535, b"bad"))
+    r = await alerts._envoi_smtp("a@b.fr", "s", "<p>x</p>", None, unsubscribe_url=None, relais=_RELAIS)
+    assert not r and alerts._refus_explicite(r)
+
+
+@pytest.mark.asyncio
+async def test_coupure_pendant_transmission_est_ambigue(monkeypatch):
+    _faux_smtp(monkeypatch, "envoi", smtplib.SMTPServerDisconnected("coupé"))
+    r = await alerts._envoi_smtp("a@b.fr", "s", "<p>x</p>", None, unsubscribe_url=None, relais=_RELAIS)
+    assert not r and not alerts._refus_explicite(r)
+
+
+@pytest.mark.asyncio
+async def test_refus_quota_met_en_pause_mais_pas_le_debit(monkeypatch):
+    _faux_smtp(monkeypatch, "envoi", smtplib.SMTPDataError(421, b"too many connections"))
+    await alerts._envoi_smtp("a@b.fr", "s", "<p>x</p>", None, unsubscribe_url=None, relais=_RELAIS)
+    assert not alerts._en_pause("smtp:h")
+    _faux_smtp(monkeypatch, "envoi", smtplib.SMTPDataError(554, b"daily quota exceeded"))
+    r = await alerts._envoi_smtp("a@b.fr", "s", "<p>x</p>", None, unsubscribe_url=None, relais=_RELAIS)
+    assert alerts._refus_explicite(r) and alerts._en_pause("smtp:h")
