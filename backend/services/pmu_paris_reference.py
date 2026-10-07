@@ -154,6 +154,59 @@ CATALOGUE: tuple[ParisPMU, ...] = (
 )
 
 PAR_NOM: dict[str, ParisPMU] = {p.nom: p for p in CATALOGUE}
+
+
+# ─── TRJ : TABLE DE RÉFÉRENCE UNIQUE (unification 2026-10-07) ───────────────
+# Taux de Retour aux Joueurs par type de pari = part du pool redistribuée aux
+# gagnants (rapport ≈ TRJ / proba marché). Avant, trois tables divergentes
+# vivaient dans ml/portfolio.py, ml/recommendations.py et ml/portfolio_simulator.py
+# (cette dernière : 25 % de retenue à plat sur TOUS les combinés, Couplé compris).
+# Tous les modules lisent désormais `TRJ_PMU` / `trj()`.
+#
+# Valeurs : grille TRJ PMU 2026 déjà utilisée par le moteur (Tiercé 64,35 %,
+# cohérent avec le TRJ ~64 % publié pour le Tiercé). Multi : 70 %, aligné sur le
+# prélèvement ~30 % du catalogue ci-dessus (hypothèse PRUDENTE — l'ancienne table
+# de ml/combo_bets disait 75 %, non sourcé).
+#
+# NB : `ParisPMU.prelevement` (catalogue) reste un ORDRE DE GRANDEUR pédagogique,
+# lu par l'apprentissage (référence « joueur sans compétence ») ; il n'est PAS
+# modifié ici pour ne pas déplacer les poids appris. Écarts connus vs 1 − TRJ :
+# Couplés 23 % vs 26 %, Trio 25 % vs 30,9 %, Quinté+ 26 % vs 35,25 %.
+TRJ_PMU: dict[str, float] = {
+    "Simple Gagnant": 0.8495,
+    "Simple Placé": 0.8495,
+    "Couplé Gagnant": 0.74,
+    "Couplé Placé": 0.74,
+    "Couplé Ordre": 0.74,
+    "2sur4": 0.74,
+    "Trio": 0.691,
+    "Trio Ordre": 0.691,
+    "Tiercé": 0.6435,
+    "Super 4": 0.65,
+    "Quarté+": 0.633,
+    "Quinté+": 0.6475,
+    "Pick5": 0.6475,
+    "Multi": 0.70,
+}
+# TRJ par défaut d'un type inconnu : le plus bas de la grille (prudence — on ne
+# surestime jamais ce que rend un pool).
+TRJ_DEFAUT = min(TRJ_PMU.values())
+
+
+def trj(nom_pari: str | None) -> float:
+    """TRJ de référence d'un type de pari, variantes comprises (« Tiercé Ordre »,
+    « Quarté+ Bonus », « Quinté+ Flexi », « Multi en 5 », « Mini Multi »…)."""
+    n = str(nom_pari or "").strip()
+    if n in TRJ_PMU:
+        return TRJ_PMU[n]
+    if "Multi" in n:
+        return TRJ_PMU["Multi"]
+    for prefixe in ("Tiercé", "Quarté+", "Quinté+", "Trio Ordre", "Trio", "Super 4",
+                    "Pick5", "2sur4", "Couplé Ordre", "Couplé Placé", "Couplé Gagnant",
+                    "Simple Placé", "Simple Gagnant"):
+        if n.startswith(prefixe):
+            return TRJ_PMU[prefixe]
+    return TRJ_DEFAUT
 PAR_FLAG: dict[str, ParisPMU] = {p.flag: p for p in CATALOGUE}
 
 

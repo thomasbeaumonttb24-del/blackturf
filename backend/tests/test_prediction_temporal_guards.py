@@ -53,9 +53,10 @@ async def test_cote_calibration_is_always_pre_course():
     session = _RecordingSession()
     await cote_calibration.compute_cote_calibration(session)
     _assert_pre_course_guard(session.statements[0])
-    assert "coalesce(pr.cote_figee, pa.cote_pmu)" in " ".join(
-        session.statements[0].lower().split()
-    )
+    sql = " ".join(session.statements[0].lower().split())
+    # Cote FIGÉE seule : la cote de clôture (pa.cote_pmu) est connue après la course.
+    assert "pr.cote_figee as cote" in sql and "pr.cote_figee > 1" in sql
+    assert "coalesce(pr.cote_figee, pa.cote_pmu)" not in sql
 
 
 @pytest.mark.asyncio

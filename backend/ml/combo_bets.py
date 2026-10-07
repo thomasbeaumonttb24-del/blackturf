@@ -27,8 +27,16 @@ TRJ = {
     "Quarté+ Désordre": 0.633, "Quinté+ Désordre": 0.6475,
     # Multi (top-4 désordre, mise plate 3€, sélection 4→7 chevaux) et Pick5 (top-5
     # désordre, mise 1€, SANS bonus). TRJ PMU officiels 2026.
-    "Multi": 0.75, "Pick5": 0.6475,
+    "Multi": 0.70, "Pick5": 0.6475,
 }
+# Source unique des taux de retour : services.pmu_paris_reference (le Multi y vaut
+# 70 %, prélèvement ~30 % ; l'ancienne valeur de 75 % n'était pas sourcée). La
+# table ci-dessus garde ses clés de candidat, ses valeurs suivent la référence.
+try:
+    from services.pmu_paris_reference import trj as _trj_ref
+    TRJ = {k: float(_trj_ref(k)) for k in TRJ}
+except Exception:  # noqa: BLE001 — module de référence indisponible : table locale
+    pass
 
 # Multi PMU : on sélectionne 4 à 7 chevaux pour trouver les 4 PREMIERS (désordre),
 # mise PLATE quel que soit le nombre (le PMU couvre TOUTES les combis de la sélection

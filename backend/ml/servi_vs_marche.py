@@ -74,7 +74,12 @@ _REQUETE = text("""
     )
     SELECT d.course_id, c.date_heure, c.discipline,
            pa.numero, s.proba_top1, s.rang_predit, s.cote_figee, pa.cote_pmu,
-           (r.classement->0->>'numero')::int AS gagnant
+           -- Gagnant(s) = `position == 1` (dead-heat : plusieurs), jamais
+           -- `classement->0` : l'ordre du tableau n'est pas garanti.
+           ARRAY(SELECT (e->>'numero')::int
+                 FROM jsonb_array_elements(r.classement) e
+                 WHERE (e->>'position') ~ '^[0-9]+$' AND (e->>'position')::int = 1
+                   AND (e->>'numero') ~ '^[0-9]+$') AS gagnant
     FROM dernier d
     JOIN prediction_snapshots s
       ON s.prediction_run_id = d.prediction_run_id AND s.course_id = d.course_id
@@ -95,14 +100,36 @@ def _devig(cotes: np.ndarray) -> np.ndarray | None:
     return inv / inv.sum()
 
 
+def _gagnants(valeur) -> list[int]:
+    """Numéros classés 1ers. Accepte la liste SQL (dead-heat possible) ou un entier
+    seul (lignes d'avant le correctif, tests)."""
+    if valeur is None:
+        return []
+    if isinstance(valeur, (list, tuple)):
+        out = []
+        for v in valeur:
+            try:
+                out.append(int(v))
+            except (TypeError, ValueError):
+                continue
+        return sorted(set(out))
+    try:
+        return [int(valeur)]
+    except (TypeError, ValueError):
+        return []
+
+
 def _mesure_course(lignes: list[tuple]) -> dict | None:
     """Une course → ses métriques. Ignorée (None) si l'arrivée ne désigne aucun des
     partants scorés, ou si le marché au moment du prono est incomplet."""
-    gagnant = lignes[0][8]
+    gagnants = _gagnants(lignes[0][8])
     nums = [int(l[3]) for l in lignes if l[3] is not None]
-    if gagnant is None or gagnant not in nums or len(nums) != len(lignes) or len(nums) < 2:
+    if len(nums) != len(lignes) or len(nums) < 2:
         return None
-    idx = nums.index(gagnant)
+    idxs = [nums.index(g) for g in gagnants if g in nums]
+    # Un gagnant hors des partants scorés invalide la course (champ incomplet).
+    if not idxs or len(idxs) != len(gagnants):
+        return None
 
     p_srv = np.array([float(l[4] or 0.0) for l in lignes])
     if p_srv.sum() <= 0:
@@ -120,15 +147,20 @@ def _mesure_course(lignes: list[tuple]) -> dict | None:
     cote_fin_srv = cotes_fin[i_srv] if np.isfinite(cotes_fin[i_srv]) else None
     cote_fin_fav = cotes_fin[i_fav] if np.isfinite(cotes_fin[i_fav]) else None
 
+    def _ll(p: np.ndarray) -> float:
+        # Dead-heat : moyenne sur les gagnants (chacun EST un gagnant) ; un seul
+        # gagnant → exactement −log p(gagnant), comme avant.
+        return float(np.mean([-math.log(max(float(p[i]), P_MIN)) for i in idxs]))
+
     return {
-        "ll_servi": -math.log(max(float(p_srv[idx]), P_MIN)),
-        "ll_fige": -math.log(max(float(p_fige[idx]), P_MIN)),
-        "ll_final": -math.log(max(float(p_fin[idx]), P_MIN)) if p_fin is not None else None,
-        "top1_servi": int(i_srv == idx),
-        "top1_favori": int(i_fav == idx),
+        "ll_servi": _ll(p_srv),
+        "ll_fige": _ll(p_fige),
+        "ll_final": _ll(p_fin) if p_fin is not None else None,
+        "top1_servi": int(i_srv in idxs),
+        "top1_favori": int(i_fav in idxs),
         # Rendement d'1 € en simple gagnant à la cote finale PMU (None si cote absente).
-        "net_servi": (cote_fin_srv - 1.0 if i_srv == idx else -1.0) if cote_fin_srv else None,
-        "net_favori": (cote_fin_fav - 1.0 if i_fav == idx else -1.0) if cote_fin_fav else None,
+        "net_servi": (cote_fin_srv - 1.0 if i_srv in idxs else -1.0) if cote_fin_srv else None,
+        "net_favori": (cote_fin_fav - 1.0 if i_fav in idxs else -1.0) if cote_fin_fav else None,
         "partants": len(nums),
     }
 

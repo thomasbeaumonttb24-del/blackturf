@@ -1111,6 +1111,109 @@ def compute_field_overround(features_list: list[dict]) -> Optional[float]:
 
 
 # ─────────────────────────────────────────────
+# Cotes RÉELLES (jamais la cote de repli des features)
+# ─────────────────────────────────────────────
+# `ml.features` remplace une cote PMU absente par 5,0 (`cote_pmu or 5.0`) et fait
+# retomber chaque bookmaker absent sur cette cote. C'est voulu POUR LE MODÈLE : il
+# a été entraîné ainsi, et changer le vecteur servi créerait un écart
+# entraînement/service. Mais hors du vecteur, ce 5,0 est une cote FABRIQUÉE : il
+# était persisté comme `cote_figee` (lue ensuite comme un fait par les
+# calibrations, le mélange appris, le bilan), comptait comme « marché connu »
+# dans le blend et le mélange appris, et pouvait même produire un pari de valeur
+# sur un prix que personne n'affichait. Tout ce qui n'est pas l'entrée du modèle
+# lit donc la cote de `participations`.
+_CLES_COTES = ("cote_pmu", "cote_geny", "cote_bzh", "cote_winamax",
+               "cote_betclic", "cote_unibet", "cote_betfair_exchange")
+
+
+def _cote_reelle(valeur) -> Optional[float]:
+    """Cote décimale exploitable (> 1, finie), sinon None."""
+    try:
+        c = float(valeur)
+    except (TypeError, ValueError):
+        return None
+    return c if math.isfinite(c) and c > 1.0 else None
+
+
+def cotes_reelles_de(feat: dict, reelles: Optional[dict]) -> dict:
+    """Les 7 cotes d'un partant pour tout ce qui n'est PAS l'entrée du modèle.
+
+    `reelles` : la ligne `participations` du partant ({colonne: valeur}), ou None
+    si la lecture a échoué — on garde alors les valeurs des features, comme avant
+    (repli explicite, journalisé par l'appelant).
+
+    Cote PMU réelle présente → valeurs des features, inchangées (un bookmaker
+    absent y vaut la cote PMU réelle : une vraie cote, déjà le comportement de la
+    détection). Cote PMU absente → les replis des features sont fabriqués : seules
+    les cotes réellement publiées par chaque source sont rendues, None sinon.
+    """
+    if reelles is None:
+        return {k: feat.get(k) for k in _CLES_COTES}
+    pmu = _cote_reelle(reelles.get("cote_pmu"))
+    if pmu is not None:
+        out = {k: feat.get(k) for k in _CLES_COTES}
+        out["cote_pmu"] = pmu
+        return out
+    return {k: _cote_reelle(reelles.get(k)) for k in _CLES_COTES}
+
+
+async def _lire_cotes_reelles(session: AsyncSession, course_id: str) -> Optional[dict]:
+    """{participation_id: {colonne de cote: valeur}} pour la course, ou None si la
+    lecture échoue (l'appelant retombe alors sur les features, comme avant)."""
+    try:
+        rows = (await session.execute(text(f"""
+            SELECT participation_id, {", ".join(_CLES_COTES)}
+            FROM participations
+            WHERE course_id = :cid
+        """), {"cid": course_id})).all()
+    except Exception as e:
+        await session.rollback()
+        log.warning("pipeline.cotes_reelles_indisponibles", course_id=course_id,
+                    err=str(e)[:160])
+        return None
+    return {r[0]: dict(zip(_CLES_COTES, r[1:])) for r in rows}
+
+
+def imposer_top3_sup_top1(p1, p3) -> np.ndarray:
+    """P(top 3) ≥ P(victoire) pour chaque partant, à somme du champ inchangée.
+
+    Gagner, c'est finir dans les trois premiers : P(top3) < P(top1) est
+    incohérent. Les deux probas sortent pourtant de chaînes séparées (le placé de
+    l'ensemble + isotone + méta-apprenant, la victoire du modèle dédié + mélange
+    appris), et rien ne les liait — un favori pouvait s'afficher à 52 % de
+    victoire et 48 % de place.
+
+    Correction MINIMALE : chaque P(top3) trop basse est relevée à P(top1) ; la
+    masse ajoutée est reprise, au prorata, sur les partants qui ont de la marge
+    (au-dessus de leur P(top1)), sans jamais les y faire passer. La somme du champ
+    (min(3, n), bornes 0,99) est donc conservée, et rien ne bouge quand aucune
+    contrainte n'est violée (identité exacte). Si la somme ne peut pas être
+    tenue (cas dégénéré), la contrainte l'emporte.
+    """
+    p1 = np.asarray(p1, dtype=float)
+    p3 = np.asarray(p3, dtype=float).copy()
+    if p1.shape != p3.shape or p3.size == 0 or not (p3 < p1).any():
+        return p3
+    cible = float(p3.sum())
+    bas = np.minimum(p1, 0.99)
+    p = np.clip(np.maximum(p3, bas), None, 0.99)
+    for _ in range(50):
+        ecart = cible - float(p.sum())
+        if abs(ecart) < 1e-12:
+            break
+        # Masse à retirer (ecart < 0) : sur ceux qui dépassent leur plancher ;
+        # à rendre (ecart > 0) : sur ceux sous le plafond.
+        marge = (p - bas) if ecart < 0 else (0.99 - p)
+        libres = marge > 1e-12
+        if not libres.any():
+            break
+        poids = p[libres] if ecart < 0 else marge[libres]
+        p[libres] += ecart * poids / poids.sum()
+        p = np.clip(p, bas, 0.99)
+    return p
+
+
+# ─────────────────────────────────────────────
 # Capture cote de clôture (fondation CLV)
 # ─────────────────────────────────────────────
 async def _capture_closing_cotes(course_id: str) -> None:
@@ -2516,6 +2619,18 @@ async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Option
             log.warning("pipeline.predict.no_features", course_id=course_id)
             return None
 
+        # Cotes RÉELLES de chaque partant (cf. `cotes_reelles_de`) : le vecteur du
+        # modèle garde sa cote de repli (5,0), tout le reste — blend marché,
+        # mélange appris, cote figée, paris de valeur — lit la cote publiée. Lue
+        # AVANT toute écriture : un échec (rollback) ne peut rien annuler.
+        _cotes_par_pid = await _lire_cotes_reelles(session, course_id)
+        _cotes_servies = [
+            cotes_reelles_de(
+                f, None if _cotes_par_pid is None
+                else _cotes_par_pid.get(f.get("participation_id"), {}))
+            for f in features_list
+        ]
+
         # Identité et horodatage uniques du cycle complet. Tous les partants de la
         # course partagent ces valeurs : une relance du même INSERT est idempotente,
         # tandis qu'un nouveau calcul produit bien un nouvel état immuable.
@@ -2727,7 +2842,10 @@ async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Option
         # ne PAS empiler une 3e correction favori-longshot (l'isotone ci-dessous + le
         # blend marché suffisent). L'empilement écrasait l'edge quand le modèle a
         # raison (cf. audit edge : triple-comptage du biais). Flag off → étape active.
-        cotes_pmu = np.array([float(f.get("cote_pmu") or 0.0) for f in features_list])
+        # Cote PMU RÉELLE (0 = absente → « pas d'info marché » pour ce partant :
+        # longshot, blend et mélange appris le traitent comme tel). Jamais la cote
+        # de repli du vecteur de features (5,0), cf. `cotes_reelles_de`.
+        cotes_pmu = np.array([float(c.get("cote_pmu") or 0.0) for c in _cotes_servies])
         try:
             from ml.algo_flags import FLAGS as _AF3
             _skip_longshot = _AF3.collapse_longshot
@@ -2796,7 +2914,14 @@ async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Option
         implied = np.where(cotes_pmu > 1.0, 1.0 / cotes_pmu, 0.0)
         si = float(implied.sum())
         if si > 0:
-            implied_norm = implied / si  # overround retiré, Σ=1
+            # Overround retiré. Le marché ne dit rien des partants SANS cote réelle :
+            # sa proba est normalisée sur la masse que le modèle donne aux partants
+            # cotés (Σ = 1 quand tout le champ est coté, exactement comme avant).
+            # Un partant non coté garde sa proba modèle, et les cotés ne lui
+            # prennent plus de masse au nom d'un marché qui ne l'a pas évalué.
+            _cotes_ok = implied > 0
+            _masse_cotee = float(np.asarray(probas_top1, dtype=float)[_cotes_ok].sum())
+            implied_norm = implied / si * (_masse_cotee if not _cotes_ok.all() else 1.0)
             # si une cote manque (implied=0), on garde la proba modèle pour ce cheval
             blend = np.where(
                 implied > 0,
@@ -2838,13 +2963,14 @@ async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Option
         except Exception as e:
             log.warning("pipeline.sharpness_skip", err=str(e)[:140])
 
-        # Proba de la chaîne ci-dessus, conservée pour la DÉTECTION des paris de
-        # valeur. Leurs seuils (EV, confiance, bandes d'EV apprises, niveau ★★★★ au
-        # rendement mesuré) ont été établis sur cette grandeur : les déplacer exige
-        # un rejeu dédié sur les deux axes, classement ET rendement (protocole du
-        # 2026-09-07). Tout le reste — proba affichée, cote juste, rang, plans — suit
-        # le mélange appris ci-dessous.
-        _p1_detection_vb = np.asarray(probas_top1, dtype=float).copy()
+        # NB (2026-10-07) : la détection des paris de valeur lisait ici une copie de
+        # cette chaîne (`_p1_detection_vb`), pendant que la proba AFFICHÉE venait du
+        # mélange appris ci-dessous. Deux probas de victoire concurrentes : un pari
+        # pouvait être annoncé « +12 % d'EV » sur un cheval dont la proba affichée
+        # × la cote valait moins de 1. Elle lit désormais la proba SERVIE (cf. la
+        # boucle des prédictions). C'est aussi la grandeur sur laquelle les bandes
+        # d'EV sont apprises : `signal_performance.compute_ev_band_performance` lit
+        # `proba_top1` persistée, c'est-à-dire la proba servie.
 
         # ── MÉLANGE APPRIS SUR LES ARRIVÉES (second étage) ──────────────────────
         # p ∝ p̂_brut^β_modèle · q_marché^β_marché, β appris chaque nuit sur les
@@ -2911,6 +3037,21 @@ async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Option
         except Exception as e:
             log.warning("pipeline.modele_technique_skip", err=str(e)[:140])
 
+        # ── Cohérence placé ≥ victoire (DERNIÈRE retouche des probas) ───────────
+        # Les deux probas finales sortent de chaînes séparées ; rien n'empêchait
+        # P(top3) < P(top1) sur un favori. Relève minimale, somme du champ
+        # conservée, identité exacte quand rien n'est violé (cf.
+        # `imposer_top3_sup_top1`). P(top1), donc le rang et l'EV, ne bouge pas.
+        try:
+            _p3_avant = np.asarray(probas_top3, dtype=float)
+            probas_top3 = imposer_top3_sup_top1(probas_top1, _p3_avant)
+            _n_releves = int((_p3_avant < np.asarray(probas_top1, dtype=float) - 1e-12).sum())
+            if _n_releves:
+                log.info("pipeline.top3_releve_a_top1", course_id=course_id,
+                         n=_n_releves)
+        except Exception as e:
+            log.warning("pipeline.top3_sup_top1_skip", err=str(e)[:140])
+
         # Désactive avant recalcul, sans SUPPRIMER : l'identité du value bet et son
         # flag `notifie` doivent survivre aux rafraîchissements de cotes. L'ancien
         # DELETE recréait les mêmes lignes avec notifie=false toutes les 20 minutes
@@ -2960,15 +3101,11 @@ async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Option
         _ci_low = np.clip(_p1_arr * (1.0 - K_CI * _ru), 1e-4, 0.999)
         _ci_high = np.clip(_p1_arr * (1.0 + K_CI * _ru), 1e-4, 0.999)
 
-        # Calibration par tranche de cote (apprise nightly des résultats réels) —
-        # chargée une fois, appliquée à l'EV des value bets (corrige favori/longshot).
-        try:
-            from ml.cote_calibration import load_cote_calibration
-            _cote_calib = await load_cote_calibration(session)
-        except Exception as e:  # noqa: BLE001 — repli inchangé, mais visible
-            log.warning("predict.cote_calibration_indisponible", course_id=course_id,
-                        err=str(e)[:160])
-            _cote_calib = None
+        # Calibration par tranche de cote (`ml.cote_calibration`) : PLUS appliquée à
+        # la détection (2026-10-07). Ses facteurs sont appris sur `proba_top1_raw`
+        # (proba brute) ; la détection lit la proba SERVIE, déjà rapprochée du
+        # marché — les lui appliquer comptait deux fois la correction
+        # favori-longshot. Cf. `detect_value_bet(proba_brute=...)`.
         # Apprentissage par signal (ROI réel par signal, recalc nightly) — module
         # le niveau des value bets vers les signaux historiquement gagnants.
         _sig_mult = None
@@ -2999,7 +3136,9 @@ async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Option
         try:
             from ml.algo_flags import FLAGS as _AF
             if _AF.devig_gates:
-                _field_overround = compute_field_overround(features_list)
+                # Sur les cotes RÉELLES : la cote de repli des features (5,0)
+                # gonflait la couverture et l'overround du champ.
+                _field_overround = compute_field_overround(_cotes_servies)
         except Exception:
             _field_overround = None
 
@@ -3028,6 +3167,12 @@ async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Option
 
             # Rang prédit cohérent avec la proba finale
             rang = int(_rang_by_index[i])
+
+            # Cotes RÉELLES du partant (None si non publiée) — jamais le 5,0 de
+            # repli des features : `cote_figee` est relue comme un fait par les
+            # calibrations, le mélange appris et le bilan.
+            _cotes_i = _cotes_servies[i]
+            _cote_figee = _cote_reelle(_cotes_i.get("cote_pmu"))
 
             # Sauvegarder prédiction
             confidence = float(confidence_scores[i])
@@ -3060,7 +3205,7 @@ async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Option
                 # Snapshot de la cote PMU servant de base au plan de mise. Recalculée
                 # à chaque cycle TANT que la course est > 10 min du départ ; figée dès
                 # que le cycle s'arrête (T-10 min) → plan stable, cotes affichées libres.
-                cote_figee=feat.get("cote_pmu"),
+                cote_figee=_cote_figee,
                 created_at=datetime.now(),
                 **_raw_vals,
             ).on_conflict_do_update(
@@ -3078,7 +3223,7 @@ async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Option
                     "proba_top1_high": ci_high,
                     "rang_predit": rang,
                     "confidence_score": round(confidence * 100, 2),
-                    "cote_figee": feat.get("cote_pmu"),
+                    "cote_figee": _cote_figee,
                     **_raw_vals,
                 },
             ).returning(PredictionModel.prediction_id)
@@ -3106,19 +3251,21 @@ async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Option
                 proba_top1_high=ci_high,
                 rang_predit=rang,
                 confidence_score=round(confidence * 100, 2),
-                cote_figee=feat.get("cote_pmu"),
+                cote_figee=_cote_figee,
                 odds_observed_at=_odds_dt_by_pid.get(pid),
             )
             await persist_snapshot_compat(session, snapshot_values)
 
             # Value bet — tous les bookmakers + suspension check
-            cote_pmu     = feat.get("cote_pmu")
-            cote_geny    = feat.get("cote_geny")
-            cote_bzh     = feat.get("cote_bzh")
-            cote_winamax = feat.get("cote_winamax")
-            cote_betclic = feat.get("cote_betclic")
-            cote_unibet  = feat.get("cote_unibet")
-            cote_betfair = feat.get("cote_betfair_exchange")
+            # Cotes RÉELLES (cf. `cotes_reelles_de`) : un partant sans cote PMU
+            # publiée n'est plus détecté « value bet » sur la cote de repli 5,0.
+            cote_pmu     = _cote_figee
+            cote_geny    = _cotes_i.get("cote_geny")
+            cote_bzh     = _cotes_i.get("cote_bzh")
+            cote_winamax = _cotes_i.get("cote_winamax")
+            cote_betclic = _cotes_i.get("cote_betclic")
+            cote_unibet  = _cotes_i.get("cote_unibet")
+            cote_betfair = _cotes_i.get("cote_betfair_exchange")
             steam_betclic_pct = feat.get("steam_move_betclic", 0.0)
             if steam_betclic_pct:
                 steam_betclic_pct = steam_betclic_pct * 100  # normalize back to %
@@ -3158,10 +3305,19 @@ async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Option
             cotes_history = await _get_cotes_history(session, pid) if pid else None
 
             # Value bet GAGNANT : EV = cote_gagnant × P(victoire). On passe la proba
-            # de victoire normalisée, pas proba_t3 (placé) — sinon EV gonflé. Celle de
-            # la chaîne de détection, cf. `_p1_detection_vb`.
+            # de victoire normalisée, pas proba_t3 (placé) — sinon EV gonflé.
+            #
+            # LA PROBA SERVIE (2026-10-07), celle qu'affiche le site et dont sort la
+            # cote juste : un pari de valeur vérifie donc toujours
+            # proba_affichée × cote ≥ 1 + seuil (l'EV est calculée sur une proba
+            # au plus égale — le cap court-cote ne fait que la baisser — et une
+            # cote au plus égale à la meilleure publiée). Les garde-fous restent :
+            # confiance, longshot, court-cote, bandes d'EV (`ev_band_gate`). Ces
+            # bandes sont apprises sur `proba_top1` persistée = cette même proba
+            # servie ; leurs historiques d'avant le mélange appris (16/09) portent
+            # l'ancienne chaîne et se renouvellent avec la fenêtre nocturne.
             vb = detect_value_bet(
-                float(_p1_detection_vb[i]),
+                proba_t1,
                 cote_pmu=cote_pmu,
                 cote_geny=cote_geny,
                 cote_bzh=cote_bzh,
@@ -3173,7 +3329,6 @@ async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Option
                 steam_move_betclic_pct=steam_betclic_pct,
                 jockey_suspendu=jockey_susp,
                 entraineur_suspendu=entraineur_susp,
-                cote_calib=_cote_calib,
                 signal_mult=(_sig_mult(feat, _signal_perf) if (_sig_mult and _signal_perf) else None),
                 field_overround=_field_overround,
                 ev_band_perf=_ev_band_perf,
@@ -3244,7 +3399,13 @@ async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Option
             "est_tierce": course.est_tierce,
             "est_2sur4": course.est_2sur4,
         }
-        recos = generer_recommandations_course(predictions, course_info, bankroll=user_bankroll)
+        # Les recommandations sont un complément d'affichage : leur échec ne doit
+        # jamais annuler les prédictions de la course (même transaction).
+        try:
+            recos = generer_recommandations_course(predictions, course_info, bankroll=user_bankroll)
+        except Exception as e:  # noqa: BLE001
+            log.warning("pipeline.recommandations_echec", course_id=course_id, err=str(e)[:160])
+            recos = []
 
         # ── Remplacer les EV/probas HARDCODÉS des paris combinés par les valeurs
         # RÉELLES du moteur Plackett-Luce (intégrité : aucune valeur inventée). ──

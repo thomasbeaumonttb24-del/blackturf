@@ -606,7 +606,9 @@ def test_model_train_and_predict_smoke(tmp_path, monkeypatch):
     assert "walk_forward_auc" in metrics
     assert metrics["walk_forward_auc"] > 0.0
     assert model.win_model is not None
-    assert model.ranker is not None
+    # Le ranker n'est entraîné que si BT_RANKER_BLEND est actif (coupé en prod).
+    from ml.algo_flags import FLAGS
+    assert (model.ranker is not None) == bool(FLAGS.ranker_blend)
 
 
 def test_model_predict_proba_range(tmp_path, monkeypatch):

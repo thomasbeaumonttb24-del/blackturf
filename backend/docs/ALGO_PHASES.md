@@ -98,9 +98,53 @@ proprement sinon.
 - **seed_dev_data.py** : garde-fou `_assert_safe_target()` — refuse toute base non
   dev/test (override explicite `BLACKTURF_ALLOW_SEED=1`).
 
+- **Cotes** : la cote de repli des features (`cote_pmu or 5.0`) n'existe que dans le
+  vecteur du modèle (pas d'écart entraînement/service). Tout le reste lit
+  `participations` (`ml.pipeline.cotes_reelles_de`) : `predictions.cote_figee` vaut
+  `NULL` sans cote publiée, un partant non coté est « sans info marché » dans le blend
+  et le mélange appris (il garde sa proba modèle ; le mélange appris ne s'applique
+  qu'à un champ entièrement coté), et aucun pari de valeur ne sort sur une cote
+  fabriquée.
+- **Gagnant** : `position == 1` dans `resultats.classement` (dead-heat compris),
+  jamais `classement->0` (`ml.signal_performance.sql_est_gagnant`, partagé par
+  cote_calibration, edge_monitor, clv_monitor, servi_vs_marche).
+
 ---
 
-## 6. Reste à faire
+## 6. Probabilités servies et paris de valeur (2026-10-07)
+
+- **Une seule proba de victoire.** La proba affichée (mélange appris, sinon chaîne
+  isotone → blend α → netteté) est AUSSI celle de la détection des paris de valeur :
+  un pari de valeur vérifie toujours `proba_affichée × cote ≥ 1 + seuil`. Les gates
+  restent (confiance, longshot, court-cote, `ev_band_gate`) ; les bandes d'EV sont
+  apprises sur `proba_top1` persistée, donc sur cette même proba servie.
+- **`cote_calibration`** : facteurs appris sur `proba_top1_raw` → plus appliqués à
+  la proba servie (déjà calibrée par le marché : double correction favori-longshot).
+  `detect_value_bet(..., proba_brute=True)` seulement.
+- **P(top3) ≥ P(top1)** imposé par partant en fin de chaîne
+  (`ml.pipeline.imposer_top3_sup_top1`), somme du champ conservée.
+- **Modèle** (`ml.models`) : `roi_simule` et la plausibilité marché de
+  `confidence_score` comparent une P(victoire) normalisée par course à la cote
+  (dé-viggée pour la confiance), plus une P(top3). Le ranker LambdaRank n'est
+  entraîné que si `BT_RANKER_BLEND=1`.
+
+## 7. Drapeaux en production
+
+Source de vérité : `docker-compose.prod.yml` (prime sur les défauts de
+`ml/algo_flags.py`). Vérifié le 2026-10-07 :
+
+| Drapeau | Prod | Défaut code | Conteneurs |
+|---------|------|-------------|------------|
+| `BT_MARKET_GATE` | 1 | ON | scraper, worker, scheduler |
+| `BT_REFIT_FULL` | 1 | OFF | worker (réentraînement nocturne) |
+| `BT_RANKER_BLEND` | 0 | OFF | scraper, worker, scheduler |
+
+Les autres drapeaux anti-fuite (`BT_GROUP_SPLIT`, `BT_CALIB_ON_RAW`,
+`BT_DEVIG_GATES`, …) sont à 1 en prod comme dans le code.
+
+---
+
+## 8. Reste à faire
 
 - Scraper `commentaire_course` (déroulé textuel) — sélecteurs à valider sur le HTML live.
 - Réconcilier entièrement le modèle `RaceLearningLog` si on veut exposer les champs

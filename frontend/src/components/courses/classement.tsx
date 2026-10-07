@@ -25,6 +25,7 @@ import { useState } from "react";
 import { Brain, ChevronDown, HelpCircle, Lock, TrendingUp, Clock3, Trophy } from "lucide-react";
 import { CasaqueNumero } from "@/components/courses/identite-cheval";
 import { cn } from "@/lib/utils";
+import { heureParis } from "@/lib/seo";
 import type { ApercuAnalyse } from "@/components/courses/insights";
 
 export interface ClassementPrediction {
@@ -41,7 +42,7 @@ export interface ClassementPrediction {
   /** Cote de marché relevée au moment du pronostic (peut différer de `cote_pmu`). */
   cote_figee?: number | null;
   cote_juste: number | null;
-  value_bet: { ev_max: number; niveau: number; meilleure_source: string } | null;
+  value_bet: { ev_max: number; niveau: number; meilleure_source: string; detecte_a?: string | null } | null;
 }
 
 export interface ClassementSignal {
@@ -240,14 +241,18 @@ export function LecturePrix({ marche, juste, coteProno = null }: {
   );
 }
 
-function BadgeValeur({ ev, niveau }: { ev: number; niveau: number }) {
+function BadgeValeur({ ev, niveau, detecteA }: { ev: number; niveau: number; detecteA?: string | null }) {
+  // L'espérance est celle du moment de la détection, pas du prix actuel : l'heure
+  // de repérage le dit sans ajouter de ligne.
+  const repere = detecteA ? heureParis(detecteA) : null;
   return (
     <span
-      title={`Espérance de gain ${ev > 0 ? "+" : ""}${Math.round(ev * 100)} % — signal de valeur niveau ${niveau}/4 retenu par le modèle`}
+      title={`Espérance de gain ${ev > 0 ? "+" : ""}${Math.round(ev * 100)} % — signal de valeur niveau ${niveau}/4 retenu par le modèle${repere ? `, repéré à ${repere} (à la cote d'alors)` : ""}`}
       className="inline-flex shrink-0 items-center gap-1 rounded-md bg-emerald-600 px-1.5 py-0.5 text-[10px] font-bold tabular-nums text-white"
     >
       <TrendingUp className="h-3 w-3" aria-hidden="true" />
       {ev > 0 ? "+" : ""}{Math.round(ev * 100)} %
+      {repere && <span className="font-medium text-emerald-50/90">· repéré à {repere}</span>}
     </span>
   );
 }
@@ -746,7 +751,7 @@ export function ClassementAlgo({
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                       <Identite numero={p.numero} nom={p.nom_cheval} terne={absent} />
-                      {p.value_bet && !absent && <BadgeValeur ev={p.value_bet.ev_max} niveau={p.value_bet.niveau} />}
+                      {p.value_bet && !absent && <BadgeValeur ev={p.value_bet.ev_max} niveau={p.value_bet.niveau} detecteA={p.value_bet.detecte_a} />}
                       {absent && (
                         <span className="rounded-md bg-stone-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-600">
                           Non-partant

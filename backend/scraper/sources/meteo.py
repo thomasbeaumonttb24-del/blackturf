@@ -68,13 +68,25 @@ class MeteoScraper:
             r.raise_for_status()
             data = r.json()
 
+            # Pluie : l'endpoint `weather` (observation courante) ne publie QUE le
+            # cumul de la dernière heure (`rain.1h`, parfois `rain.3h`) — aucun cumul
+            # 24 h n'existe dans cette réponse. La colonne historique `pluie_24h`
+            # reçoit donc en réalité une pluie SUR 1 H. On ne change pas ce qu'elle
+            # contient (features et modèle ont appris sur cette valeur : la remplacer
+            # par un vrai 24 h créerait un écart entraînement/service) ; on l'expose
+            # aussi sous son vrai nom, `pluie_1h`. Un vrai cumul 24 h demanderait une
+            # autre source (historique horaire) — non branchée.
+            # Absence du bloc `rain` = pas de pluie observée → 0,0 (c'est la
+            # convention OpenWeatherMap, pas une valeur inventée).
+            pluie_1h = data.get("rain", {}).get("1h", 0.0) or 0.0
             return {
                 "temperature": data.get("main", {}).get("temp"),
                 "humidite": data.get("main", {}).get("humidity"),
                 "pression": data.get("main", {}).get("pressure"),
                 "vent_vitesse": data.get("wind", {}).get("speed"),
                 "vent_direction": self._deg_to_direction(data.get("wind", {}).get("deg")),
-                "pluie_24h": data.get("rain", {}).get("1h", 0.0) or 0.0,
+                "pluie_1h": pluie_1h,
+                "pluie_24h": pluie_1h,   # nom historique, contenu = 1 h (cf. ci-dessus)
                 "visibilite": data.get("visibility"),
                 "description": data.get("weather", [{}])[0].get("description", ""),
             }

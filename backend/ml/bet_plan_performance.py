@@ -364,18 +364,41 @@ async def _naive_favorite_roi(session: AsyncSession, course_ids: list[str]) -> O
     # Le comparateur annonçait donc un marché à −44 % là où il est à −26 %, et
     # surestimait l'avantage revendiqué par BlackTurf de 17 à 18 points. Un
     # comparateur sans garde de cote figée n'est pas un comparateur.
+    #
+    # PAIEMENT (correctif 2026-10-07) : le favori gagnant était payé à SA COTE
+    # D'ÉMISSION alors que les plans comparés le sont au RAPPORT OFFICIEL. Deux
+    # unités différentes dans la même comparaison : le favori sur-joué voit sa
+    # cote baisser jusqu'au départ, la cote d'émission surpayait donc la
+    # référence. Le favori est désormais payé au rapport Simple Gagnant officiel
+    # (détail par cheval, sinon agrégat publié). Gagnant SANS rapport alors que
+    # des rapports sont publiés → course EXCLUE (même règle que les plans : on
+    # n'invente pas de gain). Seule une course sans AUCUN rapport en base retombe
+    # sur la cote d'émission, et elle est comptée à part (`n_cote_emission`).
     stmt = text("""
-        SELECT s.course_id, s.cotes_utilisees, r.classement
+        SELECT s.course_id, s.cotes_utilisees, r.classement, r.rapports, r.rapports_detail
         FROM bet_plan_snapshots s
         JOIN resultats r ON r.course_id = s.course_id
         WHERE s.course_id IN :cids AND s.is_pre_course = true
         ORDER BY s.course_id, s.emitted_at DESC
     """).bindparams(bindparam("cids", expanding=True))
     rows = (await session.execute(stmt, {"cids": list(set(course_ids))})).all()
+    from services.bet_settlement import _RAPPORT_KEYS as _RK, _place_rapport_exact
+    _cles_sg = _RK["Simple Gagnant"]
+
+    def _json(v):
+        if v is None or isinstance(v, (dict, list)):
+            return v
+        try:
+            return json.loads(v)
+        except (TypeError, ValueError):
+            return None
+
     seen: set[str] = set()
     mise = gain = 0.0
     n = 0
-    for course_id, cotes_raw, classement_raw in rows:
+    n_cote_emission = 0
+    n_exclus_sans_rapport = 0
+    for course_id, cotes_raw, classement_raw, rapports_raw, detail_raw in rows:
         if course_id in seen:
             continue
         cotes = cotes_raw if isinstance(cotes_raw, dict) else (
@@ -401,15 +424,35 @@ async def _naive_favorite_roi(session: AsyncSession, course_ids: list[str]) -> O
                         break
                 except (TypeError, ValueError):
                     continue
+        if gagnant is not None and int(gagnant) == int(fav_num):
+            rapports = _json(rapports_raw) or {}
+            detail = _json(detail_raw) or {}
+            rapport = _place_rapport_exact(detail, _cles_sg, [int(fav_num)])
+            if rapport is None and isinstance(rapports, dict):
+                for k in _cles_sg:
+                    try:
+                        if rapports.get(k) is not None and float(rapports[k]) > 0:
+                            rapport = float(rapports[k])
+                            break
+                    except (TypeError, ValueError):
+                        continue
+            if rapport is None:
+                if rapports or detail:
+                    n_exclus_sans_rapport += 1
+                    continue          # rapports publiés mais pas celui-ci : exclu
+                rapport = fav_cote    # aucun rapport en base : repli signalé
+                n_cote_emission += 1
+            gain += rapport
         mise += 1.0
         n += 1
-        if gagnant is not None and int(gagnant) == int(fav_num):
-            gain += fav_cote
     if n == 0:
         return None
     net = round(gain - mise, 2)
     return {"n_courses": n, "montant_mise": round(mise, 2), "montant_retour": round(gain, 2),
-            "net_profit": net, "roi_pct": round(net / mise * 100, 2) if mise else None}
+            "net_profit": net, "roi_pct": round(net / mise * 100, 2) if mise else None,
+            "paiement": "rapport_officiel",
+            "n_cote_emission": n_cote_emission,
+            "n_exclus_sans_rapport": n_exclus_sans_rapport}
 
 
 def _taille_baseline(type_pari: str) -> Optional[int]:

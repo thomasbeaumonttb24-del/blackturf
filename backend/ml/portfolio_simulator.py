@@ -28,7 +28,12 @@ import structlog
 
 log = structlog.get_logger()
 
-RETENTION_PMU = 0.25   # prélèvement moyen PMU sur les combinés (cote équitable × (1-ret))
+# Prélèvement PMU : lu PAR TYPE dans la table de référence unique
+# (services.pmu_paris_reference.trj). Avant : 25 % à plat sur tous les combinés —
+# trop doux pour le Tiercé/Quarté/Quinté (~35 %), trop dur pour les couplés (26 %).
+from services.pmu_paris_reference import trj as _trj  # noqa: E402
+
+RETENTION_PMU = 0.25   # conservé pour compatibilité (plus utilisé dans le calcul)
 EPS = 1e-9
 
 
@@ -92,6 +97,25 @@ def _norm(t: str) -> str:
     import unicodedata
     x = unicodedata.normalize("NFKD", t or "").encode("ascii", "ignore").decode()
     return " ".join(x.lower().split())
+
+
+# Libellés normalisés (`_norm`) → nom canonique de la table TRJ de référence.
+_CANON_TRJ = {
+    "gagnant": "Simple Gagnant", "simple gagnant": "Simple Gagnant",
+    "place": "Simple Placé", "simple place": "Simple Placé",
+    "couple gagnant": "Couplé Gagnant", "couple ordre": "Couplé Ordre",
+    "couple place": "Couplé Placé", "trio": "Trio", "trio ordre": "Trio Ordre",
+    "tierce": "Tiercé", "tierce desordre": "Tiercé", "tierce ordre": "Tiercé",
+    "2sur4": "2sur4", "deux sur quatre": "2sur4",
+    "quarte": "Quarté+", "quarte desordre": "Quarté+", "quarte ordre": "Quarté+",
+    "quinte": "Quinté+", "quinte+": "Quinté+", "quinte plus": "Quinté+",
+    "quinte desordre": "Quinté+", "quinte ordre": "Quinté+",
+}
+
+
+def _trj_type(type_pari: str) -> float:
+    """TRJ de référence d'un libellé de pari, accents/casse indifférents."""
+    return _trj(_CANON_TRJ.get(_norm(type_pari), type_pari))
 
 
 def _bet_win_mask(bet: dict, positions: np.ndarray, idx_of: dict, places: int) -> Optional[np.ndarray]:
@@ -186,7 +210,7 @@ def simulate_portfolio_coverage(
         if _norm(b["type"]) in _SIMPLE and b.get("cote", 0) > 1.0:
             payout_mult = float(b["cote"])               # cote réelle
         else:
-            fair = (1.0 / max(p_win, EPS)) * (1.0 - RETENTION_PMU)  # cote équitable estimée
+            fair = (1.0 / max(p_win, EPS)) * _trj_type(b["type"])  # cote équitable × TRJ du type
             payout_mult = max(fair, 1.0)
         # gain net si gagné = stake*(mult-1), sinon -stake
         pnl += np.where(m, stake * (payout_mult - 1.0), -stake)

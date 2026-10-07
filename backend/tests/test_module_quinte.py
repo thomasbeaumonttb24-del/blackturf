@@ -31,8 +31,10 @@ _INFO_QUINTE = {
 
 _INFO_SANS_QUINTE = dict(_INFO_QUINTE, est_quinte=False)
 PROFILS = ("conservateur", "equilibre", "agressif")
-# Profils à UN ticket (tendu ou champ) ; le risqué joue cinq tickets tendus distincts.
-PROFILS_TICKET_UNIQUE = ("conservateur", "equilibre")
+# Profil à UN ticket (tendu) ; modéré et risqué jouent cinq tickets tendus distincts
+# (arbitrage produit du 2026-10-07 : 10 € de Quinté+ pour ces deux profils).
+PROFILS_TICKET_UNIQUE = ("conservateur",)
+PROFILS_TICKETS = ("equilibre", "agressif")
 
 
 def _preds(n=16):
@@ -49,7 +51,11 @@ def _plan(montant, profil, info=_INFO_QUINTE, preds=None):
 
 
 def _corps(montant, profil, info=_INFO_QUINTE, preds=None):
-    """Le corps de generer_plan SANS le partage Quinté+ : le plan principal seul."""
+    """Le corps de generer_plan SANS le partage Quinté+ : le plan principal seul.
+    Sur une course Quinté+, le décorateur signale au corps que le Quinté+ est joué
+    par le module (`quinte_en_module`) : il ne le rachète pas dans le plan principal."""
+    if info.get("est_quinte"):
+        info = dict(info, quinte_en_module=True)
     return mc.generer_plan.__wrapped__(montant, profil, preds or _preds(), info,
                                        respect_montant=True)
 
@@ -87,10 +93,9 @@ def test_module_quinte_present_pour_les_trois_profils():
 
 
 def test_couverture_s_elargit_avec_le_profil_quand_le_budget_le_permet():
-    """Prudent = tendu (le moins cher), risqué = champ 7 (la plus grosse couverture).
-    À 2 € la combinaison, un champ 7 (21 combinaisons) coûte 42 € : il faut 200 €."""
+    """Prudent = tendu (le moins cher) ; modéré et risqué = cinq tickets tendus."""
     couv = {p: _plan(200, p).module_quinte["couverture"] for p in PROFILS}
-    assert couv == {"conservateur": "tendue", "equilibre": "champ 6 chevaux",
+    assert couv == {"conservateur": "tendue", "equilibre": "5 tickets tendus",
                     "agressif": "5 tickets tendus"}
 
 
@@ -126,7 +131,7 @@ def test_plan_to_dict_expose_le_module_et_son_cout():
 
 @pytest.mark.parametrize("profil,montant", [
     (p, m) for p in PROFILS_TICKET_UNIQUE for m in (4, 5, 7, 10, 13, 20, 50, 100)
-] + [("agressif", m) for m in (12, 13, 20, 50, 100)])
+] + [(p, m) for p in PROFILS_TICKETS for m in (12, 13, 20, 50, 100)])
 def test_somme_exacte_egale_au_montant_saisi(profil, montant):
     plan = _plan(montant, profil)
     mq = plan.module_quinte
@@ -142,7 +147,7 @@ def test_somme_exacte_egale_au_montant_saisi(profil, montant):
 
 @pytest.mark.parametrize("profil,montant", [
     (p, m) for p in PROFILS_TICKET_UNIQUE for m in (4, 10, 20, 50)
-] + [("agressif", m) for m in (12, 20, 50)])
+] + [(p, m) for p in PROFILS_TICKETS for m in (12, 20, 50)])
 def test_plan_principal_construit_sur_le_montant_moins_le_quinte(profil, montant):
     plan = mc.plan_to_dict(_plan(montant, profil))
     principal = mc.plan_to_dict(_corps(int(montant - plan["montant_quinte"]), profil))
@@ -211,11 +216,11 @@ def test_prix_coherents(profil, montant):
     assert mq["cout_total"] == n_comb * 2.0
 
 
-def test_champ_reduit_explique_quand_le_budget_ne_suffit_pas():
-    mq = _plan(50, "equilibre").module_quinte
-    assert mq["couverture"] == "tendue" and mq["couverture_visee"] == "champ 6 chevaux"
-    assert mq["couverture_reduite"] is True
-    assert "12 €" in mq["motif_couverture"]
+def test_champ_reduit_quand_le_budget_ne_suffit_pas():
+    """Règle de budget d'un ticket unique à champ visé > 5 : réduit au tendu tant que
+    le prix plein dépasse la part réservée (la règle reste pure et testée seule)."""
+    regle = mc._regle_budget_quinte(50, "equilibre")
+    assert regle["champ_vise"] == 6 and regle["champ"] == 5 and regle["budget"] == 2
 
 
 # ── Montant trop faible / module indisponible ────────────────────────────────
@@ -335,7 +340,7 @@ def test_settle_plan_sans_module_n_ajoute_rien():
 def test_plan_genere_puis_regle_bout_a_bout():
     """Le plan servi se règle tel quel : mises du plan principal + coût du Quinté+
     = montant saisi, et le Quinté+ a son propre bilan."""
-    plan = mc.plan_to_dict(_plan(10, "equilibre"))
+    plan = mc.plan_to_dict(_plan(10, "conservateur"))
     arrivee = [{"numero": n, "position": i} for i, n in enumerate((1, 2, 3, 4, 5), 1)]
     # Le PMU publie l'Ordre ET le Désordre : un tendu arrivé dans l'ordre joué est
     # payé à l'Ordre ; sans ce rapport il resterait en attente (jamais inventé).
@@ -350,13 +355,14 @@ def test_plan_genere_puis_regle_bout_a_bout():
     assert bilan["module_quinte"]["en_attente"] is False
 
 
-# ── Profil risqué : cinq tickets Quinté+ différents, 2 € chacun ────────────────
+# ── Profils modéré et risqué : cinq tickets Quinté+ différents, 2 € chacun ─────
 
+@pytest.mark.parametrize("profil", PROFILS_TICKETS)
 @pytest.mark.parametrize("montant", [1, 2, 5, 10, 11, 12, 20, 50, 100, 200])
-def test_risque_cinq_tickets_differents_a_deux_euros(montant):
-    """Arbitrage du 2026-09-24 : le plan risqué propose cinq tickets Quinté+
-    différents, 2 € chacun, à chaque fois."""
-    mq = _plan(montant, "agressif").module_quinte
+def test_cinq_tickets_differents_a_deux_euros(profil, montant):
+    """Arbitrages du 2026-09-24 (risqué) et du 2026-10-07 (modéré) : cinq tickets
+    Quinté+ différents, 2 € chacun, à chaque fois — 10 € de Quinté+."""
+    mq = _plan(montant, profil).module_quinte
     assert mq["disponible"] is True
     combis = mq["combinaisons"]
     assert len(combis) == 5 and len({tuple(sorted(c)) for c in combis}) == 5
@@ -367,31 +373,76 @@ def test_risque_cinq_tickets_differents_a_deux_euros(montant):
     assert all(0 < t["proba_gain"] < 1 and t["rapport_estime"] > 1 for t in mq["tickets"])
 
 
-def test_risque_les_cinq_quintes_les_plus_probables_dans_l_ordre_du_classement():
-    """Les cinq combinaisons sont les plus probables selon le modèle, parmi le haut
-    du classement, et chaque ticket est joué dans l'ordre du rang IA."""
-    mq = _plan(50, "agressif").module_quinte
+def test_modere_les_cinq_quintes_les_plus_probables_dans_l_ordre_du_classement():
+    """Modéré, « plutôt probable » : les cinq combinaisons les plus probables parmi
+    le haut du classement, chaque ticket joué dans l'ordre du rang IA."""
+    mq = _plan(50, "equilibre").module_quinte
+    assert mq["strategie"] == "probables"
     probas = [t["proba_gain"] for t in mq["tickets"]]
     assert probas == sorted(probas, reverse=True)
     assert mq["combinaisons"][0] == [1, 2, 3, 4, 5]
     for c in mq["combinaisons"]:
         assert c == sorted(c), "ordre joué = rang IA (numéros croissants dans _preds)"
-        assert max(c) <= mc.QUINTE_RISQUE_VIVIER
+        assert max(c) <= mc.QUINTE_VIVIER
 
 
+@pytest.mark.parametrize("montant", [10, 20, 50])
+def test_modere_dix_euros_de_quinte(montant):
+    """Demande produit du 2026-10-07 : à 10 €, le modéré ne jouait que 2 € de
+    Quinté+ ; il en joue désormais 10 €, et le plan principal est toujours joué."""
+    plan = _plan(montant, "equilibre")
+    assert plan.montant_quinte == 10.0
+    assert [p for n in plan.niveaux for p in n.paris], "chaque course reste jouée"
+
+
+def test_risque_tente_des_coups_hors_du_top_8_et_differents_du_modere():
+    """Risqué, « tenter des coups » : chaque ticket garde au moins deux des meilleurs
+    chevaux et prend au moins un cheval classé hors du top 8 ; aucun ticket n'est un
+    ticket du modéré, et il joue d'autres chevaux que lui."""
+    risque = _plan(50, "agressif").module_quinte
+    modere = _plan(50, "equilibre").module_quinte
+    assert risque["strategie"] == "coups"
+    rang = {c["numero"]: c["rang"] for c in risque["chevaux"]}
+    for c in risque["combinaisons"]:
+        assert any(rang[n] > mc.QUINTE_VIVIER for n in c), c
+        assert sum(1 for n in c if rang[n] <= mc.QUINTE_COUP_BASES) >= mc.QUINTE_COUP_BASES_MIN
+    assert not ({frozenset(c) for c in risque["combinaisons"]}
+                & {frozenset(c) for c in modere["combinaisons"]})
+    joues_modere = {c["numero"] for c in modere["chevaux"]}
+    assert {c["numero"] for c in risque["chevaux"]} - joues_modere
+    # Éventail : au moins trois outsiders différents, chacun dans deux tickets au plus.
+    tentatives = [c for c in risque["chevaux"] if c["role"] == "tentative"]
+    assert len(tentatives) >= 3
+    assert all(c["nb_tickets"] <= mc.QUINTE_COUP_USAGE_MAX for c in tentatives)
+
+
+def test_risque_l_outsider_detecte_est_prefere():
+    """Deux outsiders de même rang de chance : celui que le détecteur d'outsiders a
+    repéré (chance de place élevée) entre dans les tickets, avec sa justification."""
+    preds = _preds()
+    preds[13]["outsider"] = {"chance_place": 0.31, "niveau": "fort"}   # N°14, rang 14
+    mq = _plan(50, "agressif", preds=preds).module_quinte
+    assert any(14 in c for c in mq["combinaisons"])
+    ch14 = next(c for c in mq["chevaux"] if c["numero"] == 14)
+    assert ch14["role"] == "tentative"
+    assert any("outsider détecté" in s for s in ch14["signaux"])
+
+
+@pytest.mark.parametrize("profil", PROFILS_TICKETS)
 @pytest.mark.parametrize("montant", [12, 20, 50])
-def test_risque_cout_pris_sur_le_montant_des_12_euros(montant):
-    plan = _plan(montant, "agressif")
+def test_cout_pris_sur_le_montant_des_12_euros(profil, montant):
+    plan = _plan(montant, profil)
     assert plan.module_quinte["en_supplement"] is False
     assert plan.montant_joue + plan.montant_quinte == montant == plan.montant_total
     assert plan.montant_joue >= mc.QUINTE_PRINCIPAL_MIN
 
 
+@pytest.mark.parametrize("profil", PROFILS_TICKETS)
 @pytest.mark.parametrize("montant", [1, 2, 5, 10, 11])
-def test_risque_sous_12_euros_les_tickets_sont_ajoutes(montant):
+def test_sous_12_euros_les_tickets_sont_ajoutes(profil, montant):
     """Sous 12 €, prendre 10 € laisserait moins de 2 € au plan principal : les cinq
     tickets restent proposés, ajoutés au montant, et le plan le dit."""
-    plan = _plan(montant, "agressif")
+    plan = _plan(montant, profil)
     mq = plan.module_quinte
     saisi = max(2, montant)
     assert mq["en_supplement"] is True and mq["cout_total"] == 10.0

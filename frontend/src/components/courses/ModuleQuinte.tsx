@@ -5,6 +5,10 @@ import { IdentiteCheval } from "@/components/courses/identite-cheval";
 
 /** Module Quinté+ du plan de mise (backend : `mise_calculator._construire_module_quinte`).
  *
+ *  Prudent : un ticket tendu. Modéré et risqué : 10 € en cinq tickets tendus — le
+ *  modéré joue les quintés les plus probables, le risqué tente des coups avec au
+ *  moins un outsider hors du top 8 par ticket, choisi sur ses signaux.
+ *
  *  Son coût est PRIS SUR le montant du plan (arbitrage du 2026-09-24) : plan principal
  *  + Quinté+ = le montant saisi. Un Quinté+ joué à chaque course Quinté+ est une
  *  couverture de divertissement — aucune espérance positive n'est établie, et le
@@ -20,7 +24,17 @@ export interface ModuleQuinteData {
   couverture_reduite?: boolean;
   motif_couverture?: string | null;
   nb_chevaux?: number;
-  chevaux?: { numero: number; nom: string; cote?: number; rang?: number | null }[];
+  // Modéré : « probables » ; risqué : « coups » (au moins un cheval hors du top 8).
+  strategie?: "probables" | "coups";
+  resume?: string;
+  chevaux?: {
+    numero: number; nom: string; cote?: number; rang?: number | null;
+    role?: "base" | "tentative";      // tentative = cheval hors du top 8 joué pour un coup
+    hors_modere?: boolean;            // risqué : cheval absent des tickets du modéré
+    nb_tickets?: number;
+    signaux?: string[];               // ce qui l'appuie (prix, détection, forme…)
+    vigilance?: string[];             // ce qui le contredit
+  }[];
   nb_combinaisons?: number;
   flexi_pct?: number;
   mise_unitaire?: number;          // mise par combinaison (mise de base × Flexi)
@@ -37,12 +51,13 @@ export interface ModuleQuinteData {
   gain_potentiel?: number;
   gain_fourchette?: { bas: number; haut: number } | null;
   note?: string;
-  // Profil risqué : plusieurs tickets tendus distincts (2 € chacun).
+  // Profils modéré et risqué : cinq tickets tendus distincts (2 € chacun).
   tickets?: {
     numeros: number[];
+    role?: "probable" | "coup";
     proba_gain?: number | null;
     rapport_estime?: number | null;
-    chevaux?: { numero: number; nom: string; rang?: number | null }[];
+    chevaux?: { numero: number; nom: string; rang?: number | null; role?: "base" | "tentative" }[];
   }[];
 }
 
@@ -114,6 +129,7 @@ export function ModuleQuinte({ module, montantTotal }: { module: ModuleQuinteDat
   const tendu = (module.nb_combinaisons ?? 1) <= 1;
   const tickets = module.tickets ?? [];
   const multi = tickets.length > 1;
+  const tentatives = new Set(chevaux.filter((c) => c.role === "tentative").map((c) => c.numero));
 
   return (
     <section aria-label="Quinté+" style={{ borderRadius: 15, overflow: "hidden", background: CX.surf1, border: `1px solid ${CX.slateBd}`, boxShadow: "0 1px 2px rgba(17,24,39,.025)" }}>
@@ -125,11 +141,16 @@ export function ModuleQuinte({ module, montantTotal }: { module: ModuleQuinteDat
       </div>
 
       <div style={{ padding: "13px 14px", display: "flex", flexDirection: "column", gap: 11 }}>
-        {/* Profil risqué : plusieurs tickets tendus distincts, chacun à 2 €. */}
+        {module.resume && (
+          <p style={{ margin: 0, fontSize: 11.5, lineHeight: 1.5, color: CX.gray600 }}>{module.resume}</p>
+        )}
+
+        {/* Modéré et risqué : plusieurs tickets tendus distincts, chacun à 2 €. */}
         {multi && (
           <div>
             <div style={{ fontSize: 10.5, fontWeight: 600, color: CX.gray500, marginBottom: 6 }}>
               {tickets.length} tickets différents · {eur(module.mise_unitaire ?? 2)} chacun · joués dans l&apos;ordre du classement IA
+              {tentatives.size > 0 ? " · en doré : les outsiders tentés hors du top 8" : ""}
             </div>
             <ol style={{ margin: 0, padding: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: 6 }}>
               {tickets.map((t, i) => (
@@ -141,8 +162,16 @@ export function ModuleQuinte({ module, montantTotal }: { module: ModuleQuinteDat
                       {t.rapport_estime != null ? `rapport ~×${t.rapport_estime.toFixed(0)}` : ""}
                     </span>
                   </div>
-                  <div style={{ marginTop: 4, fontFamily: CX.sg, fontWeight: 700, fontSize: 14, letterSpacing: ".02em", fontVariantNumeric: "tabular-nums" }}>
-                    {t.numeros.join(" - ")}
+                  <div style={{ marginTop: 4, display: "flex", flexWrap: "wrap", gap: 4, fontFamily: CX.sg, fontWeight: 700, fontSize: 14, fontVariantNumeric: "tabular-nums" }}>
+                    {t.numeros.map((n) => (
+                      <span key={n} title={tentatives.has(n) ? "Outsider tenté (hors du top 8)" : undefined}
+                        style={{ minWidth: 26, textAlign: "center", borderRadius: 6, padding: "1px 5px",
+                          background: tentatives.has(n) ? CX.goldBg : CX.surf3,
+                          border: `1px solid ${tentatives.has(n) ? CX.goldBd : CX.bd2}`,
+                          color: tentatives.has(n) ? CX.goldDeep : CX.ink2 }}>
+                        {n}
+                      </span>
+                    ))}
                   </div>
                 </li>
               ))}
@@ -157,12 +186,24 @@ export function ModuleQuinte({ module, montantTotal }: { module: ModuleQuinteDat
           </div>
           <ul style={{ margin: 0, padding: 0, listStyle: "none", display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(190px,1fr))", gap: 6 }}>
             {chevaux.map((c) => (
-              <li key={c.numero} style={{ minWidth: 0, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6, borderRadius: 9, border: `1px solid ${CX.bd2}`, padding: "5px 8px", fontSize: 12, color: CX.ink2 }}>
-                <span style={{ minWidth: 0 }}><IdentiteCheval numero={c.numero} nom={c.nom} /></span>
-                {c.rang != null && (
-                  <span style={{ flexShrink: 0, fontSize: 10, color: CX.gray500, fontVariantNumeric: "tabular-nums" }}>
-                    {c.rang}{c.rang === 1 ? "er" : "e"} IA
-                  </span>
+              <li key={c.numero} style={{ minWidth: 0, borderRadius: 9, border: `1px solid ${c.role === "tentative" ? CX.goldBd : CX.bd2}`, background: c.role === "tentative" ? CX.goldBg : undefined, padding: "5px 8px", fontSize: 12, color: CX.ink2 }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6 }}>
+                  <span style={{ minWidth: 0 }}><IdentiteCheval numero={c.numero} nom={c.nom} /></span>
+                  {c.rang != null && (
+                    <span style={{ flexShrink: 0, fontSize: 10, color: c.role === "tentative" ? CX.goldDeep : CX.gray500, fontWeight: c.role === "tentative" ? 700 : 400, fontVariantNumeric: "tabular-nums" }}>
+                      {c.role === "tentative" ? "Coup · " : ""}{c.rang}{c.rang === 1 ? "er" : "e"} IA
+                    </span>
+                  )}
+                </div>
+                {((c.signaux?.length ?? 0) > 0 || (c.vigilance?.length ?? 0) > 0) && (
+                  <ul style={{ margin: "4px 0 0", padding: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: 2, fontSize: 10.5, lineHeight: 1.4 }}>
+                    {(c.signaux ?? []).map((s) => (
+                      <li key={s} style={{ color: CX.emDeep }}>+ {s}</li>
+                    ))}
+                    {(c.vigilance ?? []).map((s) => (
+                      <li key={s} style={{ color: CX.goldDeep }}>− {s}</li>
+                    ))}
+                  </ul>
                 )}
               </li>
             ))}

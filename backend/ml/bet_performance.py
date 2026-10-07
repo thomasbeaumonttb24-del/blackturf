@@ -347,6 +347,7 @@ async def compute_model_heat(session: AsyncSession) -> dict:
     # perdante, il paie le tarif. Sans cela le thermostat resterait au plancher en
     # permanence et ne thermostaterait plus rien.
     roi_recent = None
+    roi_reel = None
     n_bets = 0
     try:
         since = datetime.now(timezone.utc) - timedelta(days=_HEAT_ROI_JOURS)
@@ -393,6 +394,7 @@ async def compute_model_heat(session: AsyncSession) -> dict:
         if row and float(row[0] or 0) > 0 and int(row[2] or 0) >= _MIN_PLANS_FOR_ROI:
             n_bets = int(row[2] or 0)
             roi = (float(row[1]) - float(row[0])) / float(row[0])
+            roi_reel = roi
             roi_recent = roi + PRELEVEMENT_MOYEN_SYSTEME_PCT / 100.0
     except Exception as e:  # noqa: BLE001
         log.warning("bet_performance.roi_recent_indisponible", err=str(e)[:160])
@@ -405,9 +407,24 @@ async def compute_model_heat(session: AsyncSession) -> dict:
         cal = (_BRIER_BAD - brier) / (_BRIER_BAD - _BRIER_GOOD) * 2.0 - 1.0
         terms.append(max(-1.0, min(1.0, cal)))
     if roi_recent is not None and n_bets >= _MIN_PLANS_FOR_ROI:
-        terms.append(max(-1.0, min(1.0, roi_recent / 0.30)))
+        terme_roi = max(-1.0, min(1.0, roi_recent / 0.30))
+        # CORRECTIF 2026-10-07 : l'avantage (ROI + prélèvement) sert de zéro pour
+        # REFROIDIR moins vite, jamais pour RÉCHAUFFER. Un système à −10 % de ROI
+        # réel affichait +10 points d'avantage → terme positif → gates assouplies
+        # alors qu'il perd de l'argent. Tant que le ROI réel est négatif, le terme
+        # « résultats » est plafonné à 0.
+        if roi_reel is not None and roi_reel < 0:
+            terme_roi = min(0.0, terme_roi)
+        terms.append(terme_roi)
 
     heat = round(sum(terms) / len(terms), 3) if terms else 0.0
+
+    # Et le brier seul ne doit pas non plus assouplir un système qui perd : un
+    # modèle bien calibré qui joue à perte reste en mode ≤ normal.
+    roi_negatif_gel = False
+    if roi_reel is not None and roi_reel < 0 and heat > 0:
+        heat = 0.0
+        roi_negatif_gel = True
 
     # GEL OFFENSIF EN DÉRIVE (2026-07-02) : quand le drift detector est en severity
     # 'critical', le modèle dérive MAINTENANT — un heat > 0 (calé sur le brier/ROI
@@ -427,6 +444,8 @@ async def compute_model_heat(session: AsyncSession) -> dict:
         "heat": heat,
         "brier": round(brier, 4) if brier is not None else None,
         "roi_recent": round(roi_recent, 4) if roi_recent is not None else None,
+        "roi_reel": round(roi_reel, 4) if roi_reel is not None else None,
+        "roi_negatif_gel": roi_negatif_gel,
         "n_races": n_races,
         "n_bets": n_bets,
         "drift_freeze": drift_freeze,

@@ -237,6 +237,11 @@ async def record_profil_runs(session: AsyncSession, course_id: str,
         if _now >= _date_heure:
             return 0
 
+    # Mêmes signaux que /mise-plan (services.appui_signaux) : détecteur d'outsiders
+    # et contexte de chaque cheval — sinon le plan figé (bilan, palmarès) ne choisirait
+    # pas les mêmes chevaux que le plan affiché.
+    from services.appui_signaux import charger_outsiders
+    outsiders = await charger_outsiders(session, course_id)
     preds = []
     feats_by_num: dict[int, dict] = {}
     for numero, nom, p1, p3, cote, np_, feats in rows:
@@ -244,8 +249,14 @@ async def record_profil_runs(session: AsyncSession, course_id: str,
             "numero": numero, "nom_cheval": nom,
             "proba_top1": p1, "proba_top3": p3,
             "cote_pmu": cote, "non_partant": np_,
+            "outsider": outsiders.get(int(numero)),
         })
         feats_by_num[int(numero)] = feats or {}
+    try:
+        from ml.horse_context import build_horse_context
+        horse_contexts = {n: build_horse_context(f) for n, f in feats_by_num.items()}
+    except Exception:  # noqa: BLE001 — sans contexte : composante écartée
+        horse_contexts = {}
 
     from services.bet_catalog import derive_bet_flags
     course_info = derive_bet_flags(
@@ -312,7 +323,8 @@ async def record_profil_runs(session: AsyncSession, course_id: str,
             # plus aucune réserve depuis l'arbitrage produit du 2026-09-03.
             plan = generer_plan(MISE_REF, profil, preds, course_info,
                                 None, roi_weights, heat, sig_mults, respect_montant=True,
-                                rapport_calib=rapport_calib, ev_band_perf=ev_band_perf)
+                                rapport_calib=rapport_calib, ev_band_perf=ev_band_perf,
+                                horse_contexts=horse_contexts)
             plan_d = plan_to_dict(plan)
         except Exception as e:
             log.warning("profil_learning.plan_failed", course_id=course_id,
@@ -439,15 +451,36 @@ async def settle_profil_runs(session: AsyncSession, course_id: str) -> int:
     """), {"cid": course_id})).all()
     non_partants = {int(r[0]) for r in np_rows if r[0] is not None}
 
+    # Les runs déjà RÉGLÉS PARTIELLEMENT (cf. `bilan_reglement_partiel`) sont repris :
+    # si le rapport manquant a été publié depuis, la MÊME ligne est réécrite avec le
+    # bilan complet — aucun double comptage, l'agrégat lit une ligne par run.
     runs = (await session.execute(text("""
-        SELECT log_id, plan FROM profil_run_log
-        WHERE course_id = :cid AND statut IN ('pending', 'partial')
+        SELECT log_id, plan, statut FROM profil_run_log
+        WHERE course_id = :cid
+          AND (statut IN ('pending', 'partial')
+               OR (statut = 'settled'
+                   AND COALESCE(meta->>'reglement_partiel', '') = 'true'))
     """), {"cid": course_id})).all()
 
     n_settled = 0
-    for log_id, plan in runs:
+    for log_id, plan, statut_avant in runs:
         plan_d = plan if isinstance(plan, dict) else json.loads(plan)
         bilan = settle_plan(plan_d, classement, rapports, nb_partants, rapports_detail, non_partants)
+        if statut_avant == "settled":
+            # Réglé partiellement : on ne remplace que par un bilan COMPLET.
+            if bilan.get("en_attente"):
+                continue
+            await session.execute(text("""
+                UPDATE profil_run_log
+                SET resultat = CAST(:res AS jsonb), roi_reel = :roi, settled_at = now(),
+                    meta = COALESCE(meta, '{}'::jsonb) - 'reglement_partiel'
+                           - 'nb_paris_exclus'
+                WHERE log_id = :id
+            """), {"res": json.dumps(bilan),
+                   "roi": (bilan["roi"] / 100.0) if bilan.get("roi") is not None else None,
+                   "id": log_id})
+            n_settled += 1
+            continue
         statut = "partial" if bilan.get("en_attente") else "settled"
         roi = bilan.get("roi")
         await session.execute(text("""
@@ -481,6 +514,46 @@ async def settle_profil_runs(session: AsyncSession, course_id: str) -> int:
 # en retard) et n'était JAMAIS retenté → poids/bandes/calibrations apprises sur un
 # échantillon amputé (pertes non comptées → ROI appris surestimé).
 CATCHUP_TIMEOUT_DAYS = 7
+# Fenêtre pendant laquelle un run réglé partiellement est encore re-tenté (rapport
+# publié très en retard). Au-delà, son bilan partiel est définitif.
+REPRISE_PARTIEL_JOURS = 60
+
+
+def bilan_reglement_partiel(bilan: dict) -> tuple[dict, int]:
+    """Bilan d'un run 'partial' expiré, réduit à ses paris RÉGLÉS.
+
+    Avant (audit 2026-10-07) : un run 'partial' — typiquement un pari GAGNANT dont le
+    rapport n'a jamais été publié — passait 'expired' au bout de 7 jours et sortait
+    ENTIÈREMENT de l'apprentissage, avec tous ses paris perdants et gagnants déjà
+    réglés. On garde désormais les paris réglés (gagne / perdu ; rembourse reste
+    neutre) et on retire seulement ceux 'en_attente' : ni leur mise, ni un gain
+    inventé — on ne fabrique jamais un rapport.
+
+    Retourne (bilan_partiel, nb_paris_exclus). Fonction PURE."""
+    paris = list(bilan.get("paris") or [])
+    exclus = [p for p in paris if p.get("statut") == "en_attente"]
+    regles = [p for p in paris if p.get("statut") in ("gagne", "perdu")]
+    total_mise = round(sum(float(p.get("mise") or 0) for p in regles), 2)
+    total_gain = round(sum(float(p.get("gain") or 0) for p in regles
+                           if p.get("statut") == "gagne"), 2)
+    net = round(total_gain - total_mise, 2)
+    out = {
+        **bilan,
+        "paris": [p for p in paris if p.get("statut") != "en_attente"],
+        "nb_paris": len(paris) - len(exclus),
+        "nb_gagnes": sum(1 for p in regles if p.get("statut") == "gagne"),
+        "nb_en_attente": 0,
+        "en_attente": False,
+        "provisoire": False,
+        "gain_indetermine": False,
+        "total_mise": total_mise,
+        "total_gain": total_gain,
+        "net": net,
+        "roi": round(net / total_mise * 100, 1) if total_mise > 0 else 0.0,
+        "reglement_partiel": True,
+        "paris_exclus": exclus,
+    }
+    return out, len(exclus)
 
 
 async def settle_catchup(session: AsyncSession, timeout_days: int = CATCHUP_TIMEOUT_DAYS) -> dict:
@@ -489,7 +562,9 @@ async def settle_catchup(session: AsyncSession, timeout_days: int = CATCHUP_TIME
     1. RE-RÈGLE tous les runs pending/partial dont la course est terminée : le
        règlement inline a pu être manqué, et un rapport absent au premier passage
        a pu être scrapé depuis (les 'partial' n'étaient sinon JAMAIS retentés).
-    2. EXPIRE (statut 'expired') les runs encore pending/partial au-delà de
+    2. RÈGLE PARTIELLEMENT les 'partial' trop vieux qui ont un bilan (paris réglés
+       gardés, paris en attente retirés — cf. `bilan_reglement_partiel`), puis
+       EXPIRE (statut 'expired') les runs encore pending/partial au-delà de
        `timeout_days` : rapport jamais publié ou course jamais réglée. On ne
        fabrique JAMAIS un gain — le run sort explicitement du pool d'apprentissage
        (toutes les agrégations filtrent statut='settled') au lieu de traîner
@@ -501,8 +576,12 @@ async def settle_catchup(session: AsyncSession, timeout_days: int = CATCHUP_TIME
         SELECT DISTINCT r.course_id
         FROM profil_run_log r
         JOIN courses c ON c.course_id = r.course_id
-        WHERE r.statut IN ('pending', 'partial') AND c.statut = 'termine'
-    """))).all()]
+        WHERE c.statut = 'termine'
+          AND (r.statut IN ('pending', 'partial')
+               OR (r.statut = 'settled'
+                   AND COALESCE(r.meta->>'reglement_partiel', '') = 'true'
+                   AND r.created_at >= now() - make_interval(days => :rp)))
+    """), {"rp": int(REPRISE_PARTIEL_JOURS)})).all()]
     resettled = 0
     for cid in course_ids:
         try:
@@ -510,6 +589,44 @@ async def settle_catchup(session: AsyncSession, timeout_days: int = CATCHUP_TIME
         except Exception as e:                    # une course cassée ne bloque pas le lot
             log.warning("profil_learning.catchup_course_failed",
                         course_id=cid, err=str(e)[:120])
+    # Les 'partial' trop vieux qui ONT un bilan sont réglés PARTIELLEMENT (paris
+    # réglés conservés, paris en attente retirés) au lieu d'expirer : sinon chaque
+    # run contenant un gagnant sans rapport sortait de l'apprentissage avec toutes
+    # ses pertes. Repris par `settle_profil_runs` si le rapport arrive plus tard.
+    partiels = (await session.execute(text("""
+        SELECT log_id, resultat FROM profil_run_log
+        WHERE statut = 'partial' AND resultat IS NOT NULL
+          AND created_at < now() - make_interval(days => :d)
+    """), {"d": int(timeout_days)})).all()
+    regles_partiels = 0
+    for log_id, resultat in partiels:
+        try:
+            res_d = resultat if isinstance(resultat, dict) else json.loads(resultat)
+            bilan_p, n_exclus = bilan_reglement_partiel(res_d)
+        except Exception as e:  # noqa: BLE001 — un bilan illisible part en 'expired'
+            log.warning("profil_learning.reglement_partiel_skip",
+                        log_id=log_id, err=str(e)[:120])
+            continue
+        # Un pari 'en_attente' est TOUJOURS un gagnant sans rapport publié
+        # (services.bet_settlement.settle_plan) : le retirer garderait toutes les
+        # pertes du run et lui ôterait un gain certain — ROI appris biaisé à la
+        # baisse. Un tel run part donc en 'expired' (ci-dessous), comme avant ; seul
+        # un bilan sans pari en attente et avec une mise réelle est réglé ici.
+        if n_exclus > 0 or float(bilan_p.get("total_mise") or 0) <= 0:
+            continue
+        bilan_p.pop("total_avec_quinte", None)
+        await session.execute(text("""
+            UPDATE profil_run_log
+            SET resultat = CAST(:res AS jsonb), roi_reel = :roi, statut = 'settled',
+                settled_at = now(),
+                meta = COALESCE(meta, '{}'::jsonb)
+                       || jsonb_build_object('reglement_partiel', true,
+                                             'nb_paris_exclus', CAST(:nx AS integer))
+            WHERE log_id = :id
+        """), {"res": json.dumps(bilan_p), "roi": bilan_p["roi"] / 100.0,
+               "nx": n_exclus, "id": log_id})
+        regles_partiels += 1
+
     expired = (await session.execute(text("""
         UPDATE profil_run_log
         SET statut = 'expired',
@@ -532,9 +649,10 @@ async def settle_catchup(session: AsyncSession, timeout_days: int = CATCHUP_TIME
     except Exception as e:  # noqa: BLE001
         await session.rollback()
         log.warning("profil_learning.candidats_catchup_failed", err=str(e)[:140])
-    log.info("profil_learning.settle_catchup",
-             resettled=resettled, expired=expired, remaining=remaining)
-    return {"resettled": resettled, "expired": expired, "remaining": remaining}
+    log.info("profil_learning.settle_catchup", resettled=resettled,
+             regles_partiels=regles_partiels, expired=expired, remaining=remaining)
+    return {"resettled": resettled, "regles_partiels": regles_partiels,
+            "expired": expired, "remaining": remaining}
 
 
 # ─────────────────────────────────────────────────────────────
@@ -614,7 +732,8 @@ async def compute_profil_weights(session: AsyncSession) -> dict:
         _gains_par_plan.setdefault(_profil, []).append(float(_res.get("total_gain") or 0))
         for _pari in _res.get("paris", []):
             _t = _pari.get("type")
-            if not _t:
+            # Remboursé (non-partant) / en attente : ni perte ni gain → hors quantile.
+            if not _t or _pari.get("statut") in ("rembourse", "en_attente"):
                 continue
             _gains_par_type.setdefault(_t, []).append(
                 float(_pari.get("gain") or 0) if _pari.get("statut") == "gagne" else 0.0)
@@ -654,6 +773,13 @@ async def compute_profil_weights(session: AsyncSession) -> dict:
         for pari in res.get("paris", []):
             t = pari.get("type")
             if not t:
+                continue
+            # CORRECTIF 2026-10-07 : un pari REMBOURSÉ (non-partant, statut
+            # « rembourse ») ou encore EN ATTENTE de rapport n'est ni perdu ni gagné.
+            # Avant, sa mise entrait dans `mise` sans gain → compté comme une perte
+            # totale et le type sous-estimé. `settle_plan` l'exclut déjà de
+            # total_mise ; l'agrégat par type fait désormais de même.
+            if pari.get("statut") in ("rembourse", "en_attente"):
                 continue
             ts = agg["types"].setdefault(t, {"n": 0, "mise": 0.0, "gain": 0.0, "win": 0,
                                              "n_e": 0.0, "mise_e": 0.0, "gain_e": 0.0,

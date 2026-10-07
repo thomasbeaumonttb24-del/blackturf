@@ -704,9 +704,27 @@ def _settle_par_classement(
                 "note": "Cheval non-partant — mise remboursée (rapport 1.0)."}
 
     # Places payées = sur le nombre de PARTANTS RÉELS (déclarés − non-partants).
-    eff_partants = nb_partants or len(pos_by_num)
-    if np_set:
-        eff_partants = max(0, eff_partants - len(np_set))
+    #
+    # Sémantique (vérifiée 2026-10-07) : `courses.nb_partants` = champ DÉCLARÉ, NP
+    # compris (scraper PMU : len(participants), statut NON_PARTANT inclus — cf.
+    # data_quality et mise_calculator.champ_reel). Mais les appelants se replient
+    # sur `len(classement)` quand il manque — or le classement ne contient QUE les
+    # chevaux qui ont couru (arrivée + disqualifiés) : y retrancher les NP les
+    # retirait DEUX FOIS (9 coureurs dont 1 NP → 7 → 2 places payées au lieu de 3).
+    # Garde-fou : le champ réel ne peut jamais être inférieur au nombre de chevaux
+    # distincts, hors NP, présents dans le classement officiel.
+    coureurs_classement = set()
+    for e in classement or []:
+        try:
+            coureurs_classement.add(int(e.get("numero")))
+        except (TypeError, ValueError):
+            continue
+    coureurs_classement -= np_set
+    if nb_partants:
+        eff_partants = max(0, int(nb_partants) - len(np_set))
+    else:
+        eff_partants = len(coureurs_classement)
+    eff_partants = max(eff_partants, len(coureurs_classement))
     nb_pl = _nb_places(eff_partants)
     gain_mult = 1.0   # part de la mise payée au rapport (formules combinées : <1 possible)
 
@@ -725,9 +743,8 @@ def _settle_par_classement(
             if 1 <= p <= k:
                 s.add(nn)
         return s
-    # Liste officielle des placés quand le PMU l'a publiée (Simple Placé) : le
-    # recompte nb_partants − non-partants se trompait (nb_partants exclut déjà, le
-    # plus souvent, les retirés).
+    # Liste officielle des placés quand le PMU l'a publiée (Simple Placé) : elle
+    # prime toujours sur le recompte (ex æquo, retirés tardifs).
     placed = _places_publiees(rapports_detail) or _topset(nb_pl)
     top2 = _topset(2)
     top3 = _topset(3)

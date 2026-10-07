@@ -14,6 +14,7 @@ import { CasaqueNumero } from "@/components/courses/identite-cheval";
 import { ModuleQuinte, type ModuleQuinteData } from "@/components/courses/ModuleQuinte";
 import { typeDefi } from "@/components/defi/kit";
 import type { DefiTypePari } from "@/lib/api";
+import type { ReactNode } from "react";
 
 /** Cheval d'un pari du plan.
  *  `cote` est le prix que le MOTEUR a utilisé pour construire le pari (cote figée au
@@ -45,6 +46,7 @@ export interface PariRec {
   rapport_a_bouge?: boolean;   // écart ≥ 15 % entre les deux
   hors_tranche_live?: boolean; // le marché a fait sortir le ticket de la tranche du profil
   hors_tranche?: boolean;      // ticket de secours servi HORS de la tranche du profil (filet)
+  non_partant_detecte?: boolean; // un cheval du ticket est devenu non-partant après le gel
 }
 
 export interface PariEcarte {
@@ -103,7 +105,9 @@ export interface MisePlan {
   paris_hors_tranche_live?: number;     // tickets sortis de la tranche du profil
   prono_fige?: boolean;           // sélection figée (T-10) — paris/chevaux/mises immuables
   gains_live_post_gel?: boolean;  // gains ré-évalués sur cotes live MÊME après le gel
-  roi_observe?: { roi: number; nb: number; jours: number };  // ROI RÉEL récent du profil (honnêteté vs espérance théorique)
+  // ROI RÉEL récent du profil (fraction : −0,12 = −12 %), moyenne par plan réglé.
+  // `{}` quand l'échantillon est trop petit (< 30 plans) : rien n'est alors affiché.
+  roi_observe?: { roi?: number; nb?: number; jours?: number };
   module_quinte?: ModuleQuinteData | null; montant_quinte?: number;  // Quinté+ pris SUR le montant
 }
 
@@ -111,6 +115,19 @@ export interface MisePlan {
 /** Montants et cotes en écriture française : « 12,50 € », « 4,4 ». */
 const eur2 = (v: number) => v.toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const cote1 = (v: number) => v.toLocaleString("fr-FR", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+
+/** Alerte compacte sur un ticket : neutre (or) ou franche (rose). */
+function AlerteTicket({ ton, children }: { ton: "or" | "rose"; children: ReactNode }) {
+  const t = ton === "rose"
+    ? { bd: CX.redBd, bg: CX.redBg, color: CX.redDeep }
+    : { bd: CX.goldBd, bg: CX.goldBg, color: CX.goldDeep };
+  return (
+    <div style={{ marginTop: 5, display: "flex", alignItems: "flex-start", gap: 5, borderRadius: 6, border: `1px solid ${t.bd}`, background: t.bg, padding: "3px 7px", fontSize: 10.5, lineHeight: 1.4, fontWeight: 600, color: t.color, overflowWrap: "anywhere" }}>
+      <AlertTriangle className="h-3 w-3 flex-shrink-0" style={{ marginTop: 2 }} aria-hidden="true" />
+      <span>{children}</span>
+    </div>
+  );
+}
 
 // Profils de mise (source unique : formulaire + switch rapide dans le plan).
 export const PROFILS_MISE = [
@@ -279,6 +296,23 @@ export function PlanMiseDisplay({ plan, profil, switching, onChangeProfil, onClo
                           Hors tranche du profil — seul pari jouable ici
                         </div>
                       )}
+                      {/* Re-tarification au prix du marché (reprice_plan_live) : dite SUR
+                          le ticket concerné. Un non-partant prime sur le reste — le ticket
+                          sera remboursé, son rapport n'a plus de sens. */}
+                      {p.non_partant_detecte ? (
+                        <AlerteTicket ton="rose">Non-partant détecté : ticket remboursé</AlerteTicket>
+                      ) : (
+                        <>
+                          {p.rapport_a_bouge && p.rapport_estime != null && p.rapport_live != null && (
+                            <AlerteTicket ton="or">
+                              Le rapport a bougé depuis le pronostic (×{cote1(p.rapport_estime)} → ×{cote1(p.rapport_live)})
+                            </AlerteTicket>
+                          )}
+                          {p.hors_tranche_live && !p.hors_tranche && (
+                            <AlerteTicket ton="or">Hors de la tranche de votre profil au prix actuel</AlerteTicket>
+                          )}
+                        </>
+                      )}
                     </div>
                     <div style={{ textAlign: "right", flexShrink: 0 }}>
                       <div style={{ fontSize: 10, fontWeight: 600, color: CX.gray500 }}>Mise</div>
@@ -366,6 +400,36 @@ export function PlanMiseDisplay({ plan, profil, switching, onChangeProfil, onClo
             ))}
           </div>
         </details>
+      )}
+
+      {/* Récapitulatif des alertes de ticket, en une ligne neutre (pas de bandeau
+          rouge en tête : la sélection est figée, il n'y a rien à faire). */}
+      {(plan.marche_a_bouge || (plan.paris_hors_tranche_live ?? 0) > 0) && (
+        <p style={{ margin: "12px 2px 0", fontSize: 10.5, color: CX.goldDeep, display: "flex", alignItems: "center", gap: 7, lineHeight: 1.4 }}>
+          <AlertTriangle className="h-3.5 w-3.5 flex-shrink-0" aria-hidden="true" />
+          {[
+            plan.marche_a_bouge ? "Le marché a bougé depuis le pronostic" : null,
+            (plan.paris_hors_tranche_live ?? 0) > 0
+              ? `${plan.paris_hors_tranche_live} ticket${(plan.paris_hors_tranche_live ?? 0) > 1 ? "s" : ""} hors de la tranche du profil au prix actuel`
+              : null,
+          ].filter(Boolean).join(" · ")}
+        </p>
+      )}
+
+      {/* Rendement RÉEL récent du profil (plans figés déjà réglés aux rapports PMU),
+          avec la taille de l'échantillon. C'est un constat passé, pas une prévision :
+          aucune espérance théorique n'est affichée à côté. */}
+      {plan.roi_observe?.roi != null && (plan.roi_observe.nb ?? 0) > 0 && (
+        <p style={{ margin: "8px 2px 0", fontSize: 10.5, color: CX.gray500, display: "flex", alignItems: "flex-start", gap: 7, lineHeight: 1.4 }}>
+          <Info className="h-3.5 w-3.5 flex-shrink-0" style={{ marginTop: 1 }} aria-hidden="true" />
+          <span>
+            Rendement réel de ce profil sur {plan.roi_observe.jours ?? 30} jours :{" "}
+            <b style={{ color: plan.roi_observe.roi < 0 ? CX.redDeep : CX.emDeep, fontVariantNumeric: "tabular-nums" }}>
+              {plan.roi_observe.roi > 0 ? "+" : ""}{(plan.roi_observe.roi * 100).toLocaleString("fr-FR", { minimumFractionDigits: 1, maximumFractionDigits: 1 })} %
+            </b>
+            {" "}en moyenne par course, sur {plan.roi_observe.nb} plans réglés. Résultat passé, pas une promesse.
+          </span>
+        </p>
       )}
 
       <p style={{ margin: "12px 2px 0", fontSize: 10.5, color: CX.gray500, display: "flex", alignItems: "center", gap: 7, lineHeight: 1.4 }}>

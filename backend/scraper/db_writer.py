@@ -53,6 +53,20 @@ def _historique_numeric(c: dict) -> dict:
     }
 
 
+def dates_historique_pmu(date_ms) -> tuple[date, date]:
+    """(date réelle, date héritée) d'une course passée PMU (`date` en epoch ms).
+
+    Le PMU date ses performances à MINUIT HEURE DE PARIS. Lue sans fuseau dans un
+    conteneur en UTC (`fromtimestamp(ms).date()`), elle tombait sur la VEILLE :
+    toutes les copies PMU de `historique_courses` sont décalées d'un jour (mesuré
+    sur 379 338 lignes, cf. HIST_JUMEAU_LATERAL dans ml/features.py). On écrit
+    désormais le jour civil à Paris ; la date héritée (UTC) ne sert qu'à retrouver
+    les lignes déjà écrites avec l'ancien calcul.
+    """
+    instant = datetime.fromtimestamp(float(date_ms) / 1000.0, tz=timezone.utc)
+    return jour_courses(instant), instant.date()
+
+
 async def save_historique_pmu(session: AsyncSession, cheval_nom: str, courses: list) -> int:
     """
     Sauvegarde l'historique des courses passées d'un cheval (endpoint PMU
@@ -61,7 +75,6 @@ async def save_historique_pmu(session: AsyncSession, cheval_nom: str, courses: l
     Retourne le nb de lignes ajoutées.
     """
     from db.models import HistoriqueCourse, Cheval
-    from datetime import datetime as _dt
 
     # Trouver le cheval (doit exister depuis la sauvegarde des partants)
     r = await session.execute(select(Cheval.cheval_id).where(Cheval.nom == cheval_nom))
@@ -81,8 +94,9 @@ async def save_historique_pmu(session: AsyncSession, cheval_nom: str, courses: l
         dms = c.get("date_ms")
         if not dms:
             continue
-        d_course = _dt.fromtimestamp(dms / 1000.0).date()
+        d_course, d_heritee = dates_historique_pmu(dms)
         hippo = _t(c.get("hippodrome"), 100) or "?"
+        dist_c = _historique_numeric(c)["distance"]
 
         ecart = c.get("ecart")
         incident = _t(c.get("incident"), 100)
@@ -98,11 +112,23 @@ async def save_historique_pmu(session: AsyncSession, cheval_nom: str, courses: l
         #
         # On enrichit donc les lignes existantes DONT LA COLONNE EST VIDE. Jamais
         # d'écrasement : une valeur déjà là est une observation, pas un brouillon.
+        #
+        # Date : cf. `dates_historique_pmu`. Les copies déjà en base portent la date
+        # HÉRITÉE (veille) ; on les retrouve aussi, sinon chaque course passée serait
+        # réinsérée une seconde fois, à la bonne date, au premier re-scrape. La date
+        # héritée n'est retenue qu'à distance égale (une vraie sortie de la veille
+        # sur le même hippodrome n'est pas la même course). Seules les COPIES PMU
+        # (course_id NULL) sont dédoublonnées ici : la ligne interne du même jour
+        # reste distincte, c'est la lecture (BT_HIST_V2) qui les apparie.
         exist = await session.execute(text("""
             SELECT historique_id, ecart_longueurs, position_arrivee, incident
             FROM historique_courses
-            WHERE cheval_id = :cid AND date_course = :d AND hippodrome = :h LIMIT 1
-        """), {"cid": cheval_id, "d": d_course, "h": hippo})
+            WHERE cheval_id = :cid AND hippodrome = :h AND course_id IS NULL
+              AND (date_course = :d OR (date_course = :dh AND distance = :dist))
+            ORDER BY CASE WHEN date_course = :d THEN 0 ELSE 1 END
+            LIMIT 1
+        """), {"cid": cheval_id, "d": d_course, "dh": d_heritee, "h": hippo,
+               "dist": dist_c})
         deja = exist.first()
         if deja:
             if deja.ecart_longueurs is None and isinstance(ecart, (int, float)):
@@ -270,7 +296,10 @@ async def upsert_cheval(session: AsyncSession, partant: PartantScrape) -> str:
 
     if existing:
         # Mise à jour des champs si nouvelles données
-        if partant.age and not existing.age:
+        # L'âge VIEILLIT : un cheval prend un an chaque 1er janvier. « Remplir si
+        # vide » le figeait sur l'âge du tout premier scrape — un 3 ans de 2025
+        # restait un 3 ans toute sa carrière. Le PMU fait foi dès qu'il publie.
+        if partant.age and partant.age != existing.age:
             existing.age = partant.age
         sx = (partant.sexe or "")[:1].upper() or None  # code court (évite overflow VARCHAR(5))
         if sx and not existing.sexe:
@@ -351,9 +380,6 @@ def champs_maj_course(course: CourseScrape, date_heure: Optional[datetime],
         **({"heure_depart_initiale": func.least(Course.__table__.c.heure_depart_initiale, date_heure)}
            if date_heure else {}),
         "nom": _t(course.nom, 200),
-        "terrain_officiel": course.terrain,
-        "terrain_code": course.terrain_code,
-        "penetrometre_coef": course.penetrometre_coef,
         "nb_partants": course.nb_partants,
         "allocation": course.dotation,
         "conditions_texte": course.conditions_texte,
@@ -375,6 +401,17 @@ def champs_maj_course(course: CourseScrape, date_heure: Optional[datetime],
     # ressusciter une course déjà 'termine'.
     if statut_annule:
         champs["statut"] = statut_annule
+    # Terrain et pénétromètre : même règle que la cote — un NULL n'écrase JAMAIS
+    # une mesure connue. Le PMU retire `penetrometre` / `terrain` du flux selon
+    # l'heure (mesure pas encore publiée le matin, bloc absent une fois la course
+    # courue) : le re-scrape suivant effaçait le terrain que les features lisent.
+    # (La valeur passée est la même qu'à l'INSERT : tronquée à la colonne.)
+    if course.terrain:
+        champs["terrain_officiel"] = _t(course.terrain, 30)
+    if course.terrain_code:
+        champs["terrain_code"] = course.terrain_code
+    if course.penetrometre_coef is not None:
+        champs["penetrometre_coef"] = course.penetrometre_coef
     return champs
 
 
@@ -508,7 +545,8 @@ async def save_course_to_db(session: AsyncSession, course: CourseScrape) -> Opti
         ).on_conflict_do_update(
             constraint="uq_participation_course_numero",
             set_=champs_reecrits_participation(
-                partant, cote_pmu_v, cote_geny_v, cote_ref_v),
+                partant, cote_pmu_v, cote_geny_v, cote_ref_v,
+                jockey_id=jockey_id or None, entraineur_id=entraineur_id or None),
         ).returning(Participation.participation_id)
 
         result = await session.execute(stmt)
@@ -603,7 +641,9 @@ async def equipement_precedent(session: AsyncSession, cheval_id: str, course_id:
         {"cheval_id": cheval_id, "course_id": course_id})).fetchone()
 
 
-def champs_reecrits_participation(partant, cote_pmu_v, cote_geny_v, cote_ref_v) -> dict:
+def champs_reecrits_participation(partant, cote_pmu_v, cote_geny_v, cote_ref_v,
+                                  jockey_id: Optional[str] = None,
+                                  entraineur_id: Optional[str] = None) -> dict:
     """Colonnes réécrites au RE-scrape d'un partant déjà connu. Fonction PURE.
 
     ON N'ÉCRASE JAMAIS UNE VALEUR CONNUE PAR UN NULL. Le PMU cesse de publier
@@ -658,7 +698,34 @@ def champs_reecrits_participation(partant, cote_pmu_v, cote_geny_v, cote_ref_v) 
     # course retirée du programme, on ne réécrit que si présente.
     if getattr(partant, "casaque_url", None):
         champs["casaque_image_url"] = _t(partant.casaque_url, 300)
+    # Changement de monte / d'entraîneur / de poids de DERNIÈRE MINUTE : le PMU
+    # publie le jockey remplaçant le jour même, mais ces colonnes n'étaient écrites
+    # qu'à l'INSERT — la base gardait le jockey du programme de la veille, et
+    # `changement_jockey`, les stats jockey et l'affichage lisaient le mauvais
+    # cavalier. Même règle que la cote : une valeur absente n'efface rien.
+    if jockey_id:
+        champs["jockey_id"] = jockey_id
+    if entraineur_id:
+        champs["entraineur_id"] = entraineur_id
+    if getattr(partant, "poids", None) is not None:
+        champs["poids_porte"] = partant.poids
     return champs
+
+
+def oeilleres_portees(raw) -> Optional[bool]:
+    """Œillères portées d'après le libellé (PMU « SANS_OEILLERES », « OEILLERES_
+    AUSTRALIENNES », ancien « Sans »…). None si inconnu — jamais deviné.
+
+    Même règle que `ml.features.oeilleres_portees` (non importée : le scraper ne
+    doit pas charger toute la pile ML pour lire un libellé)."""
+    if raw is None:
+        return None
+    if isinstance(raw, bool):
+        return raw
+    t = str(raw).strip().upper()
+    if not t:
+        return None
+    return not ("SANS" in t or t in ("NON", "AUCUNE", "FALSE", "0"))
 
 
 async def _save_equipement(
@@ -698,7 +765,12 @@ async def _save_equipement(
                 premier_deferre = True
         if partant.oeilleres and partant.oeilleres != prev_oeilleres:
             oeilleres_change = True
-            if prev_oeilleres in (None, "Sans", "") and partant.oeilleres not in (None, "Sans", ""):
+            # Le PMU écrit « SANS_OEILLERES », pas « Sans » : la comparaison au
+            # libellé brut faisait d'un passage SANS_OEILLERES → OEILLERES_CLASSIQUE
+            # un « changement » mais JAMAIS une « première fois » (le précédent
+            # n'était pas reconnu comme « sans »). On compare l'état porté/non porté.
+            if (oeilleres_portees(prev_oeilleres) is not True
+                    and oeilleres_portees(partant.oeilleres) is True):
                 premieres_oeilleres = True
 
     # Upsert sur participation_id (unique) — évite la violation au re-scrape.
@@ -1049,28 +1121,61 @@ async def save_penetrometre(session: AsyncSession, pen: PenetrometreScrape) -> N
         description=pen.description,
         heure_mesure=pen.heure_mesure,
     ).on_conflict_do_update(
+        # LIMITE CONNUE : la contrainte unique porte sur `reunion_id` SEUL, alors que
+        # ce n'est que le numéro de réunion du jour (« 1 », « 2 »…) : le journal ne
+        # garde qu'UNE ligne par numéro, toutes dates confondues. La corriger exige
+        # une migration (unicité sur reunion_id + date_mesure). En attendant, la
+        # ligne reflète au moins la DERNIÈRE mesure en entier — date, hippodrome et
+        # heure compris — au lieu d'un coefficient du jour sous la date du premier.
         constraint="uq_penetrometre_reunion",
         set_={
             "coefficient": coef,
             "description": pen.description,
+            "date_mesure": _parse_date(pen.date),
+            "hippodrome": pen.hippodrome,
+            "heure_mesure": pen.heure_mesure,
         },
     )
     await session.execute(stmt)
 
-    # Propager sur toutes les courses de cette réunion
-    if pen.reunion_id:
-        await session.execute(
-            update(Course)
-            .where(Course.reunion_id == pen.reunion_id)
-            .values(
-                # Fix 2026-06-17 : on propage la valeur VALIDÉE (coef), pas la
-                # brute pen.coefficient — sinon une mesure aberrante polluait
-                # courses.penetrometre_coef alors que le log la rejetait.
-                penetrometre_coef=coef,
-                penetrometre_desc=pen.description,
-                updated_at=datetime.now(),
-            )
-        )
+    await propager_penetrometre(session, pen, coef)
+
+
+def filtre_courses_reunion_du_jour(reunion_id, jour: date):
+    """Condition SQL : les courses de la réunion `reunion_id` DU JOUR `jour`.
+
+    `courses.reunion_id` n'est que le numéro officiel (« 1 », « 2 »…), réutilisé
+    chaque jour : filtrer dessus seul visait la R1 de TOUTES les journées. La date
+    vit dans le préfixe de `course_id` ({ddmmyyyy}R{n}C{m}, cf. make_course_id).
+    """
+    num = str(reunion_id).strip().upper().lstrip("R")
+    return (Course.reunion_id == num) & Course.course_id.like(
+        f"{jour.strftime('%d%m%Y')}R{num}C%")
+
+
+async def propager_penetrometre(session: AsyncSession, pen: PenetrometreScrape,
+                                coef: Optional[float]) -> None:
+    """Propage la mesure sur les courses de CETTE réunion, CE jour-là seulement.
+
+    L'ancien `UPDATE courses WHERE reunion_id = :n` réécrivait le pénétromètre de
+    toutes les R{n} de l'historique à chaque mesure : les courses passées prenaient
+    le terrain du jour, et les features recalculées après coup le lisaient.
+    """
+    if not pen.reunion_id:
+        return
+    jour = _parse_date(pen.date) or jour_courses()
+    # Fix 2026-06-17 : on propage la valeur VALIDÉE (coef), pas la brute
+    # pen.coefficient — sinon une mesure aberrante polluait courses.penetrometre_coef
+    # alors que le log la rejetait. Et une mesure rejetée (None) n'efface pas le
+    # coefficient déjà publié par le PMU (cf. champs_maj_course).
+    valeurs = {"penetrometre_desc": pen.description, "updated_at": datetime.now()}
+    if coef is not None:
+        valeurs["penetrometre_coef"] = coef
+    await session.execute(
+        update(Course)
+        .where(filtre_courses_reunion_du_jour(pen.reunion_id, jour))
+        .values(**valeurs)
+    )
 
 
 async def save_temps_passage(session: AsyncSession, tp: TempsPassageScrape) -> None:
@@ -1251,6 +1356,12 @@ async def detect_jockey_change(
     """
     Détecte si le jockey a changé par rapport à la dernière course du cheval.
     Retourne True si changement détecté.
+
+    Le drapeau est ÉCRIT DANS LES DEUX SENS. Il n'était que posé (jamais remis à
+    False) : un jockey annoncé par erreur puis corrigé au re-scrape laissait
+    `changement_jockey=True` à vie. La course précédente est la dernière où le
+    cheval a RÉELLEMENT couru : un non-partant avait un jockey déclaré qui n'est
+    jamais monté, ce n'est pas « le jockey d'avant ».
     """
     from sqlalchemy import text
     result = await session.execute(text("""
@@ -1260,23 +1371,22 @@ async def detect_jockey_change(
         WHERE p.cheval_id = :cheval_id
           AND c.date_heure < (SELECT date_heure FROM courses WHERE course_id = :course_id)
           AND p.jockey_id IS NOT NULL
+          AND COALESCE(p.non_partant, false) = false
         ORDER BY c.date_heure DESC
         LIMIT 1
     """), {"cheval_id": cheval_id, "course_id": course_id})
 
     row = result.fetchone()
-    if not row:
-        return False
+    # Sans course précédente connue : pas de changement (débutant / historique absent).
+    changed = bool(row) and (row[0] != jockey_id)
 
-    prev_jockey_id = row[0]
-    changed = (prev_jockey_id != jockey_id)
-
-    if changed:
-        await session.execute(
-            update(Participation)
-            .where(Participation.participation_id == participation_id)
-            .values(changement_jockey=True)
-        )
+    await session.execute(
+        update(Participation)
+        .where(Participation.participation_id == participation_id)
+        # Pas d'écriture inutile à chaque passe (toutes les 3 min) si rien ne bouge.
+        .where(Participation.changement_jockey.is_distinct_from(changed))
+        .values(changement_jockey=changed)
+    )
     return changed
 
 

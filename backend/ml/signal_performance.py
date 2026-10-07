@@ -34,6 +34,31 @@ from ml.prediction_evaluation import sans_modeles_retires
 
 log = structlog.get_logger()
 
+
+# ─────────────────────────────────────────────────────────────
+# Qui a gagné ? `position == 1`, jamais l'index 0 du classement
+# ─────────────────────────────────────────────────────────────
+# `resultats.classement` est un tableau JSON dont l'ORDRE n'est pas garanti trié
+# (cf. ml.melange_arrivees._charger_courses, qui lit déjà `position == 1`). Lire
+# `classement->0` désignait comme gagnant le premier élément reçu, quel qu'il
+# soit. Et un dead-heat (deux chevaux classés 1ers) n'avait qu'UN gagnant sur
+# deux : l'autre comptait perdant. Ce prédicat est partagé par tous les
+# agrégats nocturnes (cote_calibration, edge_monitor, clv_monitor, servi_vs_marche,
+# ici) pour qu'ils désignent tous le même gagnant. Les éléments sans position
+# numérique (disqualifié, « DAI », « NP »…) ne gagnent jamais.
+def sql_est_gagnant(numero: str, classement: str = "r.classement") -> str:
+    """Expression SQL (PostgreSQL) valant 1 si le partant `numero` est classé 1er
+    (dead-heat compris), 0 sinon."""
+    return (
+        "CASE WHEN EXISTS (SELECT 1 FROM jsonb_array_elements(" + classement + ") e "
+        "WHERE (e->>'position') ~ '^[0-9]+$' AND (e->>'position')::int = 1 "
+        "AND (e->>'numero') ~ '^[0-9]+$' AND (e->>'numero')::int = " + numero + ") "
+        "THEN 1 ELSE 0 END"
+    )
+
+
+_GAGNANT_PA = sql_est_gagnant("pa.numero")
+
 # Définitions des signaux = (nom, prédicat sur le dict features). Alignées sur
 # narrative.explain_prediction pour cohérence avec ce que l'utilisateur voit.
 SIGNALS: dict = {
@@ -131,9 +156,9 @@ async def compute_signal_performance(session: AsyncSession) -> dict:
     #
     # La fonction n'est qu'un accumulateur de compteurs : elle n'a jamais eu
     # besoin de voir deux lignes en même temps.
-    result = await session.stream(text("""
+    result = await session.stream(text(f"""
         SELECT fm.features, ch.cote,
-               CASE WHEN (r.classement->0->>'numero')::int = pa.numero THEN 1 ELSE 0 END AS win,
+               {_GAGNANT_PA} AS win,
                r.rapports_detail, pa.numero
         FROM features_ml fm
         JOIN participations pa ON pa.participation_id = fm.participation_id
@@ -241,9 +266,9 @@ async def compute_signal_performance_by_profile(session: AsyncSession) -> dict:
     # eux seuls l'essentiel du pic mémoire du worker. Ici la version d'origine
     # était pire encore — elle construisait `parsed`, une TROISIÈME copie qui
     # cohabitait avec `rows` le temps de la boucle.
-    result = await session.stream(text("""
+    result = await session.stream(text(f"""
         SELECT fm.features, ch.cote,
-               CASE WHEN (r.classement->0->>'numero')::int = pa.numero THEN 1 ELSE 0 END AS win,
+               {_GAGNANT_PA} AS win,
                CASE WHEN pa.numero IN (
                     SELECT (e->>'numero')::int FROM jsonb_array_elements(r.classement)
                      WITH ORDINALITY a(e,o)
@@ -412,7 +437,7 @@ async def compute_ev_band_performance(session: AsyncSession) -> dict:
     ev = cote_figee × proba_top1 − 1. Flat 1€ Simple Gagnant à la cote figée."""
     rows = (await session.execute(text(f"""
         SELECT p.cote_figee, p.proba_top1,
-               CASE WHEN (r.classement->0->>'numero')::int = pa.numero THEN 1 ELSE 0 END AS win
+               {_GAGNANT_PA} AS win
         FROM prediction_evaluation p
         JOIN participations pa ON pa.participation_id = p.participation_id
         JOIN courses c ON c.course_id = p.course_id AND c.statut = 'termine'

@@ -15,7 +15,7 @@ from api.middleware.rate_limit import rate_limit_predictions, rate_limit_public
 from api.routes.auth import get_current_user, require_pro
 from db.database import get_db
 from db.models import (
-    Prediction, ValueBet, Recommandation, Participation,
+    Prediction, ValueBet, Participation,
     Cheval, Course, Resultat, User
 )
 from services.cote_juste import cote_juste as _cote_juste
@@ -192,6 +192,9 @@ class ValueBetOut(BaseModel):
     cote_max_source: Optional[str] = None
     nb_sources: int = 0
     mouvement_cote_pct: Optional[float] = None
+    # Cote PMU à laquelle `ev_max`/`ev_pmu` ont été calculées : l'EV ne suit pas la
+    # cote courante (`cote_pmu`), il faut pouvoir les distinguer.
+    cote_detection: Optional[float] = None
 
 
 # ─────────────────────────────────────────────
@@ -323,27 +326,11 @@ async def get_predictions(
             value_bet=value_bet,
         ))
 
-    # Recommandations
-    reco_res = await db.execute(
-        select(Recommandation)
-        .where(Recommandation.course_id == course_id)
-        .order_by(Recommandation.created_at.desc())
-        .limit(10)
-    )
-    recos = [
-        {
-            "reco_id": r.reco_id,
-            "niveau": r.niveau,
-            "type_pari": r.type_pari,
-            "chevaux": r.chevaux_selectionnes,
-            "mise_suggeree": r.mise_suggeree,
-            "ev_calcule": r.ev_calcule,
-            "confidence": r.confidence,
-            "explication": r.texte_explication,
-            "cout_total": r.cout_total,
-        }
-        for r in reco_res.scalars().all()
-    ]
+    # `recommandations` : la requête (table `recommandations`, 10 lignes) partait à
+    # CHAQUE appel alors qu'aucun écran ne lit ce champ (vérifié par grep dans
+    # frontend/src le 2026-10-07). La clé reste, vide, pour ne pas casser le schéma
+    # `CoursePredictionsOut` des clients existants.
+    recos: list[dict] = []
 
     if not autorise:
         # Quota journalier dépassé → réponse VERROUILLÉE. On ne renvoie PAS les valeurs

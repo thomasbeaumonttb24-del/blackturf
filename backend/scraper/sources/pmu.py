@@ -48,7 +48,10 @@ def _fmt_date_pmu(course_date=None) -> str:
     if isinstance(course_date, bool):  # garde-fou : bool est un int en Python
         return jour_courses().strftime("%d%m%Y")
     if isinstance(course_date, (int, float)):
-        return datetime.fromtimestamp(course_date / 1000).strftime("%d%m%Y")
+        # Jour civil À PARIS : sans fuseau, `fromtimestamp` lisait l'heure du
+        # conteneur (UTC) — une course de 0 h 30 à Paris tombait sur la veille.
+        return jour_courses(datetime.fromtimestamp(course_date / 1000, tz=timezone.utc)
+                            ).strftime("%d%m%Y")
     return course_date.strftime("%d%m%Y")
 
 
@@ -990,7 +993,12 @@ class PmuScraper(BaseScraper):
                 # poidsConditionMonte/poidsJockey, soit handicapPoids (en décigrammes,
                 # ex. 560 = 56,0 kg → /10). On retombe sur le 1er disponible.
                 poids=_first_poids(p),
-                decharge=p.get("handicapPoids"),
+                # Décharge d'apprenti : AUCUN champ connu du payload participants ne
+                # la porte. On y rangeait `handicapPoids` — le POIDS du handicap en
+                # décigrammes (560), pas une remise de 1 à 4 kg : la colonne
+                # `decharge` était remplie de poids. Pas de source → None, jamais
+                # une donnée fabriquée.
+                decharge=None,
                 musique=p.get("musique"),
                 # Stalle de départ (plat / obstacle). Publiée par l'API sur le
                 # participant du jour et jamais lue jusqu'ici : `draw_bias_score`

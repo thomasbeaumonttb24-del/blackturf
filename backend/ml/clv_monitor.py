@@ -23,6 +23,9 @@ import structlog
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+# Gagnant = `position == 1` (dead-heat compris), jamais `classement->0`.
+from ml.signal_performance import sql_est_gagnant
+
 log = structlog.get_logger()
 
 MIN_OBS = 100   # sous ce seuil, CLV dominée par la variance → non déclarable
@@ -61,10 +64,10 @@ async def compute_clv_monitor(session: AsyncSession) -> dict:
     # dehors, le modèle les aime) → ils reviennent + gagnent plus. In-sample ~13j : ROI
     # +19% (n~394). On le SUIT nightly pour confirmer (ou infirmer) hors échantillon avant
     # de toucher la sélection de paris. ROI flat-stake à la cote figée (T-10, où on parierait).
-    seg = (await session.execute(text("""
+    seg = (await session.execute(text(f"""
         WITH d AS (
           SELECT l.cote_figee,
-                 CASE WHEN (r.classement->0->>'numero')::int = l.numero THEN 1 ELSE 0 END AS win
+                 {sql_est_gagnant("l.numero")} AS win
           FROM cote_cloture_log l
           JOIN participations pa ON pa.participation_id = l.participation_id
           JOIN prediction_evaluation pr ON pr.participation_id = l.participation_id

@@ -344,7 +344,16 @@ function DayStrip({ selected, jourCourant, onSelect }: { selected: Date; jourCou
 }
 
 /* ─── Bandeau "Prochaine course" ────────────────────────── */
-function NextRaceBanner({ item }: { item: { course: CourseSummary; reunionNum: number } }) {
+/* Partants RÉELS : `nb_partants` du programme compte les déclarés, non-partants
+ * compris. L'aperçu du jour, lui, compte les chevaux notés par le modèle parmi ceux
+ * qui courent (`non_partant = false`, une prédiction par partant) : c'est le chiffre
+ * de la fiche course. Repli sur les déclarés tant que l'aperçu n'est pas arrivé. */
+function partantsReels(course: CourseSummary, apercu?: ApercuCourse): number {
+  const notes = apercu?.analysee ? apercu.nb_notes : 0;
+  return notes > 0 ? Math.min(notes, course.nb_partants || notes) : course.nb_partants;
+}
+
+function NextRaceBanner({ item, apercu }: { item: { course: CourseSummary; reunionNum: number }; apercu?: ApercuCourse }) {
   const { course, reunionNum } = item;
   const m = discMeta(course.discipline);
   const isLive = course.statut === "en_cours";
@@ -437,7 +446,7 @@ function NextRaceBanner({ item }: { item: { course: CourseSummary; reunionNum: n
               <span className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-[12px] font-semibold" style={{ color: m.color, background: m.bg, boxShadow: `inset 0 0 0 1px ${m.ring}` }}>
                 <DiscIcon discipline={course.discipline} w={26} h={18} />{titleCase(course.discipline)}
               </span>
-              {[`${course.distance} m`, `${course.nb_partants} partants`].map((t) => (
+              {[`${course.distance} m`, `${partantsReels(course, apercu)} partants`].map((t) => (
                 <span key={t} className="inline-flex items-center rounded-lg bg-gradient-to-b from-white to-[#FAF7F0] px-2.5 py-1 text-[12px] font-semibold tabular-nums text-stone-700 ring-1 ring-inset ring-[#ECE7DC] shadow-[0_2px_0_#ECE5D6]">{t}</span>
               ))}
               {course.est_quinte && <Pastille className="bg-amber-50 text-amber-800 ring-amber-200">Quinté+</Pastille>}
@@ -669,7 +678,7 @@ function TimelineRow({ course, reunionNum, vbCount, apercu, delay, onOuvrir }: {
           <span aria-hidden className="text-stone-300">·</span>
           <span className="tabular-nums">{course.distance.toLocaleString("fr-FR")} m</span>
           <span aria-hidden className="text-stone-300">·</span>
-          <span className="tabular-nums">{course.nb_partants} partants</span>
+          <span className="tabular-nums">{partantsReels(course, apercu)} partants</span>
         </div>
         {/* Ligne 4 : ce que l'analyse dit de CETTE course. Rien d'identifiant : une
             confiance, l'avis du marché, des comptes — jamais un cheval.
@@ -1262,7 +1271,7 @@ export default function ProgrammeClient({
         <DayStrip selected={selectedDate} jourCourant={jourCourant} onSelect={selectDate} />
 
         {/* ── Prochaine course ── */}
-        {nextRace && <NextRaceBanner item={nextRace} />}
+        {nextRace && <NextRaceBanner item={nextRace} apercu={apercuByCourse[nextRace.course.course_id]} />}
 
         {/* ── Bandeau value bets actifs (Free/Découverte + visiteurs non connectés) ── */}
         {!isPaid && (

@@ -65,6 +65,12 @@ from scraper.db_writer import (
 )
 
 log = structlog.get_logger()
+
+# Plafond de sûreté de l'enrichissement post-PMU : une journée française compte
+# ~50 à 90 courses, soit au plus ~1 200 partants. La file est triée et ne dépend
+# plus de NULL qui ne se résorbent jamais (cf. run_enrichissement_participations).
+ENRICHISSEMENT_PLAFOND = 2000
+
 settings = get_settings()
 
 
@@ -1333,21 +1339,37 @@ class BlackTurfOrchestrator:
                 # jour ne démarrait qu'à 02 h heure française (cf. temps_courses).
                 today = jour_courses()
 
-                # Query SQL directe pour éviter le problème de cast SQLAlchemy
+                # Query SQL directe pour éviter le problème de cast SQLAlchemy.
+                #
+                # L'ancienne file (`jours_depuis_derniere IS NULL … LIMIT 100`, sans
+                # ORDER BY) ne se vidait jamais : un débutant n'a pas de course
+                # précédente, son `jours_depuis_derniere` RESTE NULL, et il revenait
+                # à chaque passe. Au-delà de 100 débutants, les mêmes lignes (ordre
+                # arbitraire) occupaient tout le quota et le reste du jour n'était
+                # jamais enrichi. Et le jockey n'était examiné qu'une fois : un
+                # changement de monte publié après le premier passage était ignoré.
+                #
+                # Désormais : TOUT le jour (borné par la taille d'une journée, avec
+                # un plafond de sûreté), dans un ordre stable ; le repos n'est
+                # calculé que s'il manque, le jockey est réexaminé à chaque passe
+                # (detect_jockey_change n'écrit que si le drapeau change).
                 result = await session.execute(sa_text("""
-                    SELECT p.participation_id, p.course_id, p.cheval_id, p.jockey_id
+                    SELECT p.participation_id, p.course_id, p.cheval_id, p.jockey_id,
+                           p.jours_depuis_derniere, c.statut
                     FROM participations p
                     JOIN courses c ON p.course_id = c.course_id
                     WHERE DATE(c.date_heure) = :today
-                      AND p.jours_depuis_derniere IS NULL
                       AND p.non_partant = false
-                    LIMIT 100
-                """), {"today": today})
+                    ORDER BY c.date_heure, p.course_id, p.numero
+                    LIMIT :plafond
+                """), {"today": today, "plafond": ENRICHISSEMENT_PLAFOND})
                 rows = result.fetchall()
 
-                for pid, cid, cheval_id, jockey_id in rows:
-                    await compute_jours_depuis_derniere(session, cid, cheval_id, pid)
-                    if jockey_id:
+                for pid, cid, cheval_id, jockey_id, jours, statut in rows:
+                    if jours is None:
+                        await compute_jours_depuis_derniere(session, cid, cheval_id, pid)
+                    # Une course courue ne change plus de jockey : inutile d'y revenir.
+                    if jockey_id and (jours is None or statut != "termine"):
                         await detect_jockey_change(session, cid, cheval_id, jockey_id, pid)
 
                 await session.commit()

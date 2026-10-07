@@ -165,8 +165,10 @@ class TestVarianceCap:
         d = plan_to_dict(plan)
         paris = [p for niv in d["niveaux"] for p in niv["paris"]]
         assert paris, "plan modéré vide"
-        assert sum(p["mise"] for p in paris) + d["montant_quinte"] == 10
-        base = 10 - d["montant_quinte"]     # la tranche porte sur le plan principal
+        # Quinté+ du modéré (10 €, cinq tickets) : ajouté sous 12 €, pris dessus
+        # au-delà — la tranche porte sur le plan principal, soit d["montant_joue"].
+        assert sum(p["mise"] for p in paris) + d["montant_quinte"] == d["montant_total"]
+        base = d["montant_joue"]
         for p in paris:
             assert p["mise"] >= 2
         for p in paris:
