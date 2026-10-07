@@ -37,20 +37,23 @@ export function memoriserCodeDuLien(): string | null {
 type Reponse = OffreAnniversaire | { eligible: false; raison?: string };
 const enCours = new Map<string, Promise<Reponse>>();
 
-function charger(userId: string): Promise<Reponse> {
-  let p = enCours.get(userId);
+function charger(userId: string, code: string | null): Promise<Reponse> {
+  const cle = `${userId}:${code ?? ""}`;
+  let p = enCours.get(cle);
   if (!p) {
-    p = api.get("/stripe/offre-anniversaire")
+    p = api.get("/stripe/offre-anniversaire", { params: code ? { code } : {} })
       .then((r) => r.data as Reponse)
       .catch(() => ({ eligible: false as const }));
-    enCours.set(userId, p);
+    enCours.set(cle, p);
   }
   return p;
 }
 
 /** `offre` : l'offre (avec le code) si le compte y a droit ; `raison` : pourquoi
- *  sinon. Les deux restent nuls tant que la réponse n'est pas arrivée. */
-export function useOffreAnniversaire(user: AuthUser | null): { offre: OffreAnniversaire | null; raison: string | null } {
+ *  sinon. Les deux restent nuls tant que la réponse n'est pas arrivée.
+ *  `code` : celui du lien du mail. Sans lui (la fenêtre), l'API exige en plus un
+ *  compte sans aucun accès payant (pass, accès offert). */
+export function useOffreAnniversaire(user: AuthUser | null, code: string | null = null): { offre: OffreAnniversaire | null; raison: string | null } {
   const [rep, setRep] = useState<Reponse | null>(null);
   useEffect(() => {
     if (!user) {
@@ -58,11 +61,11 @@ export function useOffreAnniversaire(user: AuthUser | null): { offre: OffreAnniv
       return;
     }
     let annule = false;
-    charger(user.user_id).then((r) => !annule && setRep(r));
+    charger(user.user_id, code).then((r) => !annule && setRep(r));
     return () => {
       annule = true;
     };
-  }, [user]);
+  }, [user, code]);
   if (!rep) return { offre: null, raison: null };
   return rep.eligible ? { offre: rep, raison: null } : { offre: null, raison: rep.raison ?? null };
 }

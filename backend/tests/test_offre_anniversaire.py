@@ -127,13 +127,27 @@ async def test_valable_jusquau_15_octobre(db):
 @pytest.mark.asyncio
 async def test_code_revele_aux_seuls_eligibles(db):
     ancien = await _user(db)
-    res = await sr.offre_anniversaire_du_compte(db, ancien)
+    res = await sr.offre_anniversaire_du_compte(db=db, user=ancien)
     assert res["eligible"] is True and res["code"] == CODE
     assert res["prix"]["expert"] == {"avant": 1900, "apres": 950}
 
     nouveau = await _user(db, created_at=datetime(2026, 10, 9, tzinfo=timezone.utc))
-    res = await sr.offre_anniversaire_du_compte(db, nouveau)
+    res = await sr.offre_anniversaire_du_compte(db=db, user=nouveau)
     assert res["eligible"] is False and "code" not in res
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("plan, admin", [("expert", False), ("standard", False), ("free", True)])
+async def test_fenetre_jamais_chez_un_acces_payant(db, plan, admin):
+    """Pass en cours, accès offert, admin : un accès payant SANS abonnement Stripe.
+    La fenêtre (appel sans code) ne doit pas s'y afficher — constaté en prod le
+    2026-10-07 sur un compte Expert. Le code reçu par mail reste valable au paiement."""
+    user = await _user(db, plan=plan, is_admin=admin)
+    res = await sr.offre_anniversaire_du_compte(db=db, user=user)
+    assert res["eligible"] is False and "code" not in res
+
+    res = await sr.offre_anniversaire_du_compte(code=CODE, db=db, user=user)
+    assert res["eligible"] is True
 
 
 def test_le_code_nest_pas_dans_le_depot():
