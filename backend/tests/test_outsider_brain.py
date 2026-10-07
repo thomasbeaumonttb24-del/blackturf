@@ -82,10 +82,12 @@ def test_raison_sous_cote_ignore_les_appariements_absurdes():
 def test_masquage_public():
     from api.routes.outsiders import masquer
     a_venir = {"numero": 7, "nom_cheval": "X", "cote_signal": 22.0, "cote_actuelle": 25.0,
-               "chance_place": 0.3, "raisons": ["a"], "termine": False, "code": "R1C1"}
+               "chance_place": 0.3, "raisons": ["a"], "termine": False, "code": "R1C1",
+               "casaque_image_url": "https://x/c.png", "jockey": "J. Dupont"}
     fini = dict(a_venir, termine=True)
     out = masquer([a_venir, fini], complet=False)
     assert out[0]["verrouille"] and out[0]["nom_cheval"] is None and out[0]["raisons"] == []
+    assert out[0]["casaque_image_url"] is None and out[0]["jockey"] is None
     assert out[0]["code"] == "R1C1"
     assert not out[1]["verrouille"] and out[1]["nom_cheval"] == "X"
     assert masquer([a_venir], complet=True)[0]["nom_cheval"] == "X"

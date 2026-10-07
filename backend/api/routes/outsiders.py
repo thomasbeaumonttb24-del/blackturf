@@ -21,7 +21,9 @@ from services.valuebets_visibilite import PLANS_AVEC_VALUE_BETS
 
 router = APIRouter()
 
-_MASQUES = ("numero", "nom_cheval", "cote_signal", "cote_actuelle", "chance_place", "raisons")
+# La casaque et le jockey identifient le cheval autant que son nom : masqués aussi.
+_MASQUES = ("numero", "nom_cheval", "casaque_image_url", "jockey", "cote_signal", "cote_actuelle",
+            "chance_place", "raisons")
 
 
 async def _utilisateur_optionnel(

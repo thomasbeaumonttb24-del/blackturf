@@ -122,12 +122,13 @@ SELECT o.participation_id, o.course_id, o.numero, o.chance_place, o.cote_signal,
        o.places_payees, o.raisons, o.premier_signal_at,
        c.date_heure, c.hippodrome_nom, c.discipline, c.numero_reunion, c.numero AS numero_course,
        c.nom AS nom_course, c.statut, c.est_quinte,
-       ch.nom AS nom_cheval, p.cote_pmu, p.non_partant,
+       ch.nom AS nom_cheval, p.cote_pmu, p.non_partant, p.casaque_image_url, j.nom AS nom_jockey,
        r.classement, r.rapports_detail
 FROM outsider_signaux o
 JOIN courses c ON c.course_id = o.course_id
 JOIN participations p ON p.participation_id = o.participation_id
 JOIN chevaux ch ON ch.cheval_id = p.cheval_id
+LEFT JOIN jockeys j ON j.jockey_id = p.jockey_id
 LEFT JOIN resultats r ON r.course_id = o.course_id
 WHERE o.actif AND {filtre}
 ORDER BY c.date_heure, o.chance_place DESC
@@ -149,6 +150,8 @@ def _ligne(r) -> dict:
         "est_quinte": bool(r["est_quinte"]),
         "numero": r["numero"],
         "nom_cheval": r["nom_cheval"],
+        "casaque_image_url": r["casaque_image_url"],
+        "jockey": r["nom_jockey"],
         "cote_signal": round(float(r["cote_signal"]), 1),
         "cote_actuelle": round(float(cote_finale), 1) if cote_finale else None,
         "chance_place": round(float(r["chance_place"]), 3),

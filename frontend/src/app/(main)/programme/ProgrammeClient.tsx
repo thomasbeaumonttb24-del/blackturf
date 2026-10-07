@@ -1279,11 +1279,7 @@ export default function ProgrammeClient({
         )}
 
         {/* ── Outsiders du jour (grosses cotes capables de se placer) ── */}
-        {isToday && (
-          <div className="rounded-[24px] bg-white p-4 ring-1 ring-inset ring-stone-200 sm:p-5">
-            <OutsidersDuJour max={3} />
-          </div>
-        )}
+        {isToday && <OutsidersDuJour max={3} />}
 
         {/* ── Contrôles ── */}
         {programme && programme.nb_courses > 0 && (
