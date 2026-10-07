@@ -1,11 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Check, Crown, Sparkles } from "lucide-react";
+import { Cake, Check, Crown, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { CheckoutButton } from "@/components/billing/CheckoutButton";
 import { MentionPaiement } from "@/components/billing/MentionPaiement";
+import { useAuth } from "@/hooks/useAuth";
+import { euros, memoriserCodeDuLien, useOffreAnniversaire } from "@/lib/offreAnniversaire";
 
 type Periodicite = "monthly" | "annual";
 
@@ -53,6 +55,15 @@ const EXPERT = [
 export function PlansTarifs() {
   const [periodicite, setPeriodicite] = useState<Periodicite>("monthly");
   const annuel = periodicite === "annual";
+  const { user, loading } = useAuth();
+  // Offre anniversaire : le code vient de l'API (compte éligible) ; celui du lien
+  // du mail ne sert qu'à dire à un visiteur de se connecter, ou à un compte non
+  // éligible pourquoi le code ne s'applique pas.
+  const { offre, raison } = useOffreAnniversaire(user);
+  const [codeLien, setCodeLien] = useState<string | null>(null);
+  useEffect(() => setCodeLien(memoriserCodeDuLien()), []);
+  // Remise affichée et envoyée au paiement : mensuel seulement.
+  const remise = offre && !annuel ? offre : null;
 
   return (
     <div id="formules" className="scroll-mt-24 mb-12 sm:mb-16">
@@ -82,6 +93,34 @@ export function PlansTarifs() {
         </div>
       </div>
 
+      {offre ? (
+        <div className="mx-auto mb-8 max-w-3xl rounded-2xl border-2 border-dashed border-amber-400 bg-amber-50 px-4 py-3 text-center text-sm text-stone-800">
+          <p className="inline-flex flex-wrap items-center justify-center gap-x-2 gap-y-1">
+            <Cake className="h-4 w-4 text-amber-600" aria-hidden />
+            <span className="font-semibold">Offre anniversaire :</span>
+            code <span className="rounded-md bg-white px-2 py-0.5 font-mono font-bold tracking-wider ring-1 ring-amber-300">{offre.code}</span>
+            {annuel ? "valable sur l'abonnement mensuel uniquement." : `appliqué, −${offre.pourcent} % sur votre 1er mois.`}
+          </p>
+          <p className="mt-1 text-xs text-stone-600">
+            Offre exceptionnelle jusqu&apos;au {offre.fin_texte}. Remise sur le premier paiement uniquement, puis prix habituel.
+            {annuel && (
+              <button type="button" onClick={() => setPeriodicite("monthly")} className="ml-1 font-semibold text-amber-700 underline">
+                Passer en mensuel
+              </button>
+            )}
+          </p>
+        </div>
+      ) : codeLien && !loading && !user ? (
+        <div className="mx-auto mb-8 max-w-3xl rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3 text-center text-sm text-stone-800">
+          Votre code de réduction s&apos;applique une fois connecté.{" "}
+          <Link href="/login?redirect=/tarifs" className="font-semibold text-amber-700 underline">Me connecter</Link>
+        </div>
+      ) : codeLien && raison ? (
+        <div className="mx-auto mb-8 max-w-3xl rounded-2xl border border-border bg-muted/40 px-4 py-3 text-center text-sm text-muted-foreground">
+          {raison}
+        </div>
+      ) : null}
+
       <div className="grid gap-5 sm:gap-6 md:grid-cols-3 md:items-center">
         {/* Découverte */}
         <div className="order-3 md:order-none rounded-2xl border border-border bg-white p-6 sm:p-7">
@@ -109,11 +148,12 @@ export function PlansTarifs() {
           <h2 className="text-lg font-bold">Standard</h2>
           <p className="text-xs text-muted-foreground">L&apos;essentiel, avec des quotas</p>
           <div className="mt-4 flex items-baseline gap-1">
-            <span className="text-3xl font-extrabold">{PRIX.standard[periodicite]}</span>
-            <span className="text-muted-foreground">/mois</span>
+            {remise && <span className="text-lg text-muted-foreground line-through">{PRIX.standard.monthly}</span>}
+            <span className="text-3xl font-extrabold">{remise ? euros(remise.prix.standard.apres) : PRIX.standard[periodicite]}</span>
+            <span className="text-muted-foreground">{remise ? "le 1er mois" : "/mois"}</span>
           </div>
           <p className="min-h-4 text-xs leading-4 text-muted-foreground">
-            {annuel ? `${PRIX.standard.annuelTotal} payés en une fois` : "Sans engagement"}
+            {annuel ? `${PRIX.standard.annuelTotal} payés en une fois` : remise ? `puis ${PRIX.standard.monthly}/mois, sans engagement` : "Sans engagement"}
           </p>
           <p className="mb-5 mt-1 text-xs font-semibold text-emerald-700">{PRIX.standard.parJour[periodicite]} par jour</p>
           <ul className="mb-6 space-y-2.5">
@@ -127,7 +167,8 @@ export function PlansTarifs() {
           <CheckoutButton
             plan="standard"
             periodicite={periodicite}
-            label="Choisir Standard"
+            label={remise ? `Choisir Standard — −${remise.pourcent} %` : "Choisir Standard"}
+            codePromo={remise?.code}
             variant="outline"
             size="default"
             className="w-full"
@@ -144,13 +185,16 @@ export function PlansTarifs() {
           <h2 className="text-xl font-bold">Expert</h2>
           <p className="text-xs text-stone-300">Tout BlackTurf, sans aucune limite</p>
           <div className="mt-4 flex items-baseline gap-1">
-            <span className="text-5xl font-extrabold leading-[1.15] text-amber-300">{PRIX.expert[periodicite]}</span>
-            <span className="text-stone-300">/mois</span>
+            {remise && <span className="text-xl text-stone-400 line-through">{PRIX.expert.monthly}</span>}
+            <span className="text-5xl font-extrabold leading-[1.15] text-amber-300">{remise ? euros(remise.prix.expert.apres) : PRIX.expert[periodicite]}</span>
+            <span className="text-stone-300">{remise ? "le 1er mois" : "/mois"}</span>
           </div>
           <p className="min-h-4 text-xs leading-4 text-stone-300">
             {annuel
               ? `${PRIX.expert.annuelTotal} payés en une fois`
-              : "5 € de moins que le Pass Mois · résiliable à tout moment"}
+              : remise
+                ? `puis ${PRIX.expert.monthly}/mois · résiliable à tout moment`
+                : "5 € de moins que le Pass Mois · résiliable à tout moment"}
           </p>
           <p className="mb-5 mt-1 text-xs font-semibold text-emerald-300">
             {PRIX.expert.parJour[periodicite]} par jour — le meilleur prix de l&apos;accès illimité
@@ -168,7 +212,8 @@ export function PlansTarifs() {
           <CheckoutButton
             plan="expert"
             periodicite={periodicite}
-            label="Choisir Expert"
+            label={remise ? `Choisir Expert — −${remise.pourcent} %` : "Choisir Expert"}
+            codePromo={remise?.code}
             variant="brand"
             size="lg"
             className="h-12 w-full text-base"

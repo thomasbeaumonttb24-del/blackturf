@@ -6,6 +6,7 @@ import { EssaiSansCarteBanner } from "@/components/layout/EssaiSansCarteBanner";
 import { PaiementEchoueBanner } from "@/components/layout/PaiementEchoueBanner";
 import { EssaiGratuitBanner } from "@/components/billing/EssaiGratuitBanner";
 import { DefiBandeau } from "@/components/defi/DefiBandeau";
+import { OffreAnniversairePopup } from "@/components/billing/OffreAnniversairePopup";
 
 export default function MainLayout({ children }: { children: React.ReactNode }) {
   return (
@@ -31,6 +32,7 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
       <main id="contenu" className="flex-1 pb-[calc(68px+env(safe-area-inset-bottom))] md:pb-0">{children}</main>
       <Footer />
       <BottomNav />
+      <OffreAnniversairePopup />
     </div>
   );
 }

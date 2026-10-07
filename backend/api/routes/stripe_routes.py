@@ -17,7 +17,7 @@ from api.config import get_settings
 from api.routes.auth import get_current_user, require_verified_email
 from db.database import get_db
 from db.models import CarteConnue, Subscription, User
-from services import parrainage
+from services import offre_anniversaire, parrainage
 from services.abonnements import journaliser
 from services.garde_envoi import envoi_autorise
 
@@ -419,6 +419,22 @@ class CheckoutRequest(BaseModel):
     # Date de prorata renvoyée par l'aperçu : le montant débité est alors
     # exactement celui annoncé, même si le client a mis du temps à confirmer.
     proration_date: Optional[int] = None
+    # Code de l'offre anniversaire (services/offre_anniversaire.py), mensuel seulement.
+    code_promo: Optional[str] = None
+
+
+@router.get("/stripe/offre-anniversaire")
+async def offre_anniversaire_du_compte(
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Le code n'est révélé qu'à un compte ÉLIGIBLE (inscrit avant l'offre, sans
+    abonnement en cours) : c'est la fenêtre du site, l'autre canal étant le mail."""
+    raison = await offre_anniversaire.raison_refus(user, db)
+    if raison:
+        return {"eligible": False, "raison": raison}
+    return {"eligible": True, "code": offre_anniversaire.code_actif(),
+            **offre_anniversaire.offre_publique()}
 
 
 @router.post("/stripe/checkout")
@@ -442,6 +458,16 @@ async def create_checkout(
     price_id = PRICE_MAP.get(price_key)
     if not price_id:
         raise HTTPException(status_code=400, detail="Plan invalide")
+
+    # Code promo : vérifié AVANT tout le reste — un abonné qui le saisit apprend
+    # pourquoi il ne s'applique pas, au lieu de voir son plan changer sans remise.
+    # 400 et non 409 : le front renvoie les 409 vers le profil.
+    avec_offre = bool((body.code_promo or "").strip())
+    if avec_offre:
+        try:
+            await offre_anniversaire.verifier(body.code_promo, body.periodicite, user, db)
+        except offre_anniversaire.OffreRefusee as refus:
+            raise HTTPException(status_code=400, detail=str(refus))
 
     # 1) Déjà abonné ? On ne crée JAMAIS un second abonnement.
     vivants = await _subs_vivantes(user.user_id, db)
@@ -540,6 +566,11 @@ async def create_checkout(
     }
     if parrainage_filleul is not None:
         subscription_data["metadata"]["parrainage_id"] = parrainage_filleul.parrainage_id
+    if avec_offre:
+        # Coupon appliqué par le serveur (`discounts` exclut `allow_promotion_codes`
+        # chez Stripe). La métadonnée `offre` sert au contrôle « déjà utilisée ».
+        remise = {"discounts": [{"coupon": offre_anniversaire.assurer_coupon()}]}
+        subscription_data["metadata"]["offre"] = offre_anniversaire.COUPON_ID
     # Créer la session
     session = stripe.checkout.Session.create(
         customer=customer_id,
@@ -561,9 +592,11 @@ async def create_checkout(
 
     log.info("stripe.checkout_created", user_id=user.user_id, plan=plan_cible,
              essai_accorde=droit_a_lessai,
-             remise_parrainage=parrainage_filleul is not None)
+             remise_parrainage=parrainage_filleul is not None,
+             offre_anniversaire=avec_offre)
     return {"url": session.url, "essai": droit_a_lessai,
-            "remise_parrainage": parrainage_filleul is not None}
+            "remise_parrainage": parrainage_filleul is not None,
+            "offre_anniversaire": avec_offre}
 
 
 # ── Passes sans renouvellement ───────────────────────────────────────────────

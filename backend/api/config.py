@@ -72,6 +72,10 @@ class Settings(BaseSettings):
     stripe_price_starter_annual: str = ""
     stripe_price_pro_monthly: str = ""
     stripe_price_pro_annual: str = ""
+    # Code de l'offre anniversaire (services/offre_anniversaire.py). SECRET : le
+    # dépôt est public, le code n'existe que dans le .env du serveur. Vide = offre
+    # fermée.
+    code_anniversaire: str = ""
     resend_api_key: str = ""
     resend_webhook_secret: str = ""
     email_from: str = "noreply@blackturf.fr"

@@ -5,6 +5,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from services.email_templates import daily, weekly, alertes_strategies
 from services import email_compte
+from services.email_offre import anniversaire
 
 out = Path(__file__).resolve().parents[2] / "docs" / "email-previews"
 out.mkdir(parents=True, exist_ok=True)
@@ -33,7 +34,9 @@ for name, (html, plain) in (
         ("confirmation-lettre", email_compte.confirmation_newsletter("https://blackturf.fr/newsletter")),
         ("verification-adresse", email_compte.verification_adresse("Prénom", "https://blackturf.fr/verifier-email")),
         ("mot-de-passe", email_compte.reinitialisation_mot_de_passe("Prénom", "https://blackturf.fr/reinitialiser-mot-de-passe")),
-        ("resiliation", email_compte.resiliation(True))):
+        ("resiliation", email_compte.resiliation(True)),
+        # Code FICTIF : le vrai n'existe que dans le .env du serveur.
+        ("anniversaire", anniversaire("Prénom", 4, "EXEMPLE50", unsub))):
     (out / (name + ".html")).write_text(html, encoding="utf-8")
     (out / (name + ".txt")).write_text(plain, encoding="utf-8")
 print(out)
