@@ -1,0 +1,95 @@
+name: Offre anniversaire
+
+# Lancé à la main, une étape à la fois, sur le VPS (même accès que deploy.yml) :
+#   installer  — pose CODE_ANNIVERSAIRE dans /opt/blackturf/.env, recrée api + scheduler
+#   verifier   — coupon et montants Stripe (pages de paiement expirées, rien d'encaissé)
+#   simulation — nombre de destinataires et de mois, AUCUN envoi
+#   test       — un exemplaire à ADMIN_EMAIL
+#   envoyer    — envoi réel (idempotent : personne ne le reçoit deux fois)
+#
+# Le dépôt et ses journaux sont publics : le code n'est jamais écrit ici. Il est
+# lu dans l'événement puis MASQUÉ avant la moindre sortie (« *** » dans les logs).
+
+on:
+  workflow_dispatch:
+    inputs:
+      etape:
+        description: "Étape"
+        required: true
+        type: choice
+        options: [installer, verifier, simulation, test, envoyer]
+      code:
+        description: "Code de l'offre (étape installer seulement)"
+        required: false
+        default: ""
+
+concurrency:
+  group: offre-anniversaire
+  cancel-in-progress: false
+
+jobs:
+  etape:
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 40
+    steps:
+      - name: Masquer le code
+        run: |
+          CODE=$(jq -r '.inputs.code // ""' "$GITHUB_EVENT_PATH")
+          if [ -n "$CODE" ]; then echo "::add-mask::$CODE"; fi
+          echo "CODE=$CODE" >> "$GITHUB_ENV"
+          if [ "${{ inputs.etape }}" = "installer" ] && ! printf '%s' "$CODE" | grep -Eq '^[A-Z0-9]{6,20}$'; then
+            echo "::error::Code absent ou invalide (6 à 20 lettres majuscules / chiffres)."
+            exit 1
+          fi
+
+      - name: Étape ${{ inputs.etape }}
+        uses: appleboy/ssh-action@55dabf81b49d4120609345970c91507e2d734799 # v1.0.0
+        env:
+          ETAPE: ${{ inputs.etape }}
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          command_timeout: 35m
+          envs: ETAPE,CODE
+          script: |
+            set -e
+            # Jamais pendant un déploiement (même verrou que deploy.yml).
+            exec 9>/tmp/blackturf-deploy.lock
+            flock -w 1800 9 || { echo "::error::Verrou de déploiement non obtenu."; exit 1; }
+            cd /opt/blackturf
+            DC="docker compose -f docker-compose.yml -f docker-compose.prod.yml"
+            echo "Version en production : $(git rev-parse --short HEAD)"
+
+            case "$ETAPE" in
+              installer)
+                if grep -q '^CODE_ANNIVERSAIRE=' .env; then
+                  sed -i "s/^CODE_ANNIVERSAIRE=.*/CODE_ANNIVERSAIRE=$CODE/" .env
+                else
+                  printf '\nCODE_ANNIVERSAIRE=%s\n' "$CODE" >> .env
+                fi
+                $DC up -d api scheduler
+                for i in $(seq 1 40); do
+                  curl -fsS http://localhost:8000/api/v1/health >/dev/null 2>&1 && break
+                  sleep 3
+                done
+                $DC exec -T api python -c "from services.offre_anniversaire import code_actif; import sys; ok = code_actif() == '$CODE'; print('Code chargé dans l API :', 'OUI' if ok else 'NON'); sys.exit(0 if ok else 1)"
+                ;;
+              verifier)
+                $DC exec -T api python scripts/verifier_offre_stripe.py --sans-paiement
+                ;;
+              simulation)
+                $DC exec -T api python scripts/envoyer_mail_anniversaire.py
+                ;;
+              test)
+                $DC exec -T api python scripts/envoyer_mail_anniversaire.py --test
+                ;;
+              envoyer)
+                $DC exec -T api python scripts/envoyer_mail_anniversaire.py --envoyer
+                ;;
+              *)
+                echo "::error::Étape inconnue : $ETAPE"; exit 1
+                ;;
+            esac

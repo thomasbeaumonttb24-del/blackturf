@@ -11,9 +11,15 @@ Refuse une clé LIVE : aucun prélèvement réel. Clé : STRIPE_SECRET_KEY
 (environnement ou .env) — utilisez la clé sk_test_ du compte, avec les
 STRIPE_PRICE_* de test.
 
+`--sans-paiement` : accepté avec la clé LIVE. Seuls 1 et 2 tournent — le
+coupon, puis des pages de paiement ouvertes et EXPIRÉES aussitôt, pour un
+client temporaire supprimé à la fin : rien n'est encaissé. Le 3 (facture
+suivante au prix plein) découle de `duration=once`, contrôlé au 1.
+
     STRIPE_SECRET_KEY=sk_test_... STRIPE_PRICE_STARTER_MONTHLY=price_... \\
     STRIPE_PRICE_PRO_MONTHLY=price_... python scripts/verifier_offre_stripe.py
 """
+import argparse
 import sys
 from pathlib import Path
 
@@ -31,10 +37,17 @@ def controle(ok: bool, texte: str) -> bool:
 
 
 def main() -> None:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--sans-paiement", action="store_true",
+                    help="coupon + pages de paiement expirées, sans abonnement (clé live acceptée)")
+    args = ap.parse_args()
     s = get_settings()
     stripe.api_key = s.stripe_secret_key
-    if not stripe.api_key.startswith(("sk_test", "rk_test")):
-        sys.exit("Clé Stripe de TEST exigée (sk_test_…) : ce script crée et paie un abonnement.")
+    test = stripe.api_key.startswith(("sk_test", "rk_test"))
+    print("mode Stripe :", "TEST" if test else "LIVE")
+    if not test and not args.sans_paiement:
+        sys.exit("Clé Stripe de TEST exigée (sk_test_…) : ce script crée et paie un abonnement. "
+                 "Avec la clé live : --sans-paiement.")
     prix = {"standard": s.stripe_price_starter_monthly, "expert": s.stripe_price_pro_monthly}
     tout_ok = True
 
@@ -44,10 +57,14 @@ def main() -> None:
     tout_ok &= controle(coupon.duration == "once", f"durée « {coupon.duration} » : premier paiement seulement")
     tout_ok &= controle(coupon.redeem_by == int(oa.FIN.timestamp()), "fin de validité au " + oa.FIN_TEXTE)
 
-    client = stripe.Customer.create(email="verification-offre@blackturf.fr",
-                                    payment_method="pm_card_visa",
-                                    invoice_settings={"default_payment_method": "pm_card_visa"},
-                                    metadata={"app": "blackturf", "verification": "offre-anniversaire"})
+    if args.sans_paiement:
+        client = stripe.Customer.create(email="verification-offre@blackturf.fr",
+                                        metadata={"app": "blackturf", "verification": "offre-anniversaire"})
+    else:
+        client = stripe.Customer.create(email="verification-offre@blackturf.fr",
+                                        payment_method="pm_card_visa",
+                                        invoice_settings={"default_payment_method": "pm_card_visa"},
+                                        metadata={"app": "blackturf", "verification": "offre-anniversaire"})
     try:
         print("2. Page de paiement")
         for plan, price_id in prix.items():
@@ -61,22 +78,24 @@ def main() -> None:
                                 f"{plan} : {sess.amount_subtotal / 100:.2f} € → {sess.amount_total / 100:.2f} €")
             stripe.checkout.Session.expire(sess.id)
 
-        print("3. Premier paiement, puis le suivant")
-        avant, apres = oa.PRIX["expert"]
-        sub = stripe.Subscription.create(customer=client.id, items=[{"price": prix["expert"]}],
-                                         discounts=[{"coupon": oa.COUPON_ID}],
-                                         metadata={"offre": oa.COUPON_ID}, expand=["latest_invoice"])
-        premiere = sub.latest_invoice
-        tout_ok &= controle(premiere.amount_paid == apres,
-                            f"1re facture payée : {premiere.amount_paid / 100:.2f} €")
-        suivante = stripe.Invoice.upcoming(customer=client.id, subscription=sub.id)
-        tout_ok &= controle(suivante.amount_due == avant,
-                            f"facture suivante : {suivante.amount_due / 100:.2f} € (prix plein)")
-        stripe.Subscription.cancel(sub.id)
+        if args.sans_paiement:
+            print("3. Facture suivante : non jouée (sans paiement) — garantie par duration=once")
+        else:
+            print("3. Premier paiement, puis le suivant")
+            avant, apres = oa.PRIX["expert"]
+            sub = stripe.Subscription.create(customer=client.id, items=[{"price": prix["expert"]}],
+                                             discounts=[{"coupon": oa.COUPON_ID}],
+                                             metadata={"offre": oa.COUPON_ID}, expand=["latest_invoice"])
+            premiere = sub.latest_invoice
+            tout_ok &= controle(premiere.amount_paid == apres,
+                                f"1re facture payée : {premiere.amount_paid / 100:.2f} €")
+            suivante = stripe.Invoice.upcoming(customer=client.id, subscription=sub.id)
+            tout_ok &= controle(suivante.amount_due == avant,
+                                f"facture suivante : {suivante.amount_due / 100:.2f} € (prix plein)")
+            stripe.Subscription.cancel(sub.id)
     finally:
         stripe.Customer.delete(client.id)
-
-    print("\nTOUT EST BON" if tout_ok else "\nUN CONTRÔLE A ÉCHOUÉ")
+        print("\nTOUT EST BON" if tout_ok else "\nUN CONTRÔLE A ÉCHOUÉ")
     sys.exit(0 if tout_ok else 1)
 
 

@@ -64,7 +64,8 @@ async def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--mise-en-ligne", help="AAAA-MM-JJ ; défaut : date du premier compte")
     ap.add_argument("--mois", type=int, help="force le nombre de mois affiché")
-    ap.add_argument("--test", metavar="ADRESSE", help="envoie un seul exemplaire à cette adresse")
+    ap.add_argument("--test", metavar="ADRESSE", nargs="?", const="",
+                    help="envoie un seul exemplaire à cette adresse (défaut : ADMIN_EMAIL)")
     ap.add_argument("--envoyer", action="store_true", help="envoi réel à tous les destinataires")
     args = ap.parse_args()
 
@@ -89,7 +90,10 @@ async def main() -> None:
         from services.alerts import _unsubscribe_url, make_unsubscribe_token, send_email
         from services.email_campaigns import SITE, deliver
 
-        if args.test:
+        if args.test is not None:
+            if not args.test:
+                from services.email_campaigns import CONTROL_ADDRESS
+                args.test = CONTROL_ADDRESS
             prenom = await session.scalar(select(User.prenom).where(func.lower(User.email) == args.test.lower()))
             html, texte = anniversaire(prenom, mois, code, SITE + "/notifications")
             ok = await send_email(args.test, "[TEST] " + sujet(mois), html, texte)
