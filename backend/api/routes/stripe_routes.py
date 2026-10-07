@@ -425,12 +425,21 @@ class CheckoutRequest(BaseModel):
 
 @router.get("/stripe/offre-anniversaire")
 async def offre_anniversaire_du_compte(
+    code: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
     """Le code n'est révélé qu'à un compte ÉLIGIBLE (inscrit avant l'offre, sans
-    abonnement en cours) : c'est la fenêtre du site, l'autre canal étant le mail."""
+    abonnement en cours) : c'est la fenêtre du site, l'autre canal étant le mail.
+
+    Sans `code` (la fenêtre), il faut EN PLUS que le compte n'ait aucun accès
+    payant : un pass en cours ou un accès offert ne passe pas par `subscriptions`,
+    et la fenêtre s'affichait chez des comptes Expert (constaté le 2026-10-07).
+    Avec le code du mail (`/tarifs?code=…`), les règles du checkout suffisent."""
     raison = await offre_anniversaire.raison_refus(user, db)
+    if not raison and not offre_anniversaire.correspond(code) and \
+            (user.is_admin or user.plan not in ("free", "decouverte")):
+        raison = "Vous profitez déjà d'un accès payant à BlackTurf."
     if raison:
         return {"eligible": False, "raison": raison}
     return {"eligible": True, "code": offre_anniversaire.code_actif(),

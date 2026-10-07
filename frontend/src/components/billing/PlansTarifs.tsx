@@ -59,9 +59,9 @@ export function PlansTarifs() {
   // Offre anniversaire : le code vient de l'API (compte éligible) ; celui du lien
   // du mail ne sert qu'à dire à un visiteur de se connecter, ou à un compte non
   // éligible pourquoi le code ne s'applique pas.
-  const { offre, raison } = useOffreAnniversaire(user);
   const [codeLien, setCodeLien] = useState<string | null>(null);
   useEffect(() => setCodeLien(memoriserCodeDuLien()), []);
+  const { offre, raison } = useOffreAnniversaire(user, codeLien);
   // Remise affichée et envoyée au paiement : mensuel seulement.
   const remise = offre && !annuel ? offre : null;
 
