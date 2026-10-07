@@ -1190,8 +1190,6 @@ export default function ProgrammeClient({
           <span aria-hidden className="bt-halo-a pointer-events-none absolute -left-16 -top-20 -z-10 h-56 w-56 rounded-full bg-amber-500/20 blur-3xl" />
           <span aria-hidden className="bt-halo-b pointer-events-none absolute -bottom-24 right-10 -z-10 h-60 w-60 rounded-full bg-orange-600/20 blur-3xl" />
           <span aria-hidden className="bt-halo-c pointer-events-none absolute left-1/3 top-6 -z-10 h-40 w-40 rounded-full bg-yellow-400/10 blur-3xl" />
-          {/* Quadrillage discret qui s'efface vers le bas : donne de la profondeur au noir. */}
-          <span aria-hidden className="pointer-events-none absolute inset-0 -z-10 bg-[linear-gradient(rgba(255,255,255,.035)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,.035)_1px,transparent_1px)] bg-[size:26px_26px] [mask-image:linear-gradient(180deg,#000,transparent_80%)]" />
           <span
             aria-hidden
             className="pointer-events-none absolute max-[479px]:hidden"
