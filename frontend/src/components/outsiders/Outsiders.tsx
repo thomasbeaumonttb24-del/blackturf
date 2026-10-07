@@ -120,7 +120,12 @@ const THEME = {
 
 /* ─── Briques ────────────────────────────────────────────────────────────── */
 
-/** Scène claire en relief : fond crème, halos doux fixes, quadrillage léger. */
+/** Scène claire en relief : fond crème, halos doux fixes, quadrillage léger.
+ *
+ * Les halos flous vivent dans un calque rogné par un `clip-path` arrondi : Chrome
+ * ne les rogne pas sur le rayon avec le seul `overflow-hidden` (coin carré coloré).
+ * Le `clip-path` reste sur ce calque, pas sur le cadre, dont il couperait l'anneau
+ * et l'ombre. */
 export function Scene({ children, className }: { children: ReactNode; className?: string }) {
   return (
     <div
@@ -130,8 +135,10 @@ export function Scene({ children, className }: { children: ReactNode; className?
         className,
       )}
     >
-      <span className="pointer-events-none absolute -left-24 -top-24 -z-10 h-72 w-72 rounded-full bg-rose-200/40 blur-3xl" aria-hidden />
-      <span className="pointer-events-none absolute -bottom-28 -right-20 -z-10 h-80 w-80 rounded-full bg-amber-200/50 blur-3xl" aria-hidden />
+      <span className="pointer-events-none absolute inset-0 -z-10 overflow-hidden rounded-[inherit] [clip-path:inset(0_round_28px)]" aria-hidden>
+        <span className="absolute -left-24 -top-24 h-72 w-72 rounded-full bg-rose-200/40 blur-3xl" />
+        <span className="absolute -bottom-28 -right-20 h-80 w-80 rounded-full bg-amber-200/50 blur-3xl" />
+      </span>
       <span
         className="pointer-events-none absolute inset-0 -z-10 opacity-[0.06] [background-image:linear-gradient(rgba(120,90,40,.6)_1px,transparent_1px),linear-gradient(90deg,rgba(120,90,40,.6)_1px,transparent_1px)] [background-size:44px_44px] [mask-image:radial-gradient(ellipse_at_center,#000_30%,transparent_75%)]"
         aria-hidden
