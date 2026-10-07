@@ -139,6 +139,7 @@ async function sitemapPages(): Promise<Response> {
   const entrees: Entree[] = [
     { loc: `${BASE}/programme`, lastmod: majDuJour },
     { loc: `${BASE}/quinte-du-jour`, lastmod: majDuJour },
+    { loc: `${BASE}/outsiders`, lastmod: majDuJour },
     { loc: `${BASE}/resultats`, lastmod: majDuJour },
 
     { loc: BASE, lastmod: iso(MAJ.accueil) },

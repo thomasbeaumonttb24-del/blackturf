@@ -237,6 +237,7 @@ const NOMS_ETAPES: Record<string, string> = {
   nettete_probas: "Netteté des probabilités servies",
   melange_arrivees: "Mélange modèle × marché appris sur les arrivées",
   modele_technique: "Modèle technique (sans la cote)",
+  outsider_brain: "Cerveau des outsiders (cotes ≥ 15 placées)",
 };
 
 /** Écart signé à quatre décimales (« +0,0374 ») ; tiret si inconnu. */

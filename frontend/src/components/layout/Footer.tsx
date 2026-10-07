@@ -24,6 +24,7 @@ const COLUMNS: Array<{
     links: [
       R.coursesDuJour,
       R.quinte,
+      R.outsiders,
       R.resultats,
       { ...R.parisDeValeur, prive: true },
       R.performances,

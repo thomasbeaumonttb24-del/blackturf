@@ -34,6 +34,7 @@ import { BandeauOnglet, CARTE_CLS, CARTE_STYLE, IconeTuile, LienOnglet, Pastille
 import {
   ClassementAlgo, ClassementApercu, ClassementVerrouille, formatCoteFr, type ClassementSignal,
 } from "@/components/courses/classement";
+import { OutsidersCourse } from "@/components/outsiders/Outsiders";
 import { formatCote, formatCoteJuste, formatEV, etoiles, formatDateTime, formatMontantDevise, cn } from "@/lib/utils";
 import { toast } from "sonner";
 import {
@@ -3017,6 +3018,10 @@ export default function CoursePage({
           </div>
         )}
 
+          {/* ── Outsiders repérés (cerveau des outsiders) : cotes ≥ 15 capables
+              de se placer. Remplace l'ancienne « course à outsider ». */}
+          <OutsidersCourse courseId={course.course_id} />
+
           {/* ── Classement de l'algorithme ────────────────────────────────────
               Table extraite dans components/courses/classement.tsx : elle vit
               maintenant en pleine largeur, et chaque colonne correspond à un
@@ -3440,89 +3445,6 @@ export default function CoursePage({
                 <span style={{ fontSize: 12, color: CX.gray400 }}>Les paris à jouer sont dans le plan de mise.</span>
                 <LienOnglet onClick={() => allerA("plan")}>Mon plan de mise</LienOnglet>
               </div>
-            </div>
-          )}
-          {/* ── Course à outsider (carte or/crème) ── */}
-          {analysis?.detection_outsider?.course_a_outsider && (
-            <div style={{ boxShadow: CARTE_STYLE.boxShadow, borderRadius: 16, border: "1px solid rgba(245,158,11,.22)", background: "linear-gradient(180deg,#FFFBF0,#FFFFFF 60%)", padding: "18px 20px" }}>
-              <div className="flex items-center gap-2" style={{ marginBottom: 10 }}>
-                <IconeTuile icone={Zap} />
-                <h3 style={{ margin: 0, fontFamily: CX.sg, fontSize: 15, fontWeight: 700, color: CX.goldDeep }}>Course à outsider détectée</h3>
-                <span style={{ marginLeft: "auto", fontSize: 10, fontWeight: 700, color: CX.gold, background: CX.goldBg, borderRadius: 999, padding: "2px 9px" }}>
-                  Score {Math.round(analysis.detection_outsider.score * 100)}/100
-                </span>
-              </div>
-              {analysis.detection_outsider.signaux.length > 0 && (
-                <ul style={{ margin: "0 0 12px", padding: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: 4 }}>
-                  {analysis.detection_outsider.signaux.map((s, i) => (
-                    <li key={i} style={{ fontSize: 12, color: CX.gray500 }}>· {s}</li>
-                  ))}
-                </ul>
-              )}
-              <div className="cx-2col" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                {analysis.detection_outsider.candidats.map((c) => {
-                  const hasDetail = !!(c.justification || (c.facteurs_positifs && c.facteurs_positifs.length > 0) || (c.points_vigilance && c.points_vigilance.length > 0));
-                  return (
-                  <div key={c.numero} style={{ borderRadius: 12, border: `1px solid ${CX.bd1}`, background: "rgba(255,255,255,.75)", padding: "13px 14px" }} className="space-y-1.5">
-                    <div className="flex items-center justify-between gap-2">
-                      <span style={{ minWidth: 0, fontSize: 13.5, fontWeight: 700, color: CX.ink2 }}><IdentiteCheval numero={c.numero} nom={c.nom} /></span>
-                      <span style={{ flexShrink: 0, whiteSpace: "nowrap", fontFamily: CX.sg, fontSize: 12, fontWeight: 700, color: CX.gray500 }}>cote {c.cote}</span>
-                    </div>
-                    {/* Chiffres clés : valeur modèle vs marché */}
-                    <div className="flex flex-wrap gap-1 text-[10px]">
-                      <span style={{ fontSize: 10, fontWeight: 600, color: CX.gray500, background: CX.surf5, borderRadius: 5, padding: "2px 7px" }}>
-                        Modèle {Math.round(c.proba_modele * 100)}% · Marché {Math.round(c.proba_marche * 100)}%
-                      </span>
-                      {c.ratio_valeur != null && (
-                        <span style={{ fontSize: 10, fontWeight: 700, color: CX.emDeep, background: CX.emBg, borderRadius: 5, padding: "2px 7px" }}>
-                          ×{c.ratio_valeur} valeur
-                        </span>
-                      )}
-                      {c.verdict && (
-                        <span style={{ fontSize: 10, fontWeight: 600, color: CX.gray500, background: CX.surf5, borderRadius: 5, padding: "2px 7px" }}>{c.verdict}</span>
-                      )}
-                    </div>
-                    {hasDetail && (
-                      <details className="group" style={{ marginTop: 2 }}>
-                        <summary className="select-none flex items-center gap-1" style={{ cursor: "pointer", fontSize: 10.5, fontWeight: 600, color: CX.gold, listStyle: "none" }}>
-                          Voir le détail
-                          <ChevronDown className="h-3 w-3 transition-transform group-open:rotate-180" />
-                        </summary>
-                        <div style={{ marginTop: 6 }} className="space-y-1.5">
-                          {c.justification && (
-                            <p style={{ margin: 0, fontSize: 11.5, lineHeight: 1.5, color: CX.gray600 }}>{c.justification}</p>
-                          )}
-                          {/* Facteurs qui appuient le choix */}
-                          {c.facteurs_positifs && c.facteurs_positifs.length > 0 && (
-                            <ul className="space-y-0.5">
-                              {c.facteurs_positifs.slice(0, 4).map((f, i) => (
-                                <li key={i} className="text-[10.5px] text-emerald-800 flex gap-1">
-                                  <span className="flex-shrink-0">✓</span>
-                                  <span><b>{f.label}</b>{f.detail ? ` — ${f.detail}` : ""}</span>
-                                </li>
-                              ))}
-                            </ul>
-                          )}
-                          {/* Points de vigilance (honnêteté : un outsider garde des risques) */}
-                          {c.points_vigilance && c.points_vigilance.length > 0 && (
-                            <ul className="space-y-0.5">
-                              {c.points_vigilance.map((v, i) => (
-                                <li key={i} className="text-[10.5px] text-amber-700 flex gap-1">
-                                  <span className="flex-shrink-0">⚠</span><span>{v}</span>
-                                </li>
-                              ))}
-                            </ul>
-                          )}
-                        </div>
-                      </details>
-                    )}
-                  </div>
-                  );
-                })}
-              </div>
-              <p style={{ margin: "11px 0 0", fontSize: 10.5, color: CX.muted }}>
-                Grosse cote = risque élevé, réservé aux profils offensifs.
-              </p>
             </div>
           )}
 

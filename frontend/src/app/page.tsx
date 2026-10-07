@@ -16,6 +16,7 @@ import { ScrollReveal } from "@/components/ui/ScrollReveal";
 import { LiveTicker } from "@/components/ui/LiveTicker";
 import { CalculatorDemo } from "@/components/home/CalculatorDemo";
 import { LivePalmares } from "@/components/home/LivePalmares";
+import { OutsidersDuJour } from "@/components/outsiders/Outsiders";
 import { DefiBandeau } from "@/components/defi/DefiBandeau";
 import { DefiClassementLive } from "@/components/defi/DefiClassementLive";
 import { DefiConcept } from "@/components/defi/DefiConcept";
@@ -493,6 +494,13 @@ export default async function HomePage() {
             La précision d'analyse mesure la qualité du classement des chevaux. Ce n'est ni un taux de
             gain, ni une garantie de profit. Les performances passées ne préjugent pas des performances futures.
           </p>
+        </div>
+      </section>
+
+      {/* ═══════════ OUTSIDERS DU JOUR (cerveau des outsiders) ═══════════ */}
+      <section id="outsiders" className="scroll-mt-20 bg-white py-16 sm:py-20">
+        <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
+          <OutsidersDuJour />
         </div>
       </section>
 
