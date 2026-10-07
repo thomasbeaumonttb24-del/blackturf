@@ -81,20 +81,13 @@ def _joint_proba(sim, idx_by_num: dict, a_num, b_num, kind: str):
     return None
 
 
-# TRJ 2026 par type de pari
-TRJ = {
-    "Simple Gagnant": 0.8495,
-    "Simple Placé": 0.8495,
-    "Couplé Gagnant": 0.74,
-    "Couplé Placé": 0.74,
-    "Couplé Ordre": 0.74,
-    "2sur4": 0.74,
-    "Trio": 0.691,
-    "Tiercé Désordre": 0.6435,
-    "Tiercé Ordre": 0.6435,
-    "Quarté+ Bonus": 0.633,
-    "Quinté+ Flexi": 0.6475,
-}
+# TRJ 2026 par type de pari — table de référence UNIQUE (services.pmu_paris_reference).
+from services.pmu_paris_reference import trj as _trj  # noqa: E402
+
+TRJ = {t: _trj(t) for t in (
+    "Simple Gagnant", "Simple Placé", "Couplé Gagnant", "Couplé Placé", "Couplé Ordre",
+    "2sur4", "Trio", "Tiercé Désordre", "Tiercé Ordre", "Quarté+ Bonus", "Quinté+ Flexi",
+)}
 
 MISE_MIN = {
     "Simple Gagnant": 1.50,
@@ -184,7 +177,8 @@ class BetPortfolioEngine:
         sim, idx_by_num = _build_field_sim(predictions)
 
         # ── Construire les 5 scénarios ────────────────────────────────────
-        alpha = self._scenario_alpha(top1, top2, by_proba, paris_dispo, budget, sim, idx_by_num)
+        alpha = self._scenario_alpha(top1, top2, by_proba, paris_dispo, budget, sim, idx_by_num,
+                                     nb_partants=nb_partants)
         beta  = self._scenario_beta(by_ev, by_proba, paris_dispo, budget, sim, idx_by_num)
         gamma = self._scenario_gamma(by_ev, paris_dispo, budget)
         delta = self._scenario_delta(outsiders_signal, predictions, paris_dispo, budget)
@@ -225,7 +219,8 @@ class BetPortfolioEngine:
         }
 
     def _scenario_alpha(
-        self, top1, top2, by_proba, paris_dispo, budget, sim=None, idx_by_num=None
+        self, top1, top2, by_proba, paris_dispo, budget, sim=None, idx_by_num=None,
+        nb_partants: Optional[int] = None,
     ) -> Optional[dict]:
         """
         ALPHA — Sécurité absolue.
@@ -237,20 +232,29 @@ class BetPortfolioEngine:
         paris = []
         cout_total = 0.0
 
-        # Simple Placé top-1
+        # Simple Placé top-1 — dimensionné sur SON pari : proba de PLACE × rapport
+        # PLACÉ (CORRECTIF 2026-10-07). Avant : EV et cote du pari GAGNANT (cote ×8
+        # pour un placé qui en paie ×2) → mise sans rapport avec le risque, et
+        # plancher 1,50 € même quand l'EV était nulle ou négative.
         if top1.get("proba_top3", 0) >= 0.45:
-            cote = float(top1.get("cote_pmu") or 3.0)
-            mise = min(_kelly(top1.get("ev_max", 0), cote, budget, fraction=0.4), budget * 0.15)
-            mise = max(mise, MISE_MIN["Simple Placé"])
-            paris.append({
-                "type": "Simple Placé",
-                "chevaux": [_cheval(top1)],
-                "mise": round(mise, 2),
-                "ev": round(top1.get("ev_max", 0), 3),
-                "proba": round(top1.get("proba_top3", 0), 3),
-                "explication": f"N°{top1['numero']} {top1['nom']} — {top1.get('proba_top3',0)*100:.0f}% top-3",
-            })
-            cout_total += mise
+            p_place = float(top1.get("proba_top3", 0))
+            rapport_pl = _rapport_place(top1, nb_partants)
+            ev_place = (p_place * rapport_pl - 1.0) if rapport_pl else 0.0
+            mise = 0.0
+            if rapport_pl:
+                mise = min(_kelly(ev_place, rapport_pl, budget, fraction=0.4), budget * 0.15)
+            if mise > 0:   # EV ≤ 0 → pas de Simple Placé (on ne force plus 1,50 €)
+                mise = max(mise, MISE_MIN["Simple Placé"])
+                paris.append({
+                    "type": "Simple Placé",
+                    "chevaux": [_cheval(top1)],
+                    "mise": round(mise, 2),
+                    "ev": round(ev_place, 3),
+                    "proba": round(p_place, 3),
+                    "rapport_place_estime": round(rapport_pl, 2),
+                    "explication": f"N°{top1['numero']} {top1['nom']} — {p_place*100:.0f}% top-3",
+                })
+                cout_total += mise
 
         # Couplé Placé top1+top2 si disponible
         if top2 and "Couplé Placé" in paris_dispo and top2.get("proba_top3", 0) >= 0.40:
@@ -310,6 +314,8 @@ class BetPortfolioEngine:
         best = vbs_qual[0]
         cote = float(best.get("cote_pmu") or 5.0)
         mise = min(_kelly(best.get("ev_max", 0), cote, budget, fraction=0.5), budget * 0.12)
+        if mise <= 0:
+            return None    # EV ≤ 0 ou cote invalide : pas de mise (cf. _kelly)
         mise = max(mise, MISE_MIN["Simple Gagnant"])
         paris.append({
             "type": "Simple Gagnant",
@@ -809,11 +815,46 @@ def _cheval(p: dict) -> dict:
 
 
 def _kelly(ev: float, cote: float, budget: float, fraction: float = 0.5) -> float:
-    # Fraction de Kelly = EV / (cote − 1), pas EV / cote.
+    """Mise Kelly fractionnaire. Fraction de Kelly = EV / (cote − 1), pas EV / cote.
+
+    EV ≤ 0 (ou cote ≤ 1) → 0.0 = PAS DE PARI. Avant (2026-10-07) : 1,50 € renvoyés
+    quand même — Kelly dit « ne pas jouer » et on jouait le minimum. L'appelant
+    doit tester `> 0` avant d'appliquer le plancher PMU."""
     if ev <= 0 or cote <= 1.0:
-        return MISE_MIN.get("Simple Gagnant", 1.50)
+        return 0.0
     mise = (ev * budget / (cote - 1.0)) * fraction
     return max(mise, 1.50)
+
+
+def _rapport_place(p: dict, nb_partants: Optional[int] = None) -> Optional[float]:
+    """Rapport Simple Placé du cheval pour dimensionner une mise.
+
+    1. Rapport/cote PLACÉ fourni par l'appelant (`rapport_place` / `cote_place`).
+    2. Sinon estimation par le pool placé : proba marché de victoire
+       TRJ_SG / cote_gagnant, convertie en proba de place par la même règle que
+       `_p1` (top-3 ≈ top-1 / _P1_FROM_P3), puis rapport ≈ TRJ_SP / q_place,
+       plancher 1,05 (le PMU ne paie jamais moins). Une ESTIMATION de
+       dimensionnement, jamais utilisée pour régler un pari.
+    None si aucune cote exploitable."""
+    for cle in ("rapport_place", "cote_place"):
+        v = p.get(cle)
+        try:
+            if v is not None and float(v) > 1.0:
+                return float(v)
+        except (TypeError, ValueError):
+            pass
+    try:
+        cote = float(p.get("cote_pmu") or 0)
+    except (TypeError, ValueError):
+        return None
+    if cote <= 1.0:
+        return None
+    p_win_marche = TRJ["Simple Gagnant"] / cote
+    q_place = min(0.95, p_win_marche / _P1_FROM_P3)
+    if nb_partants is not None and nb_partants < 8:
+        # 2 places payées (4-7 partants) : top-2 ≈ 2/3 du top-3.
+        q_place = min(0.95, q_place * 2.0 / 3.0)
+    return max(1.05, TRJ["Simple Placé"] / q_place)
 
 
 def _kelly_outsider(force_signal: float, cote: float, budget: float) -> float:
@@ -1022,7 +1063,8 @@ def dutching_calculator(
     target_profit: Optional[float] = None,
 ) -> dict:
     """
-    Calcule les mises pour un Dutch bet (garantir un gain fixe quel que soit le gagnant).
+    Calcule les mises d'un Dutch : répartir le budget pour que le RETOUR soit le
+    même quel que soit celui de NOS chevaux qui gagne.
 
     selections : [{numero, nom, cote, proba}]
     budget : budget total à répartir
@@ -1030,9 +1072,18 @@ def dutching_calculator(
 
     Formule Dutch :
     mise_i = budget × (1/cote_i) / sum(1/cote_j for j)
-    Garantit un retour = budget × 1 / (sum of implied probas inverse)
+    → retour identique = budget / sum(1/cote_j) SI l'un des chevaux gagne.
 
-    Intéressant quand la somme des probas implicites < 0.85 (value global).
+    CORRECTIF 2026-10-07 — rien n'est GARANTI :
+      • si aucun des chevaux sélectionnés ne gagne, toute la mise est perdue ;
+      • au pari mutuel, la cote affichée n'est pas le rapport payé : le rapport
+        définitif n'est connu qu'après la course (il bouge avec les mises).
+    Une somme de probas implicites < 1 sur un SOUS-ENSEMBLE du champ n'est donc
+    pas une « valeur » : c'est juste qu'on ne couvre pas tous les partants.
+    `is_profitable` repose désormais sur l'ESPÉRANCE avec les probas du modèle :
+    P(un des chevaux gagne) × retour − mise > 0. Les clés `*_garanti` restent
+    pour compatibilité d'affichage mais valent « si l'un des chevaux gagne, aux
+    cotes actuelles » (cf. `retour_si_un_gagne`).
     """
     if not selections:
         return {}
@@ -1041,10 +1092,8 @@ def dutching_calculator(
     probas_impl = [1.0 / max(c, 1.01) for c in cotes]
     sum_probas = sum(probas_impl)
 
-    # Vérifier si le Dutch est profitable
-    # sum_probas < 1 = value (bookmakers en désavantage sur ce sous-ensemble)
-    dutch_value = 1.0 / sum_probas  # retour garanti pour chaque euro misé
-    is_profitable = dutch_value > 1.0
+    # Multiplicateur du retour SI l'un des chevaux gagne, aux cotes actuelles.
+    dutch_value = 1.0 / sum_probas
 
     # Calculer les mises
     mises = []
@@ -1063,19 +1112,43 @@ def dutching_calculator(
         })
         total_cost += mise
 
-    profit_garanti = total_cost * dutch_value - total_cost
+    retour_si_un_gagne = total_cost * dutch_value
+    profit_si_un_gagne = retour_si_un_gagne - total_cost
+
+    # Proba (modèle) qu'au moins un des chevaux gagne : les victoires sont
+    # mutuellement exclusives → somme des probas de victoire, bornée à 1.
+    probas_modele = [s.get("proba") for s in selections]
+    if all(p is not None for p in probas_modele):
+        proba_un_gagne = min(1.0, sum(max(0.0, float(p)) for p in probas_modele))
+        esperance = proba_un_gagne * retour_si_un_gagne - total_cost
+        is_profitable = esperance > 0 and dutch_value > 1.0
+    else:
+        proba_un_gagne = None
+        esperance = None
+        is_profitable = False      # sans proba modèle, aucune promesse
+    roi_si_un_gagne = round(profit_si_un_gagne / total_cost * 100, 1) if total_cost else 0.0
 
     return {
         "mises": mises,
         "budget_total": round(total_cost, 2),
-        "retour_garanti": round(total_cost * dutch_value, 2),
-        "profit_garanti": round(profit_garanti, 2),
-        "roi_garanti": round(profit_garanti / total_cost * 100, 1),
+        "retour_si_un_gagne": round(retour_si_un_gagne, 2),
+        "profit_si_un_gagne": round(profit_si_un_gagne, 2),
+        "roi_si_un_gagne": roi_si_un_gagne,
+        "proba_un_gagne": round(proba_un_gagne, 3) if proba_un_gagne is not None else None,
+        "esperance": round(esperance, 2) if esperance is not None else None,
+        "perte_si_aucun_gagne": round(-total_cost, 2),
+        # Compatibilité d'affichage (le front lit encore ces clés) : NE SONT PAS des
+        # garanties — mêmes valeurs que les clés `*_si_un_gagne` ci-dessus.
+        "retour_garanti": round(retour_si_un_gagne, 2),
+        "profit_garanti": round(profit_si_un_gagne, 2),
+        "roi_garanti": roi_si_un_gagne,
         "is_profitable": is_profitable,
         "dutch_value": round(dutch_value, 3),
         "note": (
-            "✅ Dutch profitable — les cotes offrent une valeur globale" if is_profitable
-            else "⚠️ Dutch non profitable — somme des probas > 1.0"
+            ("Espérance positive selon le modèle. " if is_profitable
+             else "Espérance non positive selon le modèle. ")
+            + "Gain NON garanti : si aucun de ces chevaux ne gagne, toute la mise est "
+              "perdue, et le rapport PMU définitif peut différer de la cote affichée."
         ),
     }
 

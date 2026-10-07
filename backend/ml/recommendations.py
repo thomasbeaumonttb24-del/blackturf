@@ -24,19 +24,13 @@ MISE_MIN = {
     "Multi": 3.00,
 }
 
-# TRJ 2026
-TRJ = {
-    "Simple Gagnant": 0.8495,
-    "Simple Placé": 0.8495,
-    "Couplé Gagnant": 0.74,
-    "Couplé Placé": 0.74,
-    "Couplé Ordre": 0.74,
-    "2sur4": 0.74,
-    "Trio": 0.691,
-    "Tiercé": 0.6435,
-    "Quarté+": 0.633,
-    "Quinté+": 0.6475,
-}
+# TRJ 2026 — table de référence UNIQUE (services.pmu_paris_reference).
+from services.pmu_paris_reference import trj as _trj  # noqa: E402
+
+TRJ = {t: _trj(t) for t in (
+    "Simple Gagnant", "Simple Placé", "Couplé Gagnant", "Couplé Placé", "Couplé Ordre",
+    "2sur4", "Trio", "Tiercé", "Quarté+", "Quinté+",
+)}
 
 
 def disponibles_selon_course(nb_partants: int, est_quinte: bool, est_quarte: bool,

@@ -8,10 +8,14 @@ ROI, profit, hit-rate, drawdown max, ventilation par type.
 Objectif : PROUVER (ou réfuter) qu'une stratégie « assure du gain » sur l'historique,
 au lieu d'optimiser à l'aveugle.
 
-RÈGLE D'INTÉGRITÉ : aucun payout fabriqué. La sélection rejoue la cote disponible
-avant course, mais un pari gagnant est réglé à la cote PMU FINALE. Les paris
-dont on ne peut pas déterminer le gain réel (ex. placé sans rapport placé connu)
-sont ignorés, pas estimés.
+RÈGLE D'INTÉGRITÉ : aucun payout fabriqué. La sélection rejoue la cote PMU
+disponible avant course (jamais la meilleure cote toutes sources : on ne joue
+qu'au PMU, cf. correctif 2026-10-07), un Simple Gagnant gagnant est réglé au
+rapport officiel (à défaut à la cote PMU FINALE), un Simple Placé UNIQUEMENT au
+rapport placé officiel publié — jamais à la cote gagnant. Les paris dont on ne
+peut pas déterminer le gain réel (ex. placé sans rapport placé publié) sont
+ignorés, gagnants COMME perdants (sinon on n'exclurait que les gains → ROI biaisé
+à la baisse), pas estimés.
 """
 from __future__ import annotations
 
@@ -116,6 +120,25 @@ def arrivee_order(arrivee: dict) -> list:
 
 # Types simples réglés à la cote ; les autres sont des combinés réglés via rapports.
 _SIMPLE_TYPES = {"gagnant", "simple gagnant", "place", "placé", "simple placé", "simple place"}
+_PLACE_TYPES = {"place", "placé", "simple placé", "simple place"}
+_CLES_PLACE = ("simple_place", "e_simple_place", "simple_place_international")
+_CLES_GAGNANT = ("simple_gagnant", "e_simple_gagnant", "simple_gagnant_international")
+
+
+def rapport_officiel_simple(rapports_detail: Optional[dict], bet_type: str,
+                            numero: int) -> Optional[float]:
+    """Rapport OFFICIEL (pour 1 €) du Simple Gagnant / Placé de ce cheval, lu dans
+    `rapports_detail` (le PMU publie un rapport placé PAR cheval). None si absent."""
+    from services.bet_settlement import _place_rapport_exact
+    t = _norm_type(bet_type)
+    cles = _CLES_PLACE if t in _PLACE_TYPES else _CLES_GAGNANT
+    return _place_rapport_exact(rapports_detail, cles, [int(numero)])
+
+
+def places_officielles(rapports_detail: Optional[dict]) -> Optional[set]:
+    """Chevaux payés placés d'après le détail officiel ; None si non publié."""
+    from services.bet_settlement import _places_publiees
+    return _places_publiees(rapports_detail)
 
 
 def _norm_type(t: str) -> str:
@@ -202,17 +225,27 @@ def settle_bet(
     arrivee: dict,
     nb_partants: Optional[int] = None,
     rapports: Optional[dict] = None,
+    rapports_detail: Optional[dict] = None,
 ) -> Optional[SettledBet]:
     """
     Règle un pari contre l'arrivée réelle.
 
-    Simple (gagnant/placé) → payout = stake × cote réelle.
+    Simple (gagnant/placé) → payout = stake × rapport OFFICIEL du cheval quand
+    `rapports_detail` le publie ; sinon stake × `bet.cote` (cote/rapport de
+    règlement fourni par l'appelant — pour un placé, ce doit être un rapport
+    PLACÉ : `run_backtest` n'y met jamais la cote gagnant).
     Combiné → payout = stake × rapport PMU réel (rapports par €1).
 
     Retourne None si non réglable sans estimation (type inconnu, ou combiné
     gagnant sans rapport connu) — on n'invente jamais un gain.
     """
-    won = bet_won(bet.type, bet.numeros, arrivee, nb_partants)
+    t = _norm_type(bet.type)
+    placees = places_officielles(rapports_detail) if t in _PLACE_TYPES else None
+    if placees is not None:
+        # Liste officielle des placés (ex æquo, retirés compris) : elle fait foi.
+        won = int(bet.numeros[0]) in placees
+    else:
+        won = bet_won(bet.type, bet.numeros, arrivee, nb_partants)
     if won is None:
         return None  # type non supporté
 
@@ -220,7 +253,14 @@ def settle_bet(
         return SettledBet(bet=bet, won=False, payout=0.0, profit=round(-bet.stake, 2))
 
     # Gagnant : déterminer le payout réel
-    if _norm_type(bet.type) in _SIMPLE_TYPES:
+    if t in _SIMPLE_TYPES:
+        officiel = rapport_officiel_simple(rapports_detail, bet.type, bet.numeros[0])
+        if officiel is not None and officiel > 0:
+            payout = round(bet.stake * officiel, 2)
+            return SettledBet(bet=bet, won=True, payout=payout,
+                              profit=round(payout - bet.stake, 2))
+        if rapports_detail and t in _PLACE_TYPES:
+            return None  # détail publié mais pas ce cheval → non réglable
         if bet.cote <= 1.0:
             return None  # pas de cote réelle → non réglable
         payout = round(bet.stake * bet.cote, 2)
@@ -296,7 +336,11 @@ def value_bet_strategy(
 ) -> list:
     """
     Pour chaque partant, détecte un value bet (EV>ev_min) et génère un pari GAGNANT
-    misé au critère de Kelly fractionné, à la MEILLEURE cote disponible.
+    misé au critère de Kelly fractionné, à la cote PMU (seul opérateur joué).
+
+    CORRECTIF 2026-10-07 : la sélection prenait la MEILLEURE cote toutes sources
+    (Geny, Betclic, Betfair…) alors que le pari est payé au PMU → EV gonflée,
+    stratégie « rentable » sur le papier et pas au guichet.
 
     partants : liste de dicts {course_id, numero, proba_top3, cotes:{source:cote},
                cotes_history?: list}.
@@ -307,31 +351,25 @@ def value_bet_strategy(
 
     bets = []
     for p in partants:
-        cotes = {k: v for k, v in (p.get("cotes") or {}).items() if v and v > 1.0}
-        if not cotes:
+        cote_pmu = (p.get("cotes") or {}).get("pmu")
+        if not cote_pmu or cote_pmu <= 1.0:
             continue
+        cote_pmu = float(cote_pmu)
         # Value bet GAGNANT → P(victoire). Si absente, estimer depuis proba_top3
         # (proba placé) et la taille du champ, cohérent avec la prod (proba_t1).
         vb = detect_value_bet(
             proba_top1=_p_win(p, nb_partants),
-            cote_pmu=cotes.get("pmu"),
-            cote_geny=cotes.get("geny"),
-            cote_bzh=cotes.get("bzh"),
-            cote_winamax=cotes.get("winamax"),
-            cote_betclic=cotes.get("betclic"),
-            cote_unibet=cotes.get("unibet"),
-            cote_betfair=cotes.get("betfair"),
+            cote_pmu=cote_pmu,
             cotes_history=p.get("cotes_history"),
         )
         if not vb or vb["ev_max"] <= ev_min:
             continue
-        best_cote = max(cotes.values())
-        stake = calculer_mise_kelly(vb["ev_max"], best_cote, bankroll, fraction=kelly_fraction)
+        stake = calculer_mise_kelly(vb["ev_max"], cote_pmu, bankroll, fraction=kelly_fraction)
         if stake <= 0:
             continue
         bets.append(Bet(
             course_id=p["course_id"], numero=p["numero"], type="gagnant",
-            stake=stake, cote=best_cote,
+            stake=stake, cote=cote_pmu,
             meta={"ev": vb["ev_max"], "niveau": vb["niveau"], "source": vb["meilleure_source"]},
         ))
     return bets
@@ -362,26 +400,24 @@ def portfolio_strategy(
     predictions = []
     cote_by_num = {}
     for p in partants:
-        cotes = {k: v for k, v in (p.get("cotes") or {}).items() if v and v > 1.0}
-        if not cotes:
+        # Cote PMU UNIQUEMENT (correctif 2026-10-07, cf. value_bet_strategy).
+        cote_pmu = (p.get("cotes") or {}).get("pmu")
+        if not cote_pmu or cote_pmu <= 1.0:
             continue
-        best_cote = max(cotes.values())
-        cote_by_num[p["numero"]] = best_cote
+        cote_pmu = float(cote_pmu)
+        cote_by_num[p["numero"]] = cote_pmu
         proba3 = p["proba_top3"]
-        vb = detect_value_bet(
-            proba_top1=_p_win(p, nb_partants), cote_pmu=cotes.get("pmu"), cote_geny=cotes.get("geny"),
-            cote_bzh=cotes.get("bzh"), cote_winamax=cotes.get("winamax"),
-            cote_betclic=cotes.get("betclic"), cote_unibet=cotes.get("unibet"),
-            cote_betfair=cotes.get("betfair"),
-        )
+        p1 = _p_win(p, nb_partants)
+        vb = detect_value_bet(proba_top1=p1, cote_pmu=cote_pmu)
         predictions.append({
             "participation_id": f"{p['course_id']}-{p['numero']}",
             "numero": p["numero"],
             "nom": p.get("nom") or f"N{p['numero']}",
             "proba_top3": proba3,
-            "proba_top1": _p_win(p, nb_partants),
-            "cote_pmu": cotes.get("pmu") or best_cote,
-            "ev_max": (vb["ev_max"] if vb else calculer_ev(best_cote, proba3)),
+            "proba_top1": p1,
+            "cote_pmu": cote_pmu,
+            # EV GAGNANT = P(victoire) × cote − 1 (pas la proba placé × cote gagnant).
+            "ev_max": (vb["ev_max"] if vb else calculer_ev(cote_pmu, p1)),
             "niveau_vb": (vb["niveau"] if vb else 0),
         })
     if not predictions:
@@ -406,7 +442,11 @@ def portfolio_strategy(
             mise = float(pari.get("mise") or 0.0)
             if mise <= 0:
                 continue
-            cote = cote_by_num.get(numeros[0], 0.0) if _norm_type(pari["type"]) in _SIMPLE_TYPES else 0.0
+            # Seul le Simple GAGNANT porte la cote gagnant ; un placé sera réglé au
+            # rapport placé officiel (run_backtest), jamais à la cote gagnant.
+            _t = _norm_type(pari["type"])
+            cote = (cote_by_num.get(numeros[0], 0.0)
+                    if _t in _SIMPLE_TYPES and _t not in _PLACE_TYPES else 0.0)
             bets.append(Bet(
                 course_id=partants[0]["course_id"], numero=numeros[0],
                 type=pari["type"], stake=mise, cote=cote, numeros=numeros,
@@ -517,14 +557,26 @@ async def run_backtest(
         }, bankroll=bankroll, **strategy_kwargs)
         nb_courses_joues += 1
         final_by_num = {int(p["numero"]): p.get("cote_finale") for p in partants}
+        rapports_detail = getattr(resultat, "rapports_detail", None) or None
         for bet in bets:
-            # La cote figée/live historique décide si le pari aurait été pris. Le
-            # paiement, lui, suit la cote PMU finale conformément au résultat réel.
-            if _norm_type(bet.type) in _SIMPLE_TYPES:
+            t = _norm_type(bet.type)
+            # La cote PMU figée/live historique décide si le pari aurait été pris.
+            if t in _PLACE_TYPES:
+                # Simple Placé : rapport placé OFFICIEL ou rien. Avant (2026-10-07)
+                # il était payé à la cote GAGNANT finale (×8 au lieu de ×2) — le
+                # backtest des placés était faux d'un facteur 3-4. Sans détail
+                # placé publié, le pari est EXCLU (gagnant comme perdant).
+                if places_officielles(rapports_detail) is None:
+                    continue
+                bet.cote = 0.0
+            elif t in _SIMPLE_TYPES:
+                # Simple Gagnant : rapport officiel si publié (settle_bet), sinon
+                # cote PMU finale.
                 final = final_by_num.get(int(bet.numero))
                 if final and final > 1.0:
                     bet.cote = float(final)
-            sb = settle_bet(bet, arrivee, nb_partants=nb_reels, rapports=resultat.rapports)
+            sb = settle_bet(bet, arrivee, nb_partants=nb_reels, rapports=resultat.rapports,
+                            rapports_detail=rapports_detail)
             if sb is not None:   # None = non réglable (jamais estimé)
                 all_settled.append(sb)
 
