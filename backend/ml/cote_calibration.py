@@ -11,6 +11,17 @@ Principe (intégrité) :
   fait pas surréagir. Aucune valeur inventée : si pas de données → facteur 1.0.
 - Recalculé chaque nuit depuis le dernier snapshot pré-course ⋈ résultats.
 - Stocké en table `cote_calibration` (créée inline, comme longshot_calibration).
+
+DOMAINE (correctif 2026-10-07). Avec `calib_on_raw` (actif en production), les
+facteurs `win` sont appris sur `proba_top1_raw` : la proba de victoire BRUTE du
+modèle, avant isotone, blend marché, netteté et mélange appris. Ils ne valent que
+pour cette grandeur. Ils étaient pourtant appliqués, dans
+`ml.valuebets.detect_value_bet`, à la proba SERVIE — déjà rapprochée du marché,
+donc déjà corrigée du biais favori-longshot : la même correction comptée deux
+fois, qui écrasait l'EV des cotes moyennes/hautes. `detect_value_bet` ne les
+applique donc plus qu'à une proba déclarée brute (`proba_brute=True`). Les
+facteurs restent calculés et persistés chaque nuit (lecture admin, banc de
+plans `test_bet_plan_performance` sur les mêmes bornes de cote).
 """
 from __future__ import annotations
 
@@ -20,6 +31,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 from ml.prediction_evaluation import MIN_COTE_BUCKET_OBS, MIN_COTE_REPLAYABLE_OBS
 from ml.prediction_evaluation import sans_modeles_retires
+from ml.signal_performance import sql_est_gagnant
 
 log = structlog.get_logger()
 
@@ -57,11 +69,15 @@ async def compute_cote_calibration(session: AsyncSession) -> dict:
     rows = (await session.execute(text(f"""
         SELECT COALESCE(pr.cote_figee, pa.cote_pmu) AS cote,
                {_p1c} AS p1, {_p3c} AS p3,
-               CASE WHEN (r.classement->0->>'numero')::int = pa.numero THEN 1 ELSE 0 END AS win,
-               CASE WHEN pa.numero IN (
-                    SELECT (e->>'numero')::int
-                    FROM jsonb_array_elements(r.classement) WITH ORDINALITY a(e,o)
-                    WHERE o <= 3
+               {sql_est_gagnant("pa.numero")} AS win,
+               -- Placé = `position` 1 à 3 (dead-heat compris), pas les 3 premiers
+               -- éléments du tableau, dont l'ordre n'est pas garanti.
+               CASE WHEN EXISTS (
+                    SELECT 1 FROM jsonb_array_elements(r.classement) e
+                    WHERE (e->>'position') ~ '^[0-9]+$'
+                      AND (e->>'position')::int BETWEEN 1 AND 3
+                      AND (e->>'numero') ~ '^[0-9]+$'
+                      AND (e->>'numero')::int = pa.numero
                ) THEN 1 ELSE 0 END AS top3
         FROM prediction_evaluation pr
         JOIN participations pa ON pa.participation_id = pr.participation_id

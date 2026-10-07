@@ -164,7 +164,15 @@ _cache: Optional[dict] = None
 # ──────────────────────────────────────────────────────────────────────────────
 
 def probas_marche(cotes: Sequence[float]) -> Optional[np.ndarray]:
-    """1/cote normalisée sur la course, ou None si UN partant n'a pas de cote."""
+    """1/cote normalisée sur la course, ou None si UN partant n'a pas de cote.
+
+    `cotes` doit porter les cotes RÉELLES (0, None ou NaN quand le PMU n'en publie
+    pas), jamais la cote de repli 5,0 du vecteur de features : sinon un partant
+    non coté passerait pour coté et la course pour entièrement cotée. Le service
+    (`ml.pipeline.predict_course`) lit `participations.cote_pmu` ; l'apprentissage
+    lit `cote_figee`, qui vaut NULL sans cote publiée depuis le 2026-10-07 (les
+    lignes antérieures peuvent encore porter le 5,0 de repli).
+    """
     c = np.asarray(cotes, dtype=float)
     if c.size == 0 or not np.isfinite(c).all() or (c <= 1.0).any():
         return None

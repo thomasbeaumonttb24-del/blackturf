@@ -13,7 +13,17 @@ Chaque flag reste désactivable individuellement via env (rollback ciblé) :
     BT_DEVIG_GATES=0        # exemple : désactive le dé-vig des gates value bet
 
 Restent OPT-IN (expérimentaux / dépendances externes) :
-    BT_RANKER_BLEND=1       # nécessite un modèle entraîné AVEC LGBMRanker
+    BT_RANKER_BLEND=1       # nécessite un modèle entraîné AVEC LGBMRanker — et le
+                            # ranker n'est entraîné QUE si ce drapeau est actif
+                            # au réentraînement (ml.models, 2026-10-07)
+
+VALEURS EN PRODUCTION (`docker-compose.prod.yml`, vérifié le 2026-10-07) — elles
+priment sur les défauts du code quand les deux diffèrent :
+    BT_MARKET_GATE=${BT_MARKET_GATE:-1}   # scraper, worker, scheduler (défaut code : ON)
+    BT_REFIT_FULL=${BT_REFIT_FULL:-1}     # worker seulement   (défaut code : OFF)
+    BT_RANKER_BLEND=${BT_RANKER_BLEND:-0} # scraper, worker, scheduler (défaut code : OFF)
+Toute modification d'un défaut ici doit être répercutée dans ce fichier compose
+(et dans docs/ALGO_PHASES.md), sinon la production ne la verra pas.
 
 Usage :
     from ml.algo_flags import FLAGS
@@ -140,7 +150,9 @@ class AlgoFlags:
     # Mélange un score LGBMRanker (lambdarank, groupé par course) dans l'ORDRE
     # d'arrivée prédit (rang_predit) UNIQUEMENT — n'affecte PAS les probas/EV
     # (calibrées). Validé offline : +~0.8pt top1 / 3118 courses holdout (non sig
-    # p~0.11), neutre top3/ndcg. Réversible. Nécessite un modèle entraîné AVEC ranker.
+    # p~0.11), neutre top3/ndcg. Réversible. Nécessite un modèle entraîné AVEC ranker,
+    # et le ranker n'est plus entraîné quand ce drapeau est coupé (2026-10-07) :
+    # l'activer = l'activer AUSSI dans le worker, puis attendre un réentraînement.
     #
     # MESURÉ EN PRODUCTION le 2026-09-16 — il DÉGRADE le classement servi : sur 1 607
     # courses figées à T-10 (17/08 → 16/09), `rang_predit` (avec ranker) contre le
@@ -196,9 +208,10 @@ class AlgoFlags:
     # (les 7 colonnes de marché portent 34 % de l'importance de v544), et il reste
     # pourtant sous elle.
     #
-    # Le code défaut à ON, mais la PRODUCTION le fixe à 0 (`docker-compose.prod.yml`,
-    # `${BT_MARKET_GATE:-0}`) : l'activer reste une décision humaine. Repli immédiat
-    # sans redéploiement : BT_MARKET_GATE=0.
+    # ACTIF par défaut, dans le code ET en production : `docker-compose.prod.yml`
+    # porte `${BT_MARKET_GATE:-1}` sur scraper, worker et scheduler (vérifié le
+    # 2026-10-07 ; l'ancien commentaire annonçait `:-0`, ce n'est plus le cas).
+    # Repli immédiat sans redéploiement : BT_MARKET_GATE=0 dans le .env.
     market_gate: bool = field(default_factory=lambda: _env_bool("BT_MARKET_GATE", True))
     # Régression d'AUC servie tolérée avant blocage (même ordre que le contrôle du
     # modèle de victoire, 0,002). Remplace `BT_MARKET_GATE_MARGIN`, qui portait sur
@@ -222,8 +235,9 @@ class AlgoFlags:
     # ── Mélange appris sur les arrivées (2026-09-16) ─────────────────────────
     # Second étage de Benter : p ∝ p̂_brut^β_modèle · q_marché^β_marché, β appris
     # chaque nuit sur les arrivées (`ml.melange_arrivees`). Remplace la proba de
-    # victoire servie — donc la cote juste, le rang affiché et les plans ; la
-    # détection des paris de valeur garde la chaîne d'avant. Mesuré hors échantillon
+    # victoire servie — donc la cote juste, le rang affiché, les plans et, depuis
+    # le 2026-10-07, la détection des paris de valeur (une seule proba de victoire,
+    # cf. ml.pipeline.predict_course). Mesuré hors échantillon
     # (1 607 courses figées à T-10) : +0,037 de log-vraisemblance du gagnant sur la
     # chaîne servie, +0,011 sur la cote seule, classement à parité.
     # ACTIF PAR DÉFAUT et sans effet tant que le nocturne n'a rien retenu. Rollback
@@ -279,7 +293,11 @@ class AlgoFlags:
     # c'est ce refit qui est servi. Les métriques stockées restent celles du
     # hold-out. Détail et justification : ml.pipeline._modele_a_servir.
     #
-    # DÉFAUT OFF : l'activation est une décision de Thomas (P0_B_retrain_2026-09-24.md).
+    # DÉFAUT OFF DANS LE CODE, mais ACTIF EN PRODUCTION : `docker-compose.prod.yml`
+    # porte `BT_REFIT_FULL=${BT_REFIT_FULL:-1}` sur le worker (qui exécute le
+    # réentraînement nocturne) — décision de Thomas (P0_B_retrain_2026-09-24.md),
+    # vérifiée le 2026-10-07. Les autres conteneurs ne lisent pas ce drapeau.
+    # Repli : BT_REFIT_FULL=0 dans le .env (effet à la nuit suivante).
     refit_full: bool = field(default_factory=lambda: _env_bool("BT_REFIT_FULL", False))
     # HISTORIQUE SANS DOUBLONS (audit 2026-09-28). Une course courue en France est
     # écrite deux fois dans `historique_courses` : la ligne interne (course_id, datée

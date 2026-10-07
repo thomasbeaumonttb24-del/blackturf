@@ -14,7 +14,8 @@ import structlog
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ml.signal_performance import SIGNALS, _safe
+from ml.signal_performance import SIGNALS, _GAGNANT_PA, _SG_KEYS, _safe
+from services.bet_settlement import _place_rapport_exact
 
 log = structlog.get_logger()
 
@@ -25,6 +26,27 @@ CAP = 10.0  # plafond du gain par pari pour le ROI winsorisé (neutralise la cha
 # win_filt/ROI sont dominés par la variance (ex. 10 paris → +233% = bruit, pas un edge).
 # Règle no-fake-data : on ne clame jamais un avantage sur un échantillon ridicule.
 MIN_FILT_FOR_EDGE = 50
+
+
+def _rapport_paye(detail, numero, win: int) -> float | None:
+    """Rapport Simple Gagnant PUBLIÉ pour ce numéro (pour 1 €), si le cheval a gagné.
+
+    None quand la course n'a pas de rapport publié lisible : l'appelant retombe
+    alors sur la cote. Un perdant ne paie rien : sa valeur n'est jamais lue.
+    """
+    if not win or numero is None:
+        return None
+    if isinstance(detail, str):
+        try:
+            detail = json.loads(detail)
+        except (TypeError, ValueError):
+            return None
+    if not isinstance(detail, dict) or not any(detail.get(k) for k in _SG_KEYS):
+        return None
+    try:
+        return _place_rapport_exact(detail, _SG_KEYS, [int(numero)])
+    except (TypeError, ValueError):
+        return None
 
 
 async def compute_edge_monitor(session: AsyncSession, test_frac: float = 0.2) -> dict:
@@ -39,9 +61,22 @@ async def compute_edge_monitor(session: AsyncSession, test_frac: float = 0.2) ->
     # ce qu'on garde tient en quelques Mio. Les prédicats sont évalués une seule
     # fois par ligne au lieu de deux (train puis test), et le résultat est
     # identique au dict près, qui n'était plus lu.
-    result = await session.stream(text("""
+    #
+    # RÈGLEMENT AU RAPPORT OFFICIEL (2026-10-07). Le ROI se calculait sur la cote
+    # scrapée (`features.cote_pmu`, ou `participations.cote_pmu`) : une cote
+    # AFFICHÉE, pas le prix payé — en pari mutuel le rapport n'est arrêté qu'au
+    # départ, et la cote des features vaut 5,0 quand le PMU n'en publiait aucune.
+    # On règle désormais chaque gagnant au rapport Simple Gagnant PUBLIÉ pour son
+    # numéro (`resultats.rapports_detail`, même lecture que
+    # `signal_performance.compute_signal_performance` et `services.bet_settlement`).
+    # Repli sur la cote seulement quand la course n'a AUCUN rapport publié
+    # (historique d'avant le scraping des rapports) ; le nombre de lignes ainsi
+    # réglées est publié (`n_regle_cote`) pour que la mesure dise ce qu'elle vaut.
+    # Gagnant : `position == 1` (dead-heat compris), plus `classement->0`.
+    result = await session.stream(text(f"""
         SELECT fm.features, COALESCE((fm.features->>'cote_pmu')::float, pa.cote_pmu) AS cote_pmu,
-               CASE WHEN (r.classement->0->>'numero')::int = pa.numero THEN 1 ELSE 0 END AS win
+               {_GAGNANT_PA} AS win,
+               r.rapports_detail, pa.numero
         FROM features_ml fm
         JOIN participations pa ON pa.participation_id = fm.participation_id
         JOIN courses c ON c.course_id = pa.course_id AND c.statut = 'termine'
@@ -53,13 +88,22 @@ async def compute_edge_monitor(session: AsyncSession, test_frac: float = 0.2) ->
         ORDER BY c.date_heure
     """))
     noms = list(SIGNALS)
+    # (signaux, rapport payé pour 1 € si gagnant — sinon la cote, sans effet —, win)
     data: list[tuple[tuple[bool, ...], float, int]] = []
+    n_regle_cote = 0
     async for partition in result.partitions(2000):
-        for f, cote, win in partition:
+        for ligne in partition:
+            f, cote, win = ligne[0], ligne[1], int(ligne[2])
+            detail = ligne[3] if len(ligne) > 3 else None
+            numero = ligne[4] if len(ligne) > 4 else None
+            paye = _rapport_paye(detail, numero, win)
+            if paye is None:
+                paye = float(cote)
+                n_regle_cote += win
             ff = f if isinstance(f, dict) else json.loads(f)
             data.append((
                 tuple(_safe(SIGNALS[nom], ff) for nom in noms),
-                float(cote), int(win),
+                paye, win,
             ))
         del partition
     n = len(data)
@@ -111,6 +155,8 @@ async def compute_edge_monitor(session: AsyncSession, test_frac: float = 0.2) ->
         "conv_thr": CONV_THR, "edge_ok": edge_ok,
         # Pour l'affichage honnête : sous ce seuil, ne pas clamer « l'avantage tient ».
         "enough_filt": enough_filt, "min_filt": MIN_FILT_FOR_EDGE,
+        # Gagnants réglés à la cote scrapée faute de rapport publié (cf. plus haut).
+        "n_regle_cote": n_regle_cote,
     }
 
 

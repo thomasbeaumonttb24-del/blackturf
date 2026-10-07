@@ -194,6 +194,25 @@ def chemin_evaluation(version_num: int) -> Path:
     return MODELS_DIR / f"model_v{int(version_num):04d}_eval.pkl"
 
 
+
+def _normaliser_par_course(valeurs, groupes=None) -> np.ndarray:
+    """Normalise `valeurs` à Σ = 1 dans chaque course (`groupes`, aligné), ou sur
+    l'ensemble quand `groupes` est None. Une course de masse nulle est laissée
+    telle quelle (rien à répartir, aucune valeur inventée)."""
+    v = np.asarray(valeurs, dtype=float).copy()
+    v = np.where(np.isfinite(v) & (v > 0), v, 0.0)
+    if groupes is None:
+        s_ = float(v.sum())
+        return v / s_ if s_ > 0 else v
+    g = np.asarray(groupes)
+    out = v.copy()
+    for cle in pd.unique(g):
+        m = g == cle
+        s_ = float(v[m].sum())
+        if s_ > 0:
+            out[m] = v[m] / s_
+    return out
+
 class BlackTurfEnsemble:
     """
     Ensemble calibré XGBoost + LightGBM + CatBoost.
@@ -713,8 +732,17 @@ class BlackTurfEnsemble:
         # Optimise directement l'ORDRE d'arrivée intra-course (vs la classif top3
         # binaire). Score utilisé seulement pour le classement affiché (blend côté
         # predict, flag BT_RANKER_BLEND) — jamais pour les probas/EV calibrées.
+        #
+        # Entraîné SEULEMENT si `BT_RANKER_BLEND` est actif (2026-10-07). Son score
+        # n'est lu que par ce drapeau, coupé en production depuis la mesure du
+        # 2026-09-16 (il dégradait le classement servi, cf. ml.algo_flags) : 400
+        # arbres LambdaRank appris chaque nuit pour rien, en temps et en mémoire
+        # du worker. Réactiver le drapeau exige donc un réentraînement (déjà le
+        # cas : « nécessite un modèle entraîné AVEC ranker »).
         self.ranker = None
-        if _AF.group_split and "course_id" in X.columns and y_win is not None and len(y_win) == n_samples:
+        if not getattr(_AF, "ranker_blend", False):
+            log.info("model.ranker_skipped", reason="BT_RANKER_BLEND=0")
+        elif _AF.group_split and "course_id" in X.columns and y_win is not None and len(y_win) == n_samples:
             try:
                 import itertools
                 from lightgbm import LGBMRanker
@@ -851,10 +879,20 @@ class BlackTurfEnsemble:
         accord_l0 = np.clip(1.0 - std_l0 / mean_l0, 0.0, 1.0)
 
         # ── Plausibilité marché ───────────────────────────────────────────
+        # Compare des grandeurs de MÊME nature (2026-10-07) : `prob_implicite`
+        # (1/cote) est une proba de VICTOIRE, marge comprise. Elle était opposée à
+        # `probas`, une proba de TOP 3 — environ trois fois plus grande par
+        # construction : l'« écart au marché » était surtout l'écart entre placé
+        # et gagnant, et pénalisait d'abord les favoris. On oppose désormais la
+        # P(victoire) du modèle, normalisée par course, à la proba implicite
+        # dé-viggée (Σ = 1 par course).
         market_confidence = np.ones(len(probas))
         if "prob_implicite" in X_feat.columns:
-            prob_market = X_feat["prob_implicite"].values.astype(float)
-            ecart = np.abs(probas - prob_market)
+            groupes = X["course_id"].to_numpy() if "course_id" in X.columns else None
+            prob_market = _normaliser_par_course(
+                X_feat["prob_implicite"].values.astype(float), groupes)
+            p_win = self._proba_victoire_par_course(X, probas, groupes)
+            ecart = np.abs(p_win - prob_market)
             market_confidence = np.clip(1.0 - ecart * 2, 0.0, 1.0)
 
         confidence = 0.6 * accord_l0 + 0.4 * market_confidence
@@ -881,6 +919,26 @@ class BlackTurfEnsemble:
         mean_l0 = stack.mean(axis=1) + 1e-8
         rel_unc = np.clip(std_l0 / mean_l0, 0.0, 1.0)
         return probas, confidence, rel_unc
+
+    def _proba_victoire_par_course(self, X: pd.DataFrame, p_top3: np.ndarray,
+                                   groupes=None) -> np.ndarray:
+        """P(victoire) du modèle, normalisée Σ = 1 par course (`groupes`).
+
+        Même règle que `ml.pipeline.predict_course` : le modèle de victoire dédié
+        s'il existe, sinon l'heuristique P(top3)^1,6. Sans `groupes`, X est traité
+        comme UNE course (cas du service, une course à la fois).
+        """
+        p_win = None
+        try:
+            p_win = self.predict_win_proba(X)
+        except Exception:
+            p_win = None
+        p3 = np.clip(np.asarray(p_top3, dtype=float), 1e-6, 0.999)
+        if p_win is None or len(p_win) != len(p3) or not np.all(np.isfinite(p_win)):
+            brut = p3 ** 1.6
+        else:
+            brut = np.clip(np.asarray(p_win, dtype=float), 1e-6, 0.999)
+        return _normaliser_par_course(brut, groupes)
 
     def predict_win_proba(self, X: pd.DataFrame) -> Optional[np.ndarray]:
         """
@@ -1026,8 +1084,18 @@ class BlackTurfEnsemble:
         # Précision top-3 : pour chaque course, le top-3 IA contient-il le vrai gagnant ?
         prec_top3 = self._compute_precision_top3(X_test, probas, course_ids, y_win_test)
 
-        # ROI simulé value bets (EV > 0.05)
-        roi = self._simulate_roi(X_test, probas, y_win_test)
+        # ROI simulé value bets (EV > 0.05) — sur la P(VICTOIRE), normalisée par
+        # course : `cote_pmu` paie une victoire. `probas` est la proba de TOP 3 ;
+        # la passer ici donnait EV = cote × P(top3) − 1, environ trois fois trop
+        # haute, et un « value bet » sur presque chaque partant.
+        # Sans `course_ids`, aucune normalisation par course possible : métrique
+        # indisponible (0.0), jamais une EV calculée sur une proba non normalisée.
+        if course_ids is not None:
+            p_win_test = self._proba_victoire_par_course(
+                X_test, probas, np.asarray(course_ids))
+            roi = self._simulate_roi(X_test, p_win_test, y_win_test)
+        else:
+            roi = 0.0
 
         # ── Classement intra-course, et la cote sur le MÊME hold-out ──────────
         # `auc` ci-dessus est poolée : elle ne dit pas si le modèle sait ordonner
@@ -1120,6 +1188,10 @@ class BlackTurfEnsemble:
         affiché ; il doit être calculable ou absent, jamais approximatif.
 
         Sans `y_win` on renvoie donc 0.0 — la métrique est indisponible, pas fausse.
+
+        `probas` doit être une P(VICTOIRE) normalisée par course (cf.
+        `_proba_victoire_par_course`) : le label était corrigé, mais `_evaluate`
+        passait encore la P(top3) — même EV ×3 (corrigé le 2026-10-07).
 
         Garde-fous : on ignore les cotes > _ROI_MAX_COTE (bruit non tradeable) et on
         exige au moins _ROI_MIN_BETS paris, sinon le ROI n'est pas significatif et

@@ -239,6 +239,7 @@ def detect_value_bet(
     signal_mult: Optional[float] = None,
     field_overround: Optional[float] = None,
     ev_band_perf: Optional[dict] = None,
+    proba_brute: bool = False,
 ) -> Optional[dict]:
     """
     Détecte si un partant est un value bet — version multi-sources.
@@ -254,6 +255,13 @@ def detect_value_bet(
 
     cotes_history : liste chronologique de cotes PMU (plus récente en dernier).
     steam_move_betclic_pct : % de baisse cote Betclic depuis l'ouverture.
+
+    cote_calib / proba_brute : les facteurs par tranche de cote
+    (`ml.cote_calibration`) sont appris sur la proba BRUTE du modèle
+    (`proba_top1_raw`). Ils ne s'appliquent que si l'appelant déclare passer cette
+    grandeur (`proba_brute=True`). Sur la proba SERVIE — déjà mélangée au marché,
+    donc déjà corrigée du biais favori-longshot — ils comptaient la correction une
+    seconde fois : `cote_calib` est alors IGNORÉ (cf. correctif 2026-10-07).
     """
     # Garde-fous critiques
     if non_partant:
@@ -289,7 +297,12 @@ def detect_value_bet(
     # RÉDUIRE la proba (couper les outsiders sur-cotés = vrais faux value bets),
     # jamais l'augmenter — un boost de favori pourrait gonfler un faux VB court
     # (le sous-ensemble VB cote<4 est sur-coté, ROI réel mesuré −44%). Prudent = renta.
-    if cote_calib and cote_pmu and cote_pmu > 1:
+    #
+    # DOMAINE (2026-10-07) : facteurs appris sur `proba_top1_raw` (FLAG calib_on_raw)
+    # → appliqués UNIQUEMENT à une proba brute. La proba servie (mélange appris /
+    # blend marché) a déjà absorbé le biais favori-longshot via la cote : lui
+    # appliquer ces facteurs comptait la correction deux fois.
+    if proba_brute and cote_calib and cote_pmu and cote_pmu > 1:
         from ml.cote_calibration import apply_factor
         f = min(1.0, apply_factor(cote_pmu, cote_calib, "win"))
         proba_top1 = float(max(1e-4, min(0.99, proba_top1 * f)))
