@@ -7,6 +7,10 @@
 - `lister` : les outsiders d'une journée ou d'une course, avec leur résultat.
 - `bilan` : taux de réussite réel et plus beaux rapports sur N jours.
 
+⚠ `analyse` est un mot RÉSERVÉ de PostgreSQL (synonyme d'ANALYZE) : la colonne
+s'écrit toujours entre guillemets dans le SQL (« "analyse" »), sinon erreur de
+syntaxe — vécu au premier déploiement le 07/10/2026.
+
 Repartir de zéro (07/10/2026) : seuls les signaux portant une fiche d'analyse
 (cerveau génération 2) sont lus. Ceux de la génération 1 restent en base,
 hors du site et du bilan.
@@ -73,13 +77,13 @@ async def rafraichir_signaux(session: AsyncSession, maintenant: Optional[datetim
     for r in retenus:
         await session.execute(text("""
             INSERT INTO outsider_signaux (participation_id, course_id, numero, chance_place,
-                cote_signal, niveau, places_payees, raisons, analyse, modele_entraine_le, actif)
+                cote_signal, niveau, places_payees, raisons, "analyse", modele_entraine_le, actif)
             VALUES (:pid, :cid, :num, :chance, :cote, :niveau, :places, CAST(:raisons AS jsonb),
                     CAST(:analyse AS jsonb), :ent, true)
             ON CONFLICT (participation_id) DO UPDATE SET
                 chance_place = EXCLUDED.chance_place, cote_signal = EXCLUDED.cote_signal,
                 niveau = EXCLUDED.niveau, places_payees = EXCLUDED.places_payees,
-                raisons = EXCLUDED.raisons, analyse = EXCLUDED.analyse, modele_entraine_le = EXCLUDED.modele_entraine_le,
+                raisons = EXCLUDED.raisons, "analyse" = EXCLUDED."analyse", modele_entraine_le = EXCLUDED.modele_entraine_le,
                 actif = true, maj_at = now()
         """), {"pid": r["participation_id"], "cid": r["course_id"], "num": int(r["numero"]),
                "chance": round(float(r["chance"]), 4), "cote": float(r["cote_figee"]),
@@ -125,7 +129,7 @@ def _position(classement, numero: int) -> Optional[int]:
 
 _SQL_LISTE = """
 SELECT o.participation_id, o.course_id, o.numero, o.chance_place, o.cote_signal, o.niveau,
-       o.places_payees, o.raisons, o.analyse, o.premier_signal_at,
+       o.places_payees, o.raisons, o."analyse", o.premier_signal_at,
        c.date_heure, c.hippodrome_nom, c.discipline, c.numero_reunion, c.numero AS numero_course,
        c.nom AS nom_course, c.statut, c.est_quinte,
        ch.nom AS nom_cheval, p.cote_pmu, p.non_partant, p.casaque_image_url, j.nom AS nom_jockey,
@@ -136,7 +140,7 @@ JOIN participations p ON p.participation_id = o.participation_id
 JOIN chevaux ch ON ch.cheval_id = p.cheval_id
 LEFT JOIN jockeys j ON j.jockey_id = p.jockey_id
 LEFT JOIN resultats r ON r.course_id = o.course_id
-WHERE o.actif AND o.analyse <> '{{}}'::jsonb AND {filtre}
+WHERE o.actif AND o."analyse" <> '{{}}'::jsonb AND {filtre}
 ORDER BY c.date_heure, o.chance_place DESC
 """
 

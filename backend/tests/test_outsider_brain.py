@@ -150,3 +150,15 @@ def test_raisons_chiffrees_et_classement_sur_les_vrais_partants():
     assert modele["detail"] == "3e sur 12"
     # modèle derrière son rang de cote : pas de raison « modèle »
     assert ob._phrase("modele", row.copy().replace({3: 10}), sens) is None
+
+
+def test_colonne_analyse_toujours_entre_guillemets():
+    """`analyse` est un mot réservé de PostgreSQL : non cité, toute requête plante
+    (premier déploiement du 07/10/2026 : registre jamais écrit, page vide)."""
+    import inspect
+    import re
+    from services import outsiders as so
+    src = so._SQL_LISTE + inspect.getsource(so.rafraichir_signaux)
+    sql = "\n".join(l for l in src.splitlines() if not l.strip().startswith("#"))
+    nus = re.findall(r'(?<![":\w])analyse(?![":\w])', sql)
+    assert nus == [], f"« analyse » non cité dans le SQL : {len(nus)} occurrence(s)"
