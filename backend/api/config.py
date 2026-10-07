@@ -80,6 +80,13 @@ class Settings(BaseSettings):
     resend_webhook_secret: str = ""
     email_from: str = "noreply@blackturf.fr"
     email_from_name: str = "BlackTurf"
+    # Secours SMTP quand Resend est à court de quota (ex. Brevo gratuit :
+    # smtp-relay.brevo.com:587, 300 mails/jour). Vide = pas de secours.
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
+    smtp_from: str = ""   # expéditeur validé chez le fournisseur ; défaut = email_from
     openweather_api_key: str = ""
 
     # IndexNow : signale à Bing, Yandex, Naver et Seznam qu'une URL vient de changer.
