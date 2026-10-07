@@ -2011,6 +2011,14 @@ async def _run_nightly_retraining_unlocked() -> None:
         log.info("pipeline.modele_technique_done",
                  **{k: v for k, v in _mt_out.items() if k in (
                      "status", "retenu", "placement_retenu", "train_fin", "n_lignes")})
+    # CERVEAU DES OUTSIDERS — chance de place des cotes ≥ 15, jugé sur les 14
+    # derniers jours jamais vus (ml.outsider_brain). Léger (~20 k lignes).
+    _gc.collect()
+    async with etape(AsyncSessionLocal, "outsider_brain"):
+        from ml.outsider_brain import entrainer_et_valider as _ob_entrainer
+        _ob_out = await _ob_entrainer()
+        log.info("pipeline.outsider_brain_done",
+                 **{k: v for k, v in _ob_out.items() if not isinstance(v, dict)})
 
 
 async def _do_retraining(mois: int, label: str) -> dict:

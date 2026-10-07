@@ -28,6 +28,7 @@ const R = RUBRIQUES;
 const NAV_LINKS_PUBLIC: NavLink[] = [
   R.coursesDuJour,
   R.quinte,
+  R.outsiders,
   R.resultats,
   { ...R.parisDeValeur, prive: true },
   R.performances,
@@ -41,6 +42,7 @@ const NAV_LINKS_AUTH: NavLink[] = [
   { ...R.monEspace, icon: LayoutDashboard, prive: true },
   R.coursesDuJour,
   R.quinte,
+  R.outsiders,
   R.resultats,
   { ...R.parisDeValeur, prive: true },
   R.performances,
@@ -232,6 +234,7 @@ export function Navbar() {
               deux liens, 12 px avant les icônes). En dessous, le menu replié les porte. */}
           <div className="hidden xl:flex items-center gap-1">
             {(user ? NAV_LINKS_AUTH : NAV_LINKS_PUBLIC).map((link) => {
+              const libellesLongs = !essai && !user;
               const Icon = (link as { icon?: LucideIcon }).icon;
               return (
                 <Link
@@ -247,14 +250,18 @@ export function Navbar() {
                       : "text-gray-600 hover:bg-[#f5f6f2] hover:text-[#17231f]"
                   )}
                 >
-                  {Icon && <Icon className={cn("hidden h-3.5 w-3.5", !essai && "2xl:block")} />}
+                  {Icon && <Icon className={cn("hidden h-3.5 w-3.5", libellesLongs && "2xl:block")} />}
                   {/* Forme courte (celle de la barre du bas sur téléphone) tant que la
                       place manque, nom complet à partir de `2xl`. Dans l'ancien
                       conteneur de 1 216 px, les noms complets s'écrasaient les uns sur
                       les autres (constaté le 2026-10-01) ; avec 1 536 px de barre, il
-                      reste ~50 px entre chaque groupe, quel que soit le compte. */}
-                  <span className={cn(!essai && "2xl:hidden")}>{link.court}</span>
-                  {!essai && <span className="hidden 2xl:inline">{link.label}</span>}
+                      reste ~50 px entre chaque groupe, quel que soit le compte.
+                      Compte connecté : formes courtes à toutes les largeurs. Avec le
+                      lien « Outsiders » (07/10/2026), ses neuf noms complets ne tiennent
+                      plus dans la barre (« Défi du mois » passait sous la loupe de
+                      1 536 à 1 920 px, mesuré) ; le nom complet reste dans `title`. */}
+                  <span className={cn(libellesLongs && "2xl:hidden")}>{link.court}</span>
+                  {libellesLongs && <span className="hidden 2xl:inline">{link.label}</span>}
                 </Link>
               );
             })}

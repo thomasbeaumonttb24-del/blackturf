@@ -735,6 +735,35 @@ async def job_track_record_a_jour() -> None:
         log.warning("jobs.track_record_a_jour.failed", err=str(e)[:120])
 
 
+async def job_outsiders_signaux() -> None:
+    """Outsiders du jour (ml.outsider_brain) : registre tenu à jour jusqu'au gel T-10.
+
+    Sans cerveau en service (premier déploiement, ou fichier perdu), demande UN
+    entraînement au worker par jour au lieu d'attendre la nuit — jamais ici : le
+    scheduler est plafonné à 1 Gio."""
+    from db.database import AsyncSessionLocal
+    from ml.outsider_brain import en_service
+    from services.outsiders import rafraichir_signaux
+
+    try:
+        if en_service() is None:
+            import redis as sync_redis
+            from rq import Queue
+            from api.config import get_settings
+            from datetime import date as _date
+            r = sync_redis.from_url(get_settings().redis_url)
+            if r.set(f"ml:outsider_brain:amorce:{_date.today().isoformat()}", "1", nx=True, ex=86400):
+                Queue("ml", connection=r, default_timeout=1800).enqueue(
+                    "ml.outsider_brain.entrainer_sync", result_ttl=86400, failure_ttl=ML_FAILURE_TTL_S)
+                log.info("jobs.outsiders.amorce_entrainement")
+            return
+        async with AsyncSessionLocal() as session:
+            res = await rafraichir_signaux(session)
+        log.info("jobs.outsiders.signaux", **res)
+    except Exception as e:  # noqa: BLE001
+        log.warning("jobs.outsiders.failed", err=str(e)[:160])
+
+
 def start_scheduler() -> None:
     scheduler = get_scheduler()
 
@@ -926,6 +955,17 @@ def start_scheduler() -> None:
         id="rappel_reconduction",
         replace_existing=True,
         misfire_grace_time=6 * 3600,
+    )
+
+    # Outsiders du jour : registre recalculé toutes les 5 min, figé à T-10.
+    scheduler.add_job(
+        job_outsiders_signaux,
+        CronTrigger(hour="8-23", minute="*/5", timezone="Europe/Paris"),
+        id="outsiders_signaux",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=120,
     )
 
     # Palmarès à jour dans la minute qui suit chaque course intégrée.
