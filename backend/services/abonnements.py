@@ -260,6 +260,7 @@ async def _notifier_admin(event: SubscriptionEvent) -> None:
                  + f"<table>{corps}</table>"
                  f"<p style='color:#666;font-size:11px;'>"
                  f"Suivi complet : {settings.frontend_url}/admin</p>",
+            transactionnel=True,
         )
     except Exception as e:  # noqa: BLE001
         log.warning("abonnements.notif_admin_echouee", type=event.type,

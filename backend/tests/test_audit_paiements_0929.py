@@ -358,6 +358,25 @@ async def test_parrain_pas_credite_sur_une_difference_au_prorata(db):
         P._lien_du_filleul = orig
 
 
+async def test_rappel_reconduction_echec_envoi_retente(db, monkeypatch):
+    """send_email ne lève pas : un échec ne doit PAS être journalisé comme envoyé."""
+    from services import reconduction_annuelle as RA
+    import services.alerts as alerts
+
+    async def _echec(**kw):
+        return alerts.ResultatEnvoi(False, "tous fournisseurs en échec")
+    monkeypatch.setattr(alerts, "send_email", _echec)
+    maintenant = datetime.now(timezone.utc)
+    u = await _user(db, plan="expert", stripe_customer_id="cus_an2")
+    s = await _abo(db, u, plan="expert", statut="active", periodicite="annual")
+    s.periode_fin = maintenant + timedelta(days=40)
+    await db.commit()
+    assert await RA.envoyer_rappels(db, maintenant) == 0
+    evs = (await db.execute(select(SubscriptionEvent).where(
+        SubscriptionEvent.type == "rappel_reconduction"))).scalars().all()
+    assert evs == []  # rien de journalisé : le rappel sera retenté le lendemain
+
+
 # ── 9. Abonnement annuel : rappel légal avant reconduction (L215-1), une fois
 async def test_rappel_reconduction_annuel_une_seule_fois(db, monkeypatch):
     from services import reconduction_annuelle as RA
@@ -365,6 +384,7 @@ async def test_rappel_reconduction_annuel_une_seule_fois(db, monkeypatch):
 
     async def _email(**kw):
         envois.append(kw["to"])
+        return alerts.ResultatEnvoi(True)
     import services.alerts as alerts
     monkeypatch.setattr(alerts, "send_email", _email)
     maintenant = datetime.now(timezone.utc)

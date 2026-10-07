@@ -185,8 +185,14 @@ async def send_email(
         if res:
             return res
         erreurs.append(f"{nom}: {res.erreur}")
-        if not _refus_explicite(res):
+        # Mail vital : un doublon (deux liens de confirmation) est sans gravité,
+        # un mail perdu bloque l'inscription ou le paiement. On essaie donc le
+        # fournisseur suivant même quand l'échec est ambigu.
+        if not _refus_explicite(res) and not transactionnel:
             break
+    if erreurs:
+        log.error("alerts.email.tous_echoues", to=masquer_email(to),
+                  transactionnel=transactionnel, erreurs=" | ".join(erreurs)[:400])
     return ResultatEnvoi(False, (" | ".join(erreurs) or "aucun fournisseur disponible")[:400])
 
 

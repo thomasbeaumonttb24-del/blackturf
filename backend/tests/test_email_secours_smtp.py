@@ -77,11 +77,11 @@ async def test_refus_brevo_passe_a_mailjet(env):
 
 
 @pytest.mark.asyncio
-async def test_delai_ambigu_ne_double_pas(env):
+async def test_delai_ambigu_ne_double_pas_un_mail_de_masse(env):
     appels, reponses = env
-    reponses["resend"] = httpx.ReadTimeout("t")
-    r = await alerts.send_email("a@b.fr", "s", "<p>x</p>", transactionnel=True)
-    assert not r and appels == ["resend"]
+    reponses["brevo.test"] = alerts.ResultatEnvoi(False, "SMTP TimeoutError: t")
+    r = await alerts.send_email("a@b.fr", "s", "<p>x</p>")
+    assert not r and appels == ["brevo.test"]
 
 
 @pytest.mark.asyncio
@@ -155,3 +155,21 @@ async def test_refus_quota_met_en_pause_mais_pas_le_debit(monkeypatch):
     _faux_smtp(monkeypatch, "envoi", smtplib.SMTPDataError(554, b"daily quota exceeded"))
     r = await alerts._envoi_smtp("a@b.fr", "s", "<p>x</p>", None, unsubscribe_url=None, relais=_RELAIS)
     assert alerts._refus_explicite(r) and alerts._en_pause("smtp:h")
+
+
+@pytest.mark.asyncio
+async def test_mail_vital_delai_ambigu_tente_le_suivant(env):
+    # Inscription/paiement : mieux vaut un doublon qu'un mail perdu.
+    appels, reponses = env
+    reponses["resend"] = httpx.ReadTimeout("t")
+    r = await alerts.send_email("a@b.fr", "s", "<p>x</p>", transactionnel=True)
+    assert r and appels == ["resend", "brevo.test"]
+
+
+@pytest.mark.asyncio
+async def test_mail_vital_tous_fournisseurs_essayes(env):
+    appels, reponses = env
+    reponses["resend"] = _Resp(500, "boom")
+    reponses["brevo.test"] = alerts.ResultatEnvoi(False, "SMTP TimeoutError: t")
+    r = await alerts.send_email("a@b.fr", "s", "<p>x</p>", transactionnel=True)
+    assert r and appels == ["resend", "brevo.test", "mailjet.test"]

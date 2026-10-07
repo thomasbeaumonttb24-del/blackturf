@@ -1428,6 +1428,7 @@ async def _handle_subscription_created(sub: dict, db: AsyncSession):
                 html=f"<p>Nouvel abonnement {sub.get('id')} alors que "
                      f"{', '.join(d.stripe_subscription_id or '?' for d in deja)} court déjà. "
                      f"À vérifier (double prélèvement possible).</p>",
+                transactionnel=True,
             )
         except Exception as e:  # noqa: BLE001
             log.warning("stripe.alerte_doublon_echouee", error=str(e)[:120])
@@ -1801,6 +1802,7 @@ async def _handle_payment_succeeded(invoice: dict, db: AsyncSession):
                 html=f"<p>{montant / 100:.2f} € encaissés (facture {invoice.get('id')}) sur "
                      f"l'abonnement clos {sub_id}. Accès NON rouvert : à rembourser ou "
                      f"réabonner à la main.</p>",
+                transactionnel=True,
             )
         except Exception as e:  # noqa: BLE001
             log.warning("stripe.alerte_paiement_clos_echouee", error=str(e)[:120])

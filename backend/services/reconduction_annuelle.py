@@ -60,11 +60,17 @@ async def envoyer_rappels(db: AsyncSession, maintenant: datetime | None = None) 
         montant = PRIX_ANNUEL_CENTS.get(sub.plan, 0)
         html, texte = rappel_reconduction(user.prenom, sub.plan, fin, montant)
         try:
-            await send_email(to=user.email,
-                             subject="BlackTurf — Votre abonnement annuel arrive à échéance",
-                             html=html, text=texte)
+            envoi = await send_email(to=user.email,
+                                     subject="BlackTurf — Votre abonnement annuel arrive à échéance",
+                                     html=html, text=texte, transactionnel=True)
         except Exception as e:  # noqa: BLE001 — retenté le lendemain (fenêtre de 14 jours)
             log.error("reconduction.envoi_echoue", email=masquer_email(user.email), error=str(e)[:150])
+            continue
+        # send_email ne lève pas : un échec revient en valeur fausse. Sans ce test,
+        # le préavis (obligatoire) était journalisé « envoyé » et jamais retenté.
+        if not envoi:
+            log.error("reconduction.envoi_echoue", email=masquer_email(user.email),
+                      error=(getattr(envoi, "erreur", None) or "")[:150])
             continue
         await journaliser(db, "rappel_reconduction", user, sub, notifier=False,
                           montant_cents=montant,
