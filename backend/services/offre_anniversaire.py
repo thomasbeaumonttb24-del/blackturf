@@ -144,7 +144,8 @@ def assurer_coupon() -> str:
         "percent_off": POURCENT,
         "duration": "once",
         "redeem_by": int(FIN.timestamp()),
-        "name": f"Anniversaire BlackTurf : −{POURCENT} % le 1er mois",
+        # Stripe : 40 caractères au plus (affiché sur la page de paiement).
+        "name": f"Anniversaire BlackTurf −{POURCENT} %",
         "metadata": {"app": "blackturf", "offre": "anniversaire"},
     }
     if produits:
