@@ -2000,6 +2000,11 @@ async def get_mise_plan(
         except Exception:
             live_cotes = {}
 
+    # Détecteur d'outsiders (registre figé à T-10) : entre dans l'appui des signaux
+    # du plan (services.appui_signaux) — même source que le plan figé du système.
+    from services.appui_signaux import charger_outsiders
+    outsiders = await charger_outsiders(db, course_id)
+
     preds = []
     for pred, part, cheval in rows:
         vb = vbs.get(pred.participation_id)
@@ -2015,6 +2020,7 @@ async def get_mise_plan(
             "cote_pmu": cote,
             "non_partant": part.non_partant,
             "value_bet": {"ev_max": vb.ev_max, "niveau": vb.niveau} if vb else None,
+            "outsider": outsiders.get(int(part.numero)),
         })
 
     # Drapeaux de disponibilité RÉELS (couplé/trio à l'ordre si champ réduit, etc.).

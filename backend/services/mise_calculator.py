@@ -152,6 +152,38 @@ def _cout_minimum_pmu(type_pari: str) -> float:
         return 0.0
 
 
+def _cout_ticket_pmu(c: dict) -> float:
+    """Prix guichet du ticket TEL QUE CONSEILLÉ (nombre de chevaux compris).
+
+    Le 2sur4 se joue en formule combinée : N chevaux = C(N, 2) combinaisons, chacune
+    à la mise de base (3 €). Un 2sur4 à 4 chevaux coûte donc 18 €, pas 3 € — et le
+    règlement le divise bien en C(4, 2) = 6 combinaisons (services.bet_settlement).
+    Les autres types gardent le prix minimal du catalogue (Multi : forfait 3 €).
+    """
+    base = _cout_minimum_pmu(c.get("type_pari") or "")
+    n = len(c.get("chevaux") or [])
+    if _fam(c.get("type_pari") or "") == "2sur4" and n > 2:
+        return base * math.comb(n, 2)
+    return base
+
+
+def _garantir_achetabilite(selected: list[dict]) -> list[dict]:
+    """Retire les tickets dont la mise allouée n'achète pas le ticket au guichet, et
+    rend leur mise au ticket restant le plus sûr (rapport le plus bas) : le montant
+    joué reste exactement le montant du plan. Le seul ticket d'un plan n'est jamais
+    retiré (chaque course est jouée ; la gate de sélection a déjà vérifié son prix
+    contre le montant entier)."""
+    garde = [c for c in selected
+             if float(c.get("mise") or 0) + 1e-9 >= _cout_ticket_pmu(c)]
+    retires = [c for c in selected if c not in garde]
+    if not retires or not garde:
+        return selected
+    receveur = min(garde, key=lambda c: float(c.get("rapport_estime") or 0.0))
+    receveur["mise"] = float(receveur.get("mise") or 0) + sum(
+        float(c.get("mise") or 0) for c in retires)
+    return garde
+
+
 MISE_MIN = {
     "Simple Gagnant":   1.0,
     "Simple Placé":     1.0,
@@ -990,6 +1022,8 @@ def _mode_label(heat: float) -> str:
 # pas un pari à valeur établie (audit P1 : l'EV de portefeuille du champ n'est
 # pas calculée de façon fiable, le prélèvement du pool dépasse 25 %). D'où une
 # part modeste, et aucune EV affichée.
+# DEPUIS LE 2026-10-07, cette règle de part ne s'applique plus qu'au profil PRUDENT :
+# modéré et risqué jouent 10 € de Quinté+ en cinq tickets (cf. QUINTE_PROFILS_TICKETS).
 QUINTE_MISE_BASE = 2.0       # mise de base PMU du Quinté+ = mise de chaque combinaison
 QUINTE_PART_PAR_PROFIL = {"conservateur": 0.15, "equilibre": 0.20, "agressif": 0.25}
 QUINTE_PART_MAX = 0.5
@@ -1061,6 +1095,9 @@ def supplement_quinte(montant: float, profil: str, course_info: dict) -> float:
         return 0.0
     profil = profil if profil in PROFIL_CONFIG else "equilibre"
     montant_saisi = max(2, int(round(float(montant or 0))))
+    if profil in QUINTE_PROFILS_TICKETS:
+        cout = QUINTE_NB_TICKETS * QUINTE_MISE_BASE
+        return float(cout) if montant_saisi - cout < QUINTE_PRINCIPAL_MIN else 0.0
     regle = _regle_budget_quinte(montant_saisi, profil)
     return float(regle["budget"]) if regle.get("en_supplement") else 0.0
 
@@ -1139,53 +1176,229 @@ def _quinte_incertitude(preds: list[dict], sel_nums: list[int]) -> dict:
         return {}
 
 
-# Profil RISQUÉ — arbitrage produit du 2026-09-24 : cinq tickets Quinté+ DIFFÉRENTS
-# à 2 € chacun sur chaque course Quinté+, plutôt qu'un seul ticket (tendu ou champ).
-# Les cinq combinaisons sont les cinq quintés les plus probables selon le modèle,
-# choisies parmi les QUINTE_RISQUE_VIVIER premiers du classement ; chacune est un
-# ticket tendu joué dans l'ordre du classement (Ordre possible au règlement).
-QUINTE_RISQUE_NB_TICKETS = 5
-QUINTE_RISQUE_VIVIER = 8
+# Profils MODÉRÉ et RISQUÉ — arbitrage produit du 2026-10-07 : sur chaque course
+# Quinté+, 10 € de Quinté+ en CINQ tickets tendus distincts à 2 € (le modéré ne
+# jouait qu'un tendu de 2 € sur un plan de 10 €). Les deux profils ne jouent PAS
+# les mêmes chevaux :
+#   - MODÉRÉ, « plutôt probable » : les cinq quintés les plus probables, choisis
+#     parmi les QUINTE_VIVIER premiers partants. Les forces de choix sont les
+#     probas du modèle légèrement inclinées par l'appui des signaux (prix,
+#     détection, profil — services.appui_signaux) ; la chance AFFICHÉE reste
+#     celle du modèle seul ;
+#   - RISQUÉ, « tenter des coups » : chaque ticket garde au moins deux des
+#     meilleurs chevaux et prend AU MOINS UN cheval classé HORS DU TOP 8, choisi
+#     sur ses signaux (détecteur d'outsiders, écart de prix, argent qui rentre,
+#     forme…) et non sur son rang. Aucun ticket n'est un ticket du modéré, et
+#     chaque tentative sert au plus deux fois pour élargir l'éventail.
+# Coût pris sur le montant tant que le plan principal garde QUINTE_PRINCIPAL_MIN,
+# sinon ajouté (le Quinté+ est proposé à chaque fois). Le profil prudent garde son
+# ticket unique (part du montant, cf. _regle_budget_quinte).
+QUINTE_PROFILS_TICKETS = ("equilibre", "agressif")
+QUINTE_NB_TICKETS = 5
+QUINTE_VIVIER = 8
+# Rétrocompatibilité des noms (tests, scripts de rejeu).
+QUINTE_RISQUE_NB_TICKETS = QUINTE_NB_TICKETS
+QUINTE_RISQUE_VIVIER = QUINTE_VIVIER
+# Inclinaison des forces de choix par l'appui des signaux (modéré) : ±15 % au plus.
+QUINTE_INCLINAISON_APPUI = 0.15
+# Risqué : chevaux « sûrs » gardés dans chaque ticket, tentatives hors top 8.
+QUINTE_COUP_BASES = 5          # parmi les 5 meilleurs…
+QUINTE_COUP_BASES_MIN = 2      # …au moins 2 par ticket
+QUINTE_COUP_TENTATIVES = 5     # chevaux hors top 8 retenus sur leurs signaux
+QUINTE_COUP_USAGE_MAX = 2      # une tentative sert au plus deux tickets
+QUINTE_COUP_DETECTES_MAX = 2   # tickets réservés aux outsiders du détecteur
 
 
-def _combinaisons_quinte_risque(preds: list[dict]) -> Optional[dict]:
-    """Les QUINTE_RISQUE_NB_TICKETS combinaisons de 5 les plus probables selon le
-    modèle, avec probabilité et rapport estimé de chacune — mêmes forces et même
-    formule de rapport que `build_coverage_bets` (TRJ / probabilité marché)."""
+def _quinte_contexte(preds: list[dict], horse_contexts: Optional[dict] = None) -> Optional[dict]:
+    """Forces, simulations et appui des signaux d'une course Quinté+ — partagé par
+    les deux constructeurs de tickets (mêmes forces et même formule de rapport que
+    `build_coverage_bets` : TRJ / probabilité marché)."""
+    import numpy as np
+    from ml.combo_bets import (N_SIMS, _Sim, _cap_model_probas, _exposants_harville,
+                               simulate_orderings)
+    from services.appui_signaux import appui_par_cheval
+    parts = [p for p in preds if (p.get("cote_pmu") or 0) > 1.0]
+    if len(parts) < 5:
+        return None
+    p1 = np.array([max(float(p.get("proba_top1") or 0.0), 1e-4) for p in parts])
+    p1 = p1 / p1.sum()
+    cotes = np.array([float(p.get("cote_pmu")) for p in parts])
+    pm = 1.0 / np.clip(cotes, 1.01, None)
+    pm = pm / pm.sum()
+    p1 = _cap_model_probas(p1, pm, cotes)
+    exp = _exposants_harville()
+    sim = _Sim(simulate_orderings(p1, n_sims=N_SIMS, seed=12345), len(parts),
+               forces=p1, exposants=exp)
+    sim_m = _Sim(simulate_orderings(pm, n_sims=N_SIMS, seed=67890), len(parts),
+                 forces=pm, exposants=exp)
     try:
-        from itertools import combinations
+        appui = appui_par_cheval(parts, horse_contexts)
+    except Exception:  # noqa: BLE001 — sans appui : forces du modèle seules
+        appui = {}
+    score = np.array([float((appui.get(int(p["numero"])) or {}).get("score") or 0.0)
+                      for p in parts])
+    p_sel = p1 * (1.0 + QUINTE_INCLINAISON_APPUI * score)
+    p_sel = p_sel / p_sel.sum()
+    sim_sel = _Sim(simulate_orderings(p_sel, n_sims=N_SIMS, seed=12345), len(parts),
+                   forces=p_sel, exposants=exp)
+    # Rang IA = ordre de proba_top1 sur TOUS les partants (celui de la fiche).
+    rang = {int(p["numero"]): i for i, p in enumerate(
+        sorted(preds, key=lambda x: float(x.get("proba_top1") or 0.0), reverse=True), start=1)}
+    return {"parts": parts, "p1": p1, "p_sel": p_sel, "sim": sim, "sim_m": sim_m,
+            "sim_sel": sim_sel, "appui": appui, "rang": rang}
+
+
+def _ticket_quinte(ctx: dict, c: list[int], role: str) -> dict:
+    from ml.combo_bets import TRJ, _RAPPORT_MAX_JACKPOT
+    p1, parts = ctx["p1"], ctx["parts"]
+    c = sorted(c, key=lambda i: -p1[i])                  # ordre joué = rang IA
+    p_mkt = max(float(ctx["sim_m"].p_topk_exact(c, 5)), 1e-5)
+    return {
+        "numeros": [int(parts[i]["numero"]) for i in c],
+        "role": role,
+        "proba_gain": round(float(ctx["sim"].p_topk_exact(c, 5)), 4),
+        "rapport_estime": round(float(min(max(TRJ["Quinté+ Désordre"] / p_mkt, 1.1),
+                                          _RAPPORT_MAX_JACKPOT)), 1),
+    }
+
+
+def _tickets_quinte_probables(ctx: dict) -> list[list[int]]:
+    """Modéré : les cinq quintés les plus probables du vivier (indices de `parts`)."""
+    from itertools import combinations
+    import numpy as np
+    p_sel, sim_sel = ctx["p_sel"], ctx["sim_sel"]
+    vivier = [int(i) for i in np.argsort(-p_sel)[:max(5, min(QUINTE_VIVIER, len(p_sel)))]]
+    notes = sorted(((float(sim_sel.p_topk_exact(list(c), 5)), list(c))
+                    for c in combinations(vivier, 5)), key=lambda x: -x[0])
+    return [c for _, c in notes[:QUINTE_NB_TICKETS]]
+
+
+def _tickets_quinte_coups(ctx: dict, interdits: list[list[int]]) -> list[list[int]]:
+    """Risqué : cinq tickets qui tentent un coup HORS DU TOP 8, distincts du modéré.
+
+    Les tentatives sont classées sur leurs SIGNAUX (appui ∈ [-1, 1] : détection
+    d'outsider, écart de prix, argent qui rentre, profil) pondérés par leur chance
+    d'arriver dans les cinq premiers — un outsider sans aucune chance n'est pas un
+    coup, c'est un don. Sans signal (appui absent), la chance seule décide.
+    """
+    from itertools import combinations
+    import numpy as np
+    p1, p_sel, sim_sel, parts = ctx["p1"], ctx["p_sel"], ctx["sim_sel"], ctx["parts"]
+    rang, appui = ctx["rang"], ctx["appui"]
+    n = len(parts)
+    p_top5 = sim_sel.in_top5.mean(axis=0)
+
+    def _rang(i):
+        return rang.get(int(parts[i]["numero"]), 99)
+
+    def _appui(i):
+        return float((appui.get(int(parts[i]["numero"])) or {}).get("score") or 0.0)
+
+    ordre = [int(i) for i in np.argsort(-p_sel)]
+    bases = ordre[:QUINTE_COUP_BASES]
+    hors_top8 = [i for i in range(n) if _rang(i) > QUINTE_VIVIER and i not in bases]
+    if not hors_top8:
+        # Champ de 8 partants ou moins : les « coups » sont les derniers du classement.
+        hors_top8 = [i for i in ordre[QUINTE_COUP_BASES:]]
+    if not hors_top8:
+        return []
+    def _detecte(i):
+        # Composante « détecteur d'outsiders » ∈ [0, 1] : c'est LE signal dédié aux
+        # grosses cotes qui se placent, il double au plus la note d'une tentative.
+        return float(((appui.get(int(parts[i]["numero"])) or {}).get("composantes") or {})
+                     .get("outsider") or 0.0)
+
+    note_coup = {i: float(p_top5[i]) * (1.0 + _appui(i)) * (1.0 + _detecte(i))
+                 for i in hors_top8}
+    # Les outsiders repérés par le détecteur entrent d'office dans les tentatives ;
+    # le reste se départage sur la note de coup.
+    _rep = [i for i in hors_top8 if _detecte(i) > 0]
+    tentatives = list(dict.fromkeys(
+        sorted(_rep, key=lambda i: -_detecte(i))
+        + sorted(hors_top8, key=lambda i: -note_coup[i])))[:max(QUINTE_COUP_TENTATIVES,
+                                                                 len(_rep))]
+    # Pieds intermédiaires (rangs 6 à 8) absents des tickets du modéré : d'autres
+    # chevaux que lui, pas seulement d'autres combinaisons des mêmes.
+    deja = {i for t in interdits for i in t}
+    milieu = [i for i in ordre[QUINTE_COUP_BASES:] if i not in tentatives
+              and _rang(i) <= QUINTE_VIVIER and i not in deja][:2]
+    vivier = list(dict.fromkeys(bases + milieu + tentatives))
+    interdits_set = {frozenset(t) for t in interdits}
+    tset = set(tentatives)
+    bset = set(bases)
+    cands = []
+    for c in combinations(vivier, 5):
+        fc = frozenset(c)
+        if fc in interdits_set:
+            continue
+        nb_t = len(fc & tset)
+        if nb_t < 1 or nb_t > 2 or len(fc & bset) < QUINTE_COUP_BASES_MIN:
+            continue
+        p = float(sim_sel.p_topk_exact(list(c), 5))
+        # Appui moyen des tentatives du ticket : à chance comparable, on joue
+        # l'outsider que les signaux soutiennent.
+        a = sum(_appui(i) + _detecte(i) for i in fc & tset) / nb_t
+        cands.append((p * (1.0 + 0.5 * a), list(c)))
+    cands.sort(key=lambda x: -x[0])
+    usage: dict[int, int] = {}
+    choisis: list[list[int]] = []
+    # Un outsider REPÉRÉ par le détecteur dédié a toujours son ticket : c'est le
+    # signal construit pour les grosses cotes qui se placent, il ne doit pas perdre
+    # la compétition contre un outsider simplement mieux classé par le modèle
+    # général (au plus QUINTE_COUP_DETECTES_MAX tickets réservés ainsi).
+    detectes = sorted((i for i in tentatives if _detecte(i) > 0), key=lambda i: -_detecte(i))
+    for i in detectes[:QUINTE_COUP_DETECTES_MAX]:
+        meilleur = next((c for _, c in cands if i in c and c not in choisis), None)
+        if meilleur is None:
+            continue
+        choisis.append(meilleur)
+        for j in meilleur:
+            if j in tset:
+                usage[j] = usage.get(j, 0) + 1
+    for _, c in cands:
+        if len(choisis) >= QUINTE_NB_TICKETS:
+            break
+        if c in choisis:
+            continue
+        ts = [i for i in c if i in tset]
+        if any(usage.get(i, 0) >= QUINTE_COUP_USAGE_MAX for i in ts):
+            continue
+        choisis.append(c)
+        for i in ts:
+            usage[i] = usage.get(i, 0) + 1
+        if len(choisis) >= QUINTE_NB_TICKETS:
+            break
+    if len(choisis) < QUINTE_NB_TICKETS:               # éventail trop étroit : on relâche
+        for _, c in cands:
+            if c not in choisis:
+                choisis.append(c)
+            if len(choisis) >= QUINTE_NB_TICKETS:
+                break
+    return choisis
+
+
+def _combinaisons_quinte_tickets(preds: list[dict], profil: str = "agressif",
+                                 horse_contexts: Optional[dict] = None) -> Optional[dict]:
+    """Tickets Quinté+ du profil (modéré : probables ; risqué : coups hors top 8),
+    avec probabilité, rapport estimé, et les signaux qui justifient chaque cheval."""
+    try:
         import numpy as np
-        from ml.combo_bets import (N_SIMS, TRJ, _RAPPORT_MAX_JACKPOT, _Sim,
-                                   _cap_model_probas, _exposants_harville,
-                                   simulate_orderings)
-        parts = [p for p in preds if (p.get("cote_pmu") or 0) > 1.0]
-        if len(parts) < 5:
+        ctx = _quinte_contexte(preds, horse_contexts)
+        if ctx is None:
             return None
-        p1 = np.array([max(float(p.get("proba_top1") or 0.0), 1e-4) for p in parts])
-        p1 = p1 / p1.sum()
-        cotes = np.array([float(p.get("cote_pmu") or 10.0) for p in parts])
-        pm = 1.0 / np.clip(cotes, 1.01, None)
-        pm = pm / pm.sum()
-        p1 = _cap_model_probas(p1, pm, cotes)
-        exp = _exposants_harville()
-        sim = _Sim(simulate_orderings(p1, n_sims=N_SIMS, seed=12345), len(parts),
-                   forces=p1, exposants=exp)
-        sim_m = _Sim(simulate_orderings(pm, n_sims=N_SIMS, seed=67890), len(parts),
-                     forces=pm, exposants=exp)
-        vivier = [int(i) for i in np.argsort(-p1)[:max(5, min(QUINTE_RISQUE_VIVIER, len(parts)))]]
-        notes = sorted(((float(sim.p_topk_exact(list(c), 5)), list(c))
-                        for c in combinations(vivier, 5)), key=lambda x: -x[0])
-        choisies = [c for _, c in notes[:QUINTE_RISQUE_NB_TICKETS]]
-        tickets = []
-        for c in choisies:
-            c = sorted(c, key=lambda i: -p1[i])          # ordre joué = rang IA
-            p_mkt = max(float(sim_m.p_topk_exact(c, 5)), 1e-5)
-            tickets.append({
-                "numeros": [int(parts[i]["numero"]) for i in c],
-                "proba_gain": round(float(sim.p_topk_exact(c, 5)), 4),
-                "rapport_estime": round(float(min(max(TRJ["Quinté+ Désordre"] / p_mkt, 1.1),
-                                                  _RAPPORT_MAX_JACKPOT)), 1),
-            })
+        probables = _tickets_quinte_probables(ctx)
+        if profil == "agressif":
+            choisies = _tickets_quinte_coups(ctx, probables)
+            role = "coup"
+        else:
+            choisies = probables
+            role = "probable"
+        if not choisies:
+            return None
+        sim = ctx["sim"]
+        tickets = [_ticket_quinte(ctx, c, role) for c in choisies]
+        # Affichés du plus probable au moins probable (chance du modèle seul).
+        tickets.sort(key=lambda t: -t["proba_gain"])
         cinq = np.zeros(sim.in_top5.shape[0], dtype=bool)
         retour = np.zeros_like(cinq)
         for c in choisies:
@@ -1194,18 +1407,28 @@ def _combinaisons_quinte_risque(preds: list[dict]) -> Optional[dict]:
             cinq |= k5 == 5
             retour |= (k5 >= 4) | (k3 == 3)
         return {"tickets": tickets, "proba_gain": round(float(cinq.mean()), 4),
-                "proba_bonus": round(float((retour & ~cinq).mean()), 4)}
-    except Exception:
+                "proba_bonus": round(float((retour & ~cinq).mean()), 4),
+                "appui": ctx["appui"], "rang": ctx["rang"],
+                "chevaux_moderes": sorted({int(ctx["parts"][i]["numero"])
+                                           for t in probables for i in t})}
+    except Exception as e:  # noqa: BLE001 — module indisponible plutôt que faux
+        log.warning("mise_plan.quinte_tickets_echec", profil=profil, err=str(e)[:160])
         return None
 
 
-def _module_quinte_risque(preds: list[dict], montant: int, base: dict) -> dict:
-    """Module Quinté+ du profil risqué : cinq tickets tendus distincts à 2 €.
+def _combinaisons_quinte_risque(preds: list[dict]) -> Optional[dict]:
+    """Compatibilité : tickets du profil risqué (cf. _combinaisons_quinte_tickets)."""
+    return _combinaisons_quinte_tickets(preds, "agressif")
+
+
+def _module_quinte_tickets(preds: list[dict], montant: int, base: dict, profil: str,
+                           horse_contexts: Optional[dict] = None) -> dict:
+    """Module Quinté+ à cinq tickets tendus distincts à 2 € (modéré et risqué).
 
     Coût pris sur le montant tant que le plan principal garde au moins
     QUINTE_PRINCIPAL_MIN ; en dessous (montant < 12 €), les cinq tickets sont
     AJOUTÉS au montant saisi — ils sont proposés à chaque fois."""
-    res = _combinaisons_quinte_risque(preds)
+    res = _combinaisons_quinte_tickets(preds, profil, horse_contexts)
     if not res or not res["tickets"]:
         return {**base, "disponible": False, "financable": True,
                 "motif": ("aucune combinaison Quinté+ calculable pour cette course : "
@@ -1214,28 +1437,59 @@ def _module_quinte_risque(preds: list[dict], montant: int, base: dict) -> dict:
     n = len(tickets)
     cout = float(n * QUINTE_MISE_BASE)
     en_supplement = montant - cout < QUINTE_PRINCIPAL_MIN
-    rang_par_num = {int(p["numero"]): i for i, p in enumerate(
-        sorted(preds, key=lambda x: float(x.get("proba_top1") or 0.0), reverse=True), start=1)}
+    rang_par_num = res["rang"]
+    appui = res["appui"] or {}
+    moderes = set(res.get("chevaux_moderes") or [])
     par_num = {int(p["numero"]): p for p in preds}
     joues = list(dict.fromkeys(n_ for t in tickets for n_ in t["numeros"]))
-    chevaux = [{"numero": n_, "nom": par_num[n_]["nom"],
-                "cote": round(float(par_num[n_].get("cote_pmu") or 0.0), 1),
-                "rang": rang_par_num.get(n_)} for n_ in joues]
+
+    def _role(num: int) -> str:
+        r = rang_par_num.get(num) or 99
+        if profil == "agressif" and r > QUINTE_VIVIER:
+            return "tentative"
+        return "base"
+
+    chevaux = []
+    for n_ in joues:
+        a = appui.get(n_) or {}
+        chevaux.append({
+            "numero": n_, "nom": par_num[n_]["nom"],
+            "cote": round(float(par_num[n_].get("cote_pmu") or 0.0), 1),
+            "rang": rang_par_num.get(n_),
+            "role": _role(n_),
+            "hors_modere": profil == "agressif" and n_ not in moderes,
+            "nb_tickets": sum(1 for t in tickets if n_ in t["numeros"]),
+            "signaux": list(a.get("pour") or [])[:3],
+            "vigilance": list(a.get("contre") or [])[:1],
+        })
     rapports = sorted(t["rapport_estime"] for t in tickets)
+    if profil == "agressif":
+        n_tent = sum(1 for c in chevaux if c["role"] == "tentative")
+        resume = (f"{n} tickets « coups » : chacun garde au moins deux des meilleurs "
+                  f"chevaux et tente un outsider classé hors du top {QUINTE_VIVIER} "
+                  f"({n_tent} outsider{'s' if n_tent > 1 else ''} retenu"
+                  f"{'s' if n_tent > 1 else ''} sur leurs signaux : détection, écart de "
+                  "prix, argent qui rentre, forme). Aucun ticket n'est celui du profil modéré.")
+    else:
+        resume = (f"{n} tickets « probables » : les quintés les plus probables parmi les "
+                  f"{QUINTE_VIVIER} premiers, choix incliné par les signaux de chaque cheval.")
     return {
         **base,
         "disponible": True,
         "financable": True,
         "couverture": f"{n} tickets tendus",
-        "couverture_visee": f"{QUINTE_RISQUE_NB_TICKETS} tickets tendus",
-        "couverture_reduite": n < QUINTE_RISQUE_NB_TICKETS,
+        "couverture_visee": f"{QUINTE_NB_TICKETS} tickets tendus",
+        "couverture_reduite": n < QUINTE_NB_TICKETS,
         "motif_couverture": None,
+        "strategie": "coups" if profil == "agressif" else "probables",
+        "resume": resume,
         "nb_chevaux": len(joues),
         "chevaux": chevaux,
         # Combinaisons EXPLICITES : le règlement joue celles-ci, pas C(N, 5).
         "combinaisons": [t["numeros"] for t in tickets],
         "tickets": [{**t, "chevaux": [{"numero": x, "nom": par_num[x]["nom"],
-                                        "rang": rang_par_num.get(x)} for x in t["numeros"]]}
+                                        "rang": rang_par_num.get(x),
+                                        "role": _role(x)} for x in t["numeros"]]}
                     for t in tickets],
         "nb_combinaisons": n,
         "flexi_pct": 100,
@@ -1264,8 +1518,14 @@ def _module_quinte_risque(preds: list[dict], montant: int, base: dict) -> dict:
     }
 
 
+def _module_quinte_risque(preds: list[dict], montant: int, base: dict) -> dict:
+    """Compatibilité : module du profil risqué (cf. _module_quinte_tickets)."""
+    return _module_quinte_tickets(preds, montant, base, "agressif")
+
+
 def _construire_module_quinte(predictions: list[dict], course_info: dict, profil: str,
-                              montant: float) -> Optional[dict]:
+                              montant: float,
+                              horse_contexts: Optional[dict] = None) -> Optional[dict]:
     """Module Quinté+ explicite pour ce profil, ou None si la course n'offre pas
     E_QUINTE_PLUS. Son `cout_total` est retranché du montant avant la
     construction du plan principal (cf. `_avec_module_quinte`).
@@ -1283,6 +1543,7 @@ def _construire_module_quinte(predictions: list[dict], course_info: dict, profil
         "proba_top1": p.get("proba_top1"),
         "proba_top3": p.get("proba_top3"),
         "cote_pmu": p.get("cote_pmu"),
+        "outsider": p.get("outsider"),
     } for p in (predictions or []) if not p.get("non_partant") and p.get("numero") is not None]
     base = {"profil": profil, "type_pari": "Quinté+ Désordre", "cout_total": 0.0,
             "montant_saisi": montant, "montant_plan_principal": montant,
@@ -1296,8 +1557,8 @@ def _construire_module_quinte(predictions: list[dict], course_info: dict, profil
                           "à cote exploitable : aucune combinaison Quinté+ calculable pour "
                           "cette course. Tout le montant va au plan principal.")}
 
-    if profil == "agressif":
-        return _module_quinte_risque(preds, montant, base)
+    if profil in QUINTE_PROFILS_TICKETS:
+        return _module_quinte_tickets(preds, montant, base, profil, horse_contexts)
 
     regle = _regle_budget_quinte(montant, profil, n_max=min(7, n_exploitables))
     en_supplement = bool(regle.get("en_supplement"))
@@ -1456,13 +1717,19 @@ def _avec_module_quinte(generer):
         try:
             module = _construire_module_quinte(arguments.get("predictions") or [],
                                                arguments.get("course_info") or {},
-                                               profil, montant_saisi)
+                                               profil, montant_saisi,
+                                               arguments.get("horse_contexts"))
         except Exception:
             module = None
         cout = (float(module.get("cout_total") or 0.0)
                 if module and module.get("disponible") else 0.0)
         if cout and not module.get("en_supplement"):
             arguments["montant"] = int(montant_saisi - cout)
+        if cout:
+            # Le Quinté+ est joué par le module : le plan principal ne rachète pas
+            # un ticket Quinté+ de plus (souvent la même combinaison).
+            arguments["course_info"] = {**(arguments.get("course_info") or {}),
+                                        "quinte_en_module": True}
         plan = generer(*lie.args, **lie.kwargs)
         return _joindre_module_quinte(plan, module, montant_saisi, cout)
 
@@ -1565,6 +1832,10 @@ def generer_plan(
             # décision : sert à ce que le plan et la page « Value bets » se citent
             # au lieu de parler des mêmes chevaux sans se connaître.
             "value_bet": p.get("value_bet"),
+            # Signal figé du détecteur d'outsiders (registre `outsider_signaux`) :
+            # {chance_place, niveau}. Entre dans l'appui des signaux (cf.
+            # services.appui_signaux) ; absent → composante écartée.
+            "outsider": p.get("outsider"),
             # Contexte traçable (forme/terrain/jockey/ferrure/cote/presse) pour ce
             # cheval sur CETTE course. Clé additive : ignorée par tout code qui ne
             # la lit pas explicitement (H() dans combo_bets.py ne reprend que
@@ -1597,6 +1868,8 @@ def generer_plan(
     _vb_par_num = {int(p["numero"]): p["value_bet"] for p in preds
                    if p.get("value_bet") and p.get("numero") is not None}
     cands = enumerate_bet_candidates(preds, course_info)
+    if (course_info or {}).get("quinte_en_module"):
+        cands = [c for c in cands if _fam(c.get("type_pari") or "") != "Quinté+ Désordre"]
     if not cands:
         return _plan_vide(montant, profil)
     # Traçabilité horse_context : purement additive (clé `contexte_traceabilite`
@@ -1655,6 +1928,23 @@ def generer_plan(
         _hors = [r for n, r in ((n, _rang_par_num.get(n)) for n in _nums)
                  if r and n not in _top2]
         c["_rang_hors_ancre"] = min(_hors) if _hors else None
+    # APPUI DES SIGNAUX (demande produit du 2026-10-07) : un cheval n'entre pas
+    # dans le plan pour son seul rang. Écart de prix modèle/marché, détection
+    # d'outsider, forme, terrain, jockey, argent qui rentre, presse → un
+    # multiplicateur de conviction BORNÉ [0,75 ; 1,30] par candidat, lu à la
+    # sélection, au filet de repli et à la répartition de la mise. Ce n'est pas une
+    # porte : tranches de rapport et « chaque course jouée » restent intactes.
+    _appui: dict[int, dict] = {}
+    try:
+        from services.appui_signaux import appui_par_cheval, multiplicateur_appui
+        _appui = appui_par_cheval(preds, horse_contexts)
+        for c in cands:
+            _nums_c = [int(h["numero"]) for h in c.get("chevaux", [])
+                       if h.get("numero") is not None]
+            c["_appui_mult"] = multiplicateur_appui(_nums_c, _appui)
+            c["_appui_chevaux"] = {n: _appui[n] for n in _nums_c if n in _appui}
+    except Exception as e:  # noqa: BLE001 — sans appui, plan d'avant (multiplicateur 1)
+        log.warning("mise_plan.appui_signaux_echec", err=str(e)[:160])
     if ci_width_by_num:
         for c in cands:
             c["_ci_width"] = max(
@@ -1833,6 +2123,9 @@ def generer_plan(
         # produit — la somme affichée est intégralement jouée : voir « TOUT JOUER,
         # TOUJOURS » plus haut.
         _appliquer_discipline_mise(selected, montant, palier, cfg)
+    # ACHETABLE TICKET PAR TICKET : un 2sur4 à 4 chevaux (6 combinaisons à 3 €) qui
+    # ne reçoit que 2 € n'est pas un ticket que le guichet vend.
+    selected = _garantir_achetabilite(selected)
     ecartes = _paris_ecartes(cands, selected, cfg, rang_par_num=_rang_par_num,
                              roi_weights=roi_weights, montant=montant,
                              value_bets=_vb_par_num)
@@ -2268,7 +2561,11 @@ def _allocate_spread(selected: list[dict], montant: float, cfg: dict, min_stake:
         # Même tilt de désaccord qu'à la sélection : l'argent suit le rang 1 quand le
         # marché ne le suit pas (cf. DESACCORD_BOOST_R1).
         des = float(b.get("_des_mult", 1.0) or 1.0)
-        return max(p * min(r, 40.0), 0.05) * (1.0 + 3.0 * edge) * sig * evb * unc * des
+        # Appui des signaux (services.appui_signaux) : l'argent va d'abord aux
+        # tickets dont les chevaux ont le prix, la détection et le profil pour eux.
+        appui = float(b.get("_appui_mult", 1.0) or 1.0)
+        return (max(p * min(r, 40.0), 0.05) * (1.0 + 3.0 * edge) * sig * evb * unc * des
+                * appui)
 
     def _cap(b):
         # Plafond de mise = variance (HV) ∩ borne HAUTE de bande (gain = rapport×mise ≤
@@ -2722,7 +3019,8 @@ def _select_conviction(
         # marché ne le suit pas est la configuration mesurée comme rentable.
         rw = (roi_w(c) * sig_factor(c) * evb(c) * anc_factor(c)
               * float(c.get("_pb_mult", 1.0) or 1.0)
-              * float(c.get("_des_mult", 1.0) or 1.0))
+              * float(c.get("_des_mult", 1.0) or 1.0)
+              * float(c.get("_appui_mult", 1.0) or 1.0))
         if objectif == "proba":
             # PRUDENT : MAX de victoires DANS la contrainte ≥1.8× (le rapport_min 1.8 garantit
             # déjà le multiplicateur ; on ne touche PAS aux gains). On classe par PROBA de placé
@@ -2769,7 +3067,7 @@ def _select_conviction(
         # nombre de chevaux (3 € en 4, 15 € en 5, 45 € en 6, 105 € en 7 — on couvre
         # C(n,4) combinaisons). Un plan de 10 € qui conseille « Multi en 7 » conseille
         # un ticket que le PMU ne vend pas. On l'écarte plutôt que de l'afficher.
-        if _cout_minimum_pmu(c["type_pari"]) > montant:
+        if _cout_ticket_pmu(c) > montant:
             return False
         # GATE DUR appris : un type au poids ~0 = bucket (type×contexte) PROUVÉ perdant
         # (ROI réel ≤ seuil sur n suffisant, cf. profil_learning.suppressed) → on ne le
@@ -3092,7 +3390,8 @@ def _select_conviction(
                 # retomber sur la tranche de rapport la moins rentable.
                 tranche = max(0.60, min(1.40, float(c.get("_pb_mult", 1.0) or 1.0)))
                 base = p if objectif == "proba" else p * min(r, 40.0)
-                return base * (1.0 + 2.0 * edge) * learned * signal * band * tranche
+                appui = float(c.get("_appui_mult", 1.0) or 1.0)
+                return base * (1.0 + 2.0 * edge) * learned * signal * band * tranche * appui
 
             safe = max(pool, key=lambda c: (_fallback_score(c), c["proba_gain"]))
             safe["_roi_w"] = roi_w(safe)
@@ -3694,6 +3993,22 @@ def _raisons_pari(c: dict, profil: str, facteurs_chevaux: Optional[dict],
                       "gros lot accessible, deux fois moins cher que le Quinté+.")
     if r_type:
         raisons.append(r_type)
+    # 1 bis. POURQUOI CES CHEVAUX — les signaux qui les appuient ou les contredisent
+    # (services.appui_signaux) : écart de prix, détection, forme, marché, presse.
+    for n, a in (c.get("_appui_chevaux") or {}).items():
+        nom = next((h.get("nom", "") for h in c.get("chevaux", [])
+                    if h.get("numero") is not None and int(h["numero"]) == int(n)), "")
+        if a.get("pour"):
+            raisons.append(f"N°{n} {nom} — appuyé par : {' · '.join(a['pour'][:3])}.")
+        if a.get("contre"):
+            raisons.append(f"N°{n} — signal contraire : {a['contre'][0]}.")
+        if a.get("neutre"):
+            raisons.append(f"N°{n} {nom} — {a['neutre']}.")
+    _am = float(c.get("_appui_mult", 1.0) or 1.0)
+    if _am >= 1.05:
+        raisons.append(f"Pari bien appuyé par les signaux : conviction renforcée ×{_am:.2f}.")
+    elif _am <= 0.95:
+        raisons.append(f"Signaux en retrait sur ce pari : conviction réduite ×{_am:.2f}.")
     # 2. Valeur modèle vs marché (edge)
     edge = float(c.get("edge", 0.0) or 0.0)
     if edge > 0.005:
@@ -3810,7 +4125,7 @@ def _motif_rejet(c: dict, cfg: dict, roi_weights: Optional[dict] = None,
     # Ticket le moins cher au guichet PMU au-dessus du budget (Multi surtout) :
     # inutile de conseiller un pari que le joueur ne peut pas acheter.
     if montant is not None:
-        _cout = _cout_minimum_pmu(c["type_pari"])
+        _cout = _cout_ticket_pmu(c)
         if _cout > montant:
             return (f"Le ticket le moins cher de ce pari coûte {_cout:.0f} € au guichet "
                     f"PMU — au-dessus du budget de {montant:.0f} €.")

@@ -201,6 +201,12 @@ POSITION_HISTORIQUE_SQL = f"""
 # zéro), même distance, et place identique (77 965) ou vide côté copie (20 147). Les
 # 137 paires aux places différentes ne sont PAS appariées (prudence).
 #
+# Depuis le 2026-10-07 le scraper écrit la date À PARIS (scraper/db_writer.py,
+# `dates_historique_pmu`) : les copies NOUVELLES sont datées du MÊME jour que la
+# ligne interne, les anciennes restent à la veille (non réécrites). L'appariement
+# accepte donc les deux décalages — même cheval, même distance, une ligne interne
+# et une copie : un cheval ne court pas deux fois le même jour.
+#
 # La copie porte ce que la ligne interne n'écrit pas (écart, vitesse du vainqueur,
 # corde, poids porté…) : on ne la jette pas, on en complète la ligne interne.
 #
@@ -216,7 +222,8 @@ HIST_JUMEAU_LATERAL = """
             FROM historique_courses e
             WHERE h.course_id IS NOT NULL AND e.cheval_id = h.cheval_id
               AND e.course_id IS NULL
-              AND e.date_course = h.date_course - 1 AND e.distance = h.distance
+              AND (e.date_course = h.date_course - 1 OR e.date_course = h.date_course)
+              AND e.distance = h.distance
               AND (e.position_arrivee IS NULL OR e.position_arrivee = h.position_arrivee)
             ORDER BY e.historique_id
             LIMIT 1
@@ -226,7 +233,8 @@ HIST_SANS_COPIE_SQL = """
           AND NOT (h.course_id IS NULL AND EXISTS (
               SELECT 1 FROM historique_courses i
               WHERE i.cheval_id = h.cheval_id AND i.course_id IS NOT NULL
-                AND i.date_course = h.date_course + 1 AND i.distance = h.distance
+                AND (i.date_course = h.date_course + 1 OR i.date_course = h.date_course)
+                AND i.distance = h.distance
                 AND (h.position_arrivee IS NULL OR h.position_arrivee = i.position_arrivee)))"""
 
 # Copie PMU de la course CALCULÉE (paramètre :cid), sans condition de place : pour
@@ -235,7 +243,8 @@ HIST_SANS_COPIE_COURSE_SQL = """
           AND NOT (h.course_id IS NULL AND EXISTS (
               SELECT 1 FROM historique_courses i
               WHERE i.cheval_id = h.cheval_id AND i.course_id = :cid
-                AND i.date_course = h.date_course + 1 AND i.distance = h.distance))"""
+                AND (i.date_course = h.date_course + 1 OR i.date_course = h.date_course)
+                AND i.distance = h.distance))"""
 
 # Colonnes que la copie PMU complète sur la ligne interne.
 HIST_COLONNES_COMPLETEES = ("ecart_longueurs", "indice_vitesse", "corde", "poids_porte_course",
@@ -640,6 +649,37 @@ def corde_zone(num: Optional[int]) -> str:
     if num <= 8:
         return "milieu"
     return "exterieure"
+
+
+def stalle_passee(h, stalles_passees: Optional[dict] = None) -> Optional[int]:
+    """Stalle RÉELLE d'une sortie passée (ligne d'historique batch), ou None.
+
+    `historique_courses.corde` porte le SENS DU VIRAGE (« CORDE_GAUCHE »), pas une
+    stalle (cf. le biais de corde plus haut) : la lire comme un numéro donnait
+    toujours « inconnu ». La stalle d'une sortie INTERNE vit dans
+    `participations.numero_corde`, retrouvée par le course_id de la ligne (h[19]).
+    Une valeur purement numérique dans `corde` reste acceptée ; rien n'est deviné.
+    """
+    cid = h[19] if len(h) > 19 else None
+    if cid and stalles_passees and stalles_passees.get(cid):
+        return int(stalles_passees[cid])
+    c_h = h[11] if len(h) > 11 else None
+    if c_h is None:
+        return None
+    t = str(c_h).strip()
+    return int(t) if t.isdigit() and int(t) > 0 else None
+
+
+def corde_preference_stalles(historique, zone_jour: str,
+                             stalles_passees: Optional[dict] = None) -> float:
+    """Taux de top-3 du cheval parti dans la MÊME zone de stalle qu'aujourd'hui.
+    Fonction PURE. Min 3 sorties à stalle connue, sinon 0,5 neutre."""
+    if zone_jour == "inconnu":
+        return 0.5
+    meme_zone = [1 if h[0] <= 3 else 0 for h in historique
+                 if h[0] and h[0] < 20
+                 and corde_zone(stalle_passee(h, stalles_passees)) == zone_jour]
+    return float(sum(meme_zone) / len(meme_zone)) if len(meme_zone) >= 3 else 0.5
 
 
 def compute_vitesse_relative(vitesses_recentes: list[float], mediane_ref: Optional[float]) -> float:
@@ -1071,7 +1111,10 @@ async def compute_features_for_participation(
     hippo_wins = sum(1 for h in hippo_hist if h[0] and h[0] == 1)
     record_hippodrome = hippo_wins / len(hippo_hist) if hippo_hist else 0.0
 
-    # corde_preference — corde gagnante historiquement vs corde actuelle
+    # corde_preference — corde gagnante historiquement vs corde actuelle.
+    # Ici `courses.corde` des DEUX côtés : le SENS DU VIRAGE (« CORDE_GAUCHE »),
+    # comparé au sens du jour — une préférence main gauche/droite, cohérente. Ce
+    # n'est pas une stalle (cf. corde_preference_stalles, chemin batch v2).
     corde_match = 0.5  # default neutre
     if corde:
         corde_r = await session.execute(text("""
@@ -2277,6 +2320,24 @@ async def _load_course_batch_data(session: AsyncSession, course_id: str,
             #  18 temps_officiel, 19 course_id, -1 allocation_eur)
             hist_by_cheval[cid].append(row[1:])
 
+    # 2bis. Stalles RÉELLES des sorties internes passées (lot v2 seulement) —
+    #       `historique_courses.corde` n'en contient pas (cf. stalle_passee). Clé :
+    #       (cheval_id, course_id). Une requête pour tout le champ.
+    stalles_passees_by_cheval: dict = {}
+    if _dedup:
+        _cids_internes = sorted({h[19] for hs in hist_by_cheval.values() for h in hs
+                                 if len(h) > 19 and h[19]})
+        if _cids_internes:
+            try:
+                for _ch, _co, _st in (await session.execute(text("""
+                    SELECT cheval_id, course_id, numero_corde FROM participations
+                    WHERE cheval_id = ANY(:cids) AND course_id = ANY(:courses)
+                      AND numero_corde IS NOT NULL
+                """), {"cids": cheval_ids, "courses": _cids_internes})).fetchall():
+                    stalles_passees_by_cheval.setdefault(_ch, {})[_co] = int(_st)
+            except Exception as e:  # noqa: BLE001
+                log.warning("features.stalles_passees_load_failed", err=str(e)[:120])
+
     # 3. ELO history — POINT-IN-TIME : uniquement les deltas ELO des courses
     # ANTÉRIEURES à celle-ci (anti-fuite : sinon delta_elo_5/velocity voient les
     # variations ELO des courses futures du cheval). Pour une course à venir, tout
@@ -2728,6 +2789,7 @@ async def _load_course_batch_data(session: AsyncSession, course_id: str,
         "draw_bias_by_zone": draw_bias_by_zone,
         "draw_bias_pente": draw_bias_pente,
         "corde_by_numero": corde_by_numero,
+        "stalles_passees_by_cheval": stalles_passees_by_cheval,
         # Stalles des seuls PARTANTS (les non-partants laissent leur stalle vide) :
         # base du rang relatif de chaque stalle dans le champ réel.
         "stalles_partants": sorted(corde_by_numero[int(r[5])] for r in partants_raw
@@ -3158,26 +3220,37 @@ async def _compute_features_from_batch(session: AsyncSession, row, batch: dict) 
             # Stalle inconnue → zone inconnue → 0,5 neutre, jamais devinée.
             _stalle = (batch.get("corde_by_numero") or {}).get(int(numero)) if numero else None
             zone_jour = corde_zone(int(_stalle) if _stalle else None)
+            # …et les STALLES passées réelles (participations.numero_corde), pas
+            # le sens du virage que contient `historique_courses.corde`.
+            corde_pref = corde_preference_stalles(
+                historique, zone_jour,
+                (batch.get("stalles_passees_by_cheval") or {}).get(cheval_id))
         else:
+            # Chemin servi au modèle actuel : INCHANGÉ (il a appris sur ces vecteurs,
+            # où h[11] — « CORDE_GAUCHE » — ne se lit jamais : 0,5 de fait).
             zone_jour = corde_zone(int(numero) if numero else None)
-        if zone_jour != "inconnu":
-            same_zone = []
-            for h in historique:
-                c_h = h[11] if len(h) > 11 else None
-                try:
-                    z_h = corde_zone(int(str(c_h))) if c_h not in (None, "") else "inconnu"
-                except (TypeError, ValueError):
-                    z_h = "inconnu"
-                if z_h == zone_jour and h[0] and h[0] < 20:
-                    same_zone.append(1 if h[0] <= 3 else 0)
-            if len(same_zone) >= 3:
-                corde_pref = float(sum(same_zone) / len(same_zone))
+            if zone_jour != "inconnu":
+                same_zone = []
+                for h in historique:
+                    c_h = h[11] if len(h) > 11 else None
+                    try:
+                        z_h = corde_zone(int(str(c_h))) if c_h not in (None, "") else "inconnu"
+                    except (TypeError, ValueError):
+                        z_h = "inconnu"
+                    if z_h == zone_jour and h[0] and h[0] < 20:
+                        same_zone.append(1 if h[0] <= 3 else 0)
+                if len(same_zone) >= 3:
+                    corde_pref = float(sum(same_zone) / len(same_zone))
 
     feat_hippodrome = {"pref_hippodrome": pref_hippo, "nb_courses_hippodrome": len(hippo_hist),
                        "record_hippodrome": float(record_hippodrome),
                        "corde_preference": float(np.clip(corde_pref, 0.0, 1.0))}
 
     # ── G. Cotes ─────────────────────────────────────────────────────────────
+    # 5,0 = IMPUTATION quand le PMU n'a pas (encore) de cote : le modèle a appris
+    # avec, on ne la change pas ici. Mais ce n'est PAS un prix : tout aval qui fige,
+    # affiche ou règle une cote doit relire `participations.cote_pmu` (NULL = pas
+    # de cote), jamais `features["cote_pmu"]`.
     cote = float(cote_pmu or 5.0)
     prob_implicite = 1.0 / max(cote, 1.01)
     rang_cote = int(rang_prono_pmu or 99)

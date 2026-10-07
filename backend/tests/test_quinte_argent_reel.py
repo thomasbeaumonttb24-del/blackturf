@@ -258,10 +258,10 @@ async def test_exposition_quotidienne_compte_le_quinte(db):
     db.add(Course(course_id="EXPQ", reunion_id="R1", numero=1, nom="Q",
                   date_heure=depart, hippodrome_nom="Pau", discipline="Plat",
                   distance=2000, nb_partants=16, statut="a_venir"))
-    plan = _plan_dict(20, "equilibre")
+    plan = _plan_dict(20, "conservateur")
     assert plan["montant_quinte"] == 2.0 and plan["montant_joue"] == 18.0
     values = bps.build_plan_snapshot_values(
-        course_id="EXPQ", plan=plan, profil="equilibre", montant_demande=20.0,
+        course_id="EXPQ", plan=plan, profil="conservateur", montant_demande=20.0,
         cotes_utilisees={1: 3.0}, algo_config={}, emitted_at=maintenant - timedelta(minutes=1),
         course_start_at=depart, subject=subject)
     db.add(BetPlanSnapshot(**values))
@@ -280,15 +280,19 @@ async def test_exposition_quotidienne_compte_le_quinte(db):
 
 
 def test_supplement_quinte_pour_le_plafond():
-    assert mc.supplement_quinte(3, "equilibre", _INFO_QUINTE) == 2.0     # ajouté au montant
-    assert mc.supplement_quinte(1, "agressif", _INFO_QUINTE) == 2.0
-    assert mc.supplement_quinte(10, "equilibre", _INFO_QUINTE) == 0.0    # pris sur le montant
+    assert mc.supplement_quinte(3, "conservateur", _INFO_QUINTE) == 2.0  # ajouté au montant
+    assert mc.supplement_quinte(10, "conservateur", _INFO_QUINTE) == 0.0 # pris sur le montant
+    # Modéré et risqué : cinq tickets à 2 €, ajoutés sous 12 €, pris dessus au-delà.
+    assert mc.supplement_quinte(1, "agressif", _INFO_QUINTE) == 10.0
+    assert mc.supplement_quinte(10, "equilibre", _INFO_QUINTE) == 10.0
+    assert mc.supplement_quinte(12, "equilibre", _INFO_QUINTE) == 0.0
     assert mc.supplement_quinte(3, "equilibre", _INFO_SANS_QUINTE) == 0.0
     # Cohérent avec le plan réellement généré.
-    for montant in (1, 2, 3, 4, 10):
-        plan = _plan_dict(montant, "equilibre")
-        assert plan["montant_total"] == max(2, montant) + mc.supplement_quinte(
-            montant, "equilibre", _INFO_QUINTE)
+    for profil in ("conservateur", "equilibre", "agressif"):
+        for montant in (1, 2, 3, 4, 10, 12, 20):
+            plan = _plan_dict(montant, profil)
+            assert plan["montant_total"] == max(2, montant) + mc.supplement_quinte(
+                montant, profil, _INFO_QUINTE)
 
 
 def test_route_plafond_compte_le_montant_engage():
