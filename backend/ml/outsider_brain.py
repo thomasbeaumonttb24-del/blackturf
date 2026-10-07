@@ -82,6 +82,11 @@ TOLERANCE_AUC = 0.002             # le mélange doit classer au moins aussi bien
 POIDS_CERVEAU = 0.5
 
 NOM_FICHIER = "outsider_brain.pkl"
+# Génération du cerveau. 2 (07/10/2026) : critères placés dans le champ, sens
+# appris, cote inventée à 5,0 écartée, fiche d'analyse. Un cerveau d'une
+# génération antérieure ne publie plus rien (cf. services.jobs.job_outsiders_signaux)
+# et ses signaux, sans fiche, sont exclus du site et du bilan (repartir de zéro).
+VERSION = 2
 
 PARAMS_LGB = dict(n_estimators=400, learning_rate=0.02, num_leaves=15,
                   min_child_samples=100, subsample=0.8, subsample_freq=1,
@@ -103,9 +108,13 @@ def nb_places(partants: int) -> int:
 # Lecture des snapshots
 # ──────────────────────────────────────────────────────────────────────────────
 
-# Dernier ET premier snapshot pré-course de chaque partant (live seulement). Le
-# premier donne la cote du premier pronostic : sa dérive jusqu'au dernier est un
-# signal de marché disponible avant le départ.
+# Dernier snapshot pré-course de chaque partant (live seulement), et la COTE DE
+# RÉFÉRENCE officielle du PMU (publiée le matin) comme point de départ du
+# mouvement de cote. Le premier snapshot ne convient pas : vu le 07/10/2026, les
+# cotes relevées la nuit sur un enjeu quasi nul valent 1,1 → 1,7 → 2,6 pour un
+# cheval coté 8,3 au matin et 17 au départ ; et jusqu'au 07/10 l'algo inscrivait
+# 5,0 quand la cote manquait (36 % des snapshots). Sans cote de référence : pas
+# de mouvement (dérive nulle), jamais une valeur supposée.
 _SQL_SNAPSHOTS = """
 WITH last AS (
   SELECT DISTINCT ON (s.participation_id)
@@ -115,21 +124,14 @@ WITH last AS (
   WHERE s.is_pre_course AND s.origin = 'live' AND s.observed_at <= s.course_start_at
     AND {filtre}
   ORDER BY s.participation_id, s.observed_at DESC
-), first AS (
-  SELECT DISTINCT ON (s.participation_id) s.participation_id, s.cote_figee AS cote_premiere
-  FROM prediction_snapshots s
-  WHERE s.is_pre_course AND s.origin = 'live' AND s.cote_figee IS NOT NULL
-    AND s.observed_at <= s.course_start_at AND {filtre}
-  ORDER BY s.participation_id, s.observed_at ASC
 )
 SELECT l.participation_id, l.course_id, p.numero, p.cheval_id, p.musique,
-       l.cote_figee, f.cote_premiere, l.proba_top1, l.proba_top3, l.rang_predit,
+       l.cote_figee, p.cote_reference AS cote_premiere, l.proba_top1, l.proba_top3, l.rang_predit,
        l.features, l.observed_at,
        (SELECT count(*) FROM participations p2
          WHERE p2.course_id = l.course_id AND NOT coalesce(p2.non_partant, false)) AS partants
        {colonnes_resultat}
 FROM last l
-LEFT JOIN first f USING (participation_id)
 JOIN participations p ON p.participation_id = l.participation_id
 WHERE NOT coalesce(p.non_partant, false) AND l.cote_figee >= :cote_min
 """
@@ -299,7 +301,7 @@ def entrainer_sur(d: pd.DataFrame, fin_train: pd.Timestamp) -> dict:
     iso_final = IsotonicRegression(out_of_bounds="clip", y_min=0.0, y_max=1.0)
     iso_final.fit(d.loc[tout15, "proba_top3"], y[tout15.to_numpy()])
     out["status"] = "promu"
-    out["artefact"] = {"cerveau": clf_final, "iso_general": iso_final, "colonnes": colonnes,
+    out["artefact"] = {"version": VERSION, "cerveau": clf_final, "iso_general": iso_final, "colonnes": colonnes,
                        "sens": sens_criteres(d[tout15.to_numpy()], y[tout15.to_numpy()]),
                        "entraine_le": datetime.now(timezone.utc).isoformat(),
                        "validation": {k: v for k, v in out.items() if k != "artefact"}}
@@ -410,8 +412,35 @@ def _f(row: pd.Series, col: str) -> Optional[float]:
     return None if math.isnan(v) else v
 
 
-def _phrase(groupe: str, row: pd.Series, n_out: int) -> Optional[str]:
-    """Raison lisible et chiffrée quand la donnée le permet."""
+def _crit(row: pd.Series, nom: str, sens: dict) -> Optional[dict]:
+    """Place d'un critère dans le champ du jour : position (1 = meilleur), effectif,
+    valeur lisible. None si la donnée manque."""
+    n = int(_f(row, "n_champ") or 0)
+    v, r = _f(row, f"f_{nom}"), _f(row, f"r_{nom}")
+    if v is None or r is None or not n or (nom in _ZERO_ABSENT and v == 0):
+        return None
+    rang_bas = max(1, min(n, round(r * n)))                  # 1 = plus petite valeur
+    position = rang_bas if sens.get(nom, 1) < 0 else n - rang_bas + 1
+    return {"position": position, "n": n, "valeur": _valeur(v, _FORMAT.get(nom)),
+            "libelle": _LIBELLE.get(nom, nom)}
+
+
+def _meilleur(row: pd.Series, noms: Sequence[str], sens: dict) -> Optional[dict]:
+    cands = [c for c in (_crit(row, x, sens) for x in noms) if c]
+    return min(cands, key=lambda c: c["position"] / c["n"]) if cands else None
+
+
+def _phrase_crit(c: Optional[dict]) -> Optional[str]:
+    """« Jockey : taux de places 37 % (2e sur 14 partants) » — seulement s'il est
+    dans le premier tiers du champ."""
+    if not c or c["position"] > max(1, c["n"] // 3):
+        return None
+    val = f" {c['valeur']}" if c["valeur"] else ""
+    return f"{c['libelle']}{val} ({_eme(c['position'])} sur {c['n']} partants)"
+
+
+def _phrase(groupe: str, row: pd.Series, sens: dict) -> Optional[str]:
+    """Raison chiffrée et propre au cheval, ou None (jamais de phrase générique)."""
     cote = _f(row, "cote_figee")
     if groupe == "sous_cote_pmu":
         autres = [v for v in (_f(row, c) for c in ("f_cote_betfair_exchange", "f_cote_unibet",
@@ -421,47 +450,55 @@ def _phrase(groupe: str, row: pd.Series, n_out: int) -> Optional[str]:
         # mauvais appariement de cheval chez la source, pas une information.
         if autres:
             return f"Mieux coté ailleurs qu'au PMU ({max(autres):.0f} contre {cote:.0f}) : sous-coté au PMU"
-        return "Le marché hors PMU le juge plus sérieusement que sa cote PMU"
+        return None
     if groupe == "joue":
         prem = _f(row, "cote_premiere")
         if prem and cote and cote < prem * 0.85:
-            return f"Joué depuis le premier pronostic (cote {prem:.0f} → {cote:.0f})"
-        return "Mouvement de cote favorable avant le départ"
+            return f"Joué : cote de référence PMU {prem:.0f}, {cote:.0f} au pronostic"
+        return None
     if groupe == "modele":
-        r = _f(row, "rang_predit"); n = _f(row, "partants")
-        if r and n:
-            return f"Notre modèle le classe {int(r)}e sur {int(n)}, bien mieux que sa cote"
-        return "Notre modèle l'estime au-dessus de sa cote"
-    if groupe == "niveau":
-        return "Niveau (ELO, gains) au-dessus de ce que dit sa cote"
+        r, n, rc = _f(row, "rang_predit"), _f(row, "partants"), _f(row, "f_rang_cote")
+        if r and n and rc and r < rc:
+            return (f"Notre modèle le classe {_eme(int(r))} sur {int(n)}, devant son rang au "
+                    f"marché ({_eme(int(rc))})")
+        return None
     if groupe == "forme":
-        return "Forme récente encourageante"
+        perfs, podiums, lues = lire_musique(row.get("musique"))
+        if perfs and podiums and podiums >= 2:
+            return f"Forme : {podiums} podiums sur ses {lues} dernières courses ({perfs})"
+        return _phrase_crit(_meilleur(row, ("taux_top3", "time_decay_form", "forme_5_courses"), sens))
+    if groupe == "niveau":
+        return _phrase_crit(_meilleur(row, ("elo_vs_champ", "elo_global", "gains_par_course_log",
+                                            "taux_podium_carriere"), sens))
     if groupe == "entourage":
-        return "Jockey / entraîneur en réussite"
+        return _phrase_crit(_meilleur(row, ("jockey_taux_place_global", "jockey_forme_30j",
+                                            "entraineur_taux_place", "entraineur_forme_30j"), sens))
     if groupe == "aptitudes":
-        return "Conditions du jour à sa convenance (terrain, distance, piste)"
+        return _phrase_crit(_meilleur(row, ("pref_terrain_actuel", "pref_distance_actuelle",
+                                            "pref_hippodrome"), sens))
     if groupe == "presse":
-        return "Cité par la presse spécialisée"
+        return _phrase_crit(_crit(row, "presse_consensus_score", sens))
     if groupe == "course":
         hhi = _f(row, "f_field_hhi")
         return "Course ouverte, sans favori écrasant" if hhi is not None and hhi < 0.12 else None
     if groupe == "signaux":
-        return "Changement ou signal d'écurie favorable (ferrure, œillères, repos)"
+        return _phrase_crit(_crit(row, "jours_repos", sens))
     return None
 
 
 def raisons(contribs: np.ndarray, colonnes: Sequence[str], row: pd.Series,
-            n_out: int, maxi: int = 3) -> list[str]:
-    """Top raisons positives (groupes distincts) d'après les contributions SHAP."""
+            sens: dict, maxi: int = 3) -> list[str]:
+    """Top raisons positives (groupes distincts) d'après les contributions SHAP ;
+    le rang dans le champ (`r_x`) compte pour le groupe de son critère (`f_x`)."""
     par_groupe: dict[str, float] = {}
     for col, c in zip(colonnes, contribs):
-        g = _GROUPE_DE.get(col)
+        g = _GROUPE_DE.get(col) or (_GROUPE_DE.get("f_" + col[2:]) if col.startswith("r_") else None)
         if g is None or c <= 0:
             continue
         par_groupe[g] = par_groupe.get(g, 0.0) + float(c)
     out: list[str] = []
     for g, _ in sorted(par_groupe.items(), key=lambda kv: kv[1], reverse=True):
-        p = _phrase(g, row, n_out)
+        p = _phrase(g, row, sens)
         if p and p not in out:
             out.append(p)
         if len(out) >= maxi:
@@ -475,7 +512,7 @@ def raisons(contribs: np.ndarray, colonnes: Sequence[str], row: pd.Series,
 # ou l'inverse) est appris sur les arrivées des outsiders (`sens_criteres`).
 FICHE: list[tuple[str, str, Optional[str]]] = [
     ("taux_top3", "Podiums sur ses dernières courses", "pct"),
-    ("time_decay_form", "Forme récente (pondérée)", None),
+    ("time_decay_form", "Forme récente pondérée", None),
     ("forme_5_courses", "Forme sur 5 courses", None),
     ("forme_1_course", "Dernière course", None),
     ("proximite_vainqueur", "Écart au vainqueur (dernières courses)", None),
@@ -502,6 +539,9 @@ FICHE: list[tuple[str, str, Optional[str]]] = [
     ("class_drop_ratio_reel", "Niveau de la course face à ses précédentes", None),
     ("valeur_latente", "Valeur latente", None),
 ]
+_LIBELLE = {nom: lib for nom, lib, _ in FICHE}
+_FORMAT = {nom: fmt for nom, _, fmt in FICHE}
+
 # Sens par défaut tant qu'aucun cerveau n'a appris le sien (mesuré le 07/10 sur
 # 18 255 outsiders : seuls ces trois-là jouent à l'envers).
 _SENS_DEFAUT = {"jours_repos": -1, "dyn_reduction_km_moy": -1, "class_drop_ratio_reel": -1}
@@ -582,25 +622,25 @@ def fiche(row: pd.Series, art: dict) -> dict:
     prem = _f(row, "cote_premiere")
     if prem and cote and abs(cote / prem - 1) >= 0.1:
         ajoute("Mouvement de cote", "favorable" if cote < prem else "defavorable",
-               f"{prem:.0f} → {cote:.0f} depuis le premier pronostic")
-    rang = _f(row, "rang_predit")
-    if rang and n:
+               f"{prem:.0f} (référence PMU) → {cote:.0f}")
+    # Rang du modèle général : sur les partants RÉELS (n_champ ne compte que les
+    # partants lus dans les snapshots, d'où un « 8e sur 7 » vu le 07/10).
+    rang, n_part = _f(row, "rang_predit"), int(_f(row, "partants") or 0)
+    if rang and n_part >= rang:
         ajoute("Classement de notre modèle général",
-               "favorable" if rang <= max(1, round(n / 3)) else
-               "defavorable" if rang > n - n // 3 else "neutre",
-               f"{_eme(int(rang))} sur {n}", int(rang))
+               "favorable" if rang <= max(1, round(n_part / 3)) else
+               "defavorable" if rang > n_part - n_part // 3 else "neutre",
+               f"{_eme(int(rang))} sur {n_part}", int(rang))
 
-    for nom, libelle, fmt in FICHE:
-        v, r = _f(row, f"f_{nom}"), _f(row, f"r_{nom}")
-        if v is None or r is None or not n or (nom in _ZERO_ABSENT and v == 0):
+    for nom, libelle, _fmt in FICHE:
+        c = _crit(row, nom, sens)
+        if not c:
             continue
-        rang_bas = max(1, min(n, round(r * n)))              # 1 = plus petite valeur
-        position = rang_bas if sens.get(nom, 1) < 0 else n - rang_bas + 1
-        tiers = max(1, n // 3)
+        position, tiers = c["position"], max(1, c["n"] // 3)
         verdict = ("favorable" if position <= tiers else
-                   "defavorable" if position > n - tiers else "neutre")
-        val = _valeur(v, fmt)
-        ajoute(libelle, verdict, f"{_eme(position)} sur {n}" + (f" · {val}" if val else ""), position)
+                   "defavorable" if position > c["n"] - tiers else "neutre")
+        ajoute(libelle, verdict, f"{_eme(position)} sur {c['n']}"
+               + (f" · {c['valeur']}" if c["valeur"] else ""), position)
 
     return {
         "lus": len(art.get("colonnes") or []),
@@ -625,8 +665,8 @@ def scorer(d: pd.DataFrame, art: Optional[dict]) -> pd.DataFrame:
     p_base = art["iso_general"].predict(d["proba_top3"].fillna(0))
     chance = POIDS_CERVEAU * p_brain + (1 - POIDS_CERVEAU) * p_base
     contrib = art["cerveau"].booster_.predict(X, pred_contrib=True)
-    n_out = d.groupby("course_id")["course_id"].transform("size").to_numpy()
-    rs = [raisons(contrib[i, :-1], cols, d.iloc[i], int(n_out[i])) for i in range(len(d))]
+    sens = {**_SENS_DEFAUT, **(art.get("sens") or {})}
+    rs = [raisons(contrib[i, :-1], cols, d.iloc[i], sens) for i in range(len(d))]
     analyses = [fiche(d.iloc[i], art) for i in range(len(d))]
     return d.assign(chance=chance, raisons=rs, analyse=analyses)
 

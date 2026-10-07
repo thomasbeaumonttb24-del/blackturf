@@ -6,6 +6,10 @@
   donc sur ce qui était réellement affiché, jamais sur un recalcul après coup.
 - `lister` : les outsiders d'une journée ou d'une course, avec leur résultat.
 - `bilan` : taux de réussite réel et plus beaux rapports sur N jours.
+
+Repartir de zéro (07/10/2026) : seuls les signaux portant une fiche d'analyse
+(cerveau génération 2) sont lus. Ceux de la génération 1 restent en base,
+hors du site et du bilan.
 """
 from __future__ import annotations
 
@@ -40,7 +44,7 @@ async def rafraichir_signaux(session: AsyncSession, maintenant: Optional[datetim
     from ml import outsider_brain as ob
 
     art = ob.en_service()
-    if art is None:
+    if art is None or art.get("version", 1) < ob.VERSION:
         return {"status": "sans_modele"}
     now = maintenant or datetime.now(timezone.utc)
     debut_jour = datetime.combine(now.astimezone(PARIS).date(), datetime.min.time(), PARIS)
@@ -132,7 +136,7 @@ JOIN participations p ON p.participation_id = o.participation_id
 JOIN chevaux ch ON ch.cheval_id = p.cheval_id
 LEFT JOIN jockeys j ON j.jockey_id = p.jockey_id
 LEFT JOIN resultats r ON r.course_id = o.course_id
-WHERE o.actif AND {filtre}
+WHERE o.actif AND o.analyse <> '{{}}'::jsonb AND {filtre}
 ORDER BY c.date_heure, o.chance_place DESC
 """
 

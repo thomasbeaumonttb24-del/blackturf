@@ -67,6 +67,7 @@ def test_entrainer_promeut_un_cerveau_qui_voit_le_signal(monkeypatch):
     assert all(isinstance(r, list) for r in s["raisons"])
     assert all(a["lus"] == len(art["colonnes"]) and a["criteres"] for a in s["analyse"])
     assert any(c.startswith("r_") for c in art["colonnes"])
+    assert art["version"] == ob.VERSION
 
 
 def test_sans_cerveau_aucune_selection():
@@ -76,9 +77,9 @@ def test_sans_cerveau_aucune_selection():
 
 def test_raison_sous_cote_ignore_les_appariements_absurdes():
     row = pd.Series({"cote_figee": 21.0, "f_cote_betfair_exchange": 2.0, "f_cote_unibet": 14.0})
-    assert "14 contre 21" in ob._phrase("sous_cote_pmu", row, 5)
+    assert "14 contre 21" in ob._phrase("sous_cote_pmu", row, {})
     row = pd.Series({"cote_figee": 21.0, "f_cote_betfair_exchange": 2.0})
-    assert "contre" not in ob._phrase("sous_cote_pmu", row, 5)
+    assert ob._phrase("sous_cote_pmu", row, {}) is None      # jamais de phrase générique
 
 
 def test_non_abonne_ne_recoit_rien_d_identifiant_sur_une_course_a_venir():
@@ -125,3 +126,27 @@ def test_fiche_place_chaque_critere_dans_le_champ():
     assert par["Cote ailleurs qu'au PMU"]["detail"] == "12 ailleurs contre 21 au PMU"
     assert par["Mouvement de cote"]["verdict"] == "favorable"
     assert f["favorables"] >= 4 and f["defavorables"] >= 1
+
+
+def test_sans_cote_de_reference_pas_de_mouvement():
+    df = _jeu(3)
+    df["cote_premiere"] = None         # pas de cote de référence PMU
+    d = ob.preparer(df)
+    assert (d["derive"] == 0).all()
+    row = d.iloc[0]
+    assert not any(c["libelle"] == "Mouvement de cote" for c in ob.fiche(row, {"colonnes": []})["criteres"])
+
+
+def test_raisons_chiffrees_et_classement_sur_les_vrais_partants():
+    sens = {}
+    row = pd.Series({"n_champ": 7, "partants": 12, "rang_predit": 3, "f_rang_cote": 9,
+                     "f_jockey_taux_place_global": 0.37, "r_jockey_taux_place_global": 1.0,
+                     "musique": "1a2a5a3a7a"})
+    assert ob._phrase("modele", row, sens) == "Notre modèle le classe 3e sur 12, devant son rang au marché (9e)"
+    assert ob._phrase("entourage", row, sens) == "Jockey : taux de places 37 % (1er sur 7 partants)"
+    assert ob._phrase("forme", row, sens).startswith("Forme : 3 podiums sur ses 5 dernières courses")
+    f = ob.fiche(row, {"colonnes": []})
+    modele = [c for c in f["criteres"] if c["libelle"].startswith("Classement")][0]
+    assert modele["detail"] == "3e sur 12"
+    # modèle derrière son rang de cote : pas de raison « modèle »
+    assert ob._phrase("modele", row.copy().replace({3: 10}), sens) is None

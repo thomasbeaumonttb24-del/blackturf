@@ -366,41 +366,60 @@ function ResumeAnalyse({ a }: { a?: Analyse }) {
   );
 }
 
-function FicheAnalyse({ a }: { a?: Analyse }) {
+function FicheAnalyse({ a, raisons = [] }: { a?: Analyse; raisons?: string[] }) {
   const criteres = a?.criteres ?? [];
-  if (criteres.length === 0) return null;
+  if (criteres.length === 0 && raisons.length === 0) return null;
   return (
-    <details className="group/fiche relative z-10 mt-4 rounded-2xl bg-stone-50/80 ring-1 ring-stone-200 open:bg-white">
-      <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-2 px-3 py-2.5 [&::-webkit-details-marker]:hidden">
-        <span className="text-[13px] font-bold text-gray-900">Analyse complète · {criteres.length} critères</span>
-        <span className="flex items-center gap-1.5 text-[11px] font-semibold">
-          <span className="text-emerald-700">{a?.favorables ?? 0} ✓</span>
-          <span className="text-stone-300">/</span>
-          <span className="text-rose-700">{a?.defavorables ?? 0} ✗</span>
+    <details className="group/fiche relative z-10 mt-3 rounded-2xl bg-stone-50/80 ring-1 ring-stone-200 open:bg-white">
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-3 py-2.5 [&::-webkit-details-marker]:hidden">
+        <span className="text-[13px] font-bold text-gray-900">Pourquoi cet outsider ?</span>
+        <span className="flex items-center gap-1 text-[11px] font-semibold text-stone-500">
+          {criteres.length > 0 && <span>{criteres.length} critères</span>}
           <ChevronDown className="h-4 w-4 text-stone-400 transition-transform group-open/fiche:rotate-180" aria-hidden />
         </span>
       </summary>
-      <div className="border-t border-stone-200 px-3 pb-3 pt-2">
-        {a?.lus ? (
-          <p className="mb-2 text-[11.5px] leading-4 text-stone-500">
-            Le cerveau a lu {a.lus} signaux (valeurs et rang face aux adversaires du jour). Voici les critères qu&apos;un
-            turfiste regarde, chacun placé dans le champ.
-          </p>
-        ) : null}
-        <ul className="divide-y divide-stone-100">
-          {criteres.map((c) => (
-            <li key={c.libelle} className="flex items-start gap-2 py-1.5 text-[12.5px] leading-5">
-              <span className={cn("mt-1.5 h-2 w-2 shrink-0 rounded-full ring-2", PASTILLE[c.verdict])} aria-hidden />
-              <span className="min-w-0 flex-1 text-stone-700">{c.libelle}</span>
-              <span className="min-w-0 max-w-[55%] break-words text-right font-semibold tabular-nums text-gray-900">
-                {c.detail}
-              </span>
-              <span className="sr-only">
-                {c.verdict === "favorable" ? "favorable" : c.verdict === "defavorable" ? "défavorable" : "neutre"}
-              </span>
-            </li>
-          ))}
-        </ul>
+      <div className="border-t border-stone-200 px-3 pb-3 pt-2.5">
+        {raisons.length > 0 && (
+          <>
+            <p className="mb-1.5 text-[11px] font-bold uppercase tracking-wide text-stone-500">Ce qui l&apos;a fait retenir</p>
+            <ul className="mb-3 space-y-1.5">
+              {raisons.map((r) => (
+                <li key={r} className="flex gap-2 text-[13px] leading-5 text-stone-700">
+                  <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-amber-100 ring-1 ring-amber-200">
+                    <Check className="h-2.5 w-2.5 text-amber-700" aria-hidden />
+                  </span>
+                  <span className="min-w-0 break-words">{r}</span>
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
+        {criteres.length > 0 && (
+          <>
+            <p className="mb-1 text-[11px] font-bold uppercase tracking-wide text-stone-500">
+              Analyse complète · place dans le champ
+            </p>
+            {a?.lus ? (
+              <p className="mb-1.5 text-[11.5px] leading-4 text-stone-500">
+                {a.lus} signaux lus par le cerveau ; voici les critères qu&apos;un turfiste regarde.
+              </p>
+            ) : null}
+            <ul className="divide-y divide-stone-100">
+              {criteres.map((c) => (
+                <li key={c.libelle} className="flex items-start gap-2 py-1.5 text-[12.5px] leading-5">
+                  <span className={cn("mt-1.5 h-2 w-2 shrink-0 rounded-full ring-2", PASTILLE[c.verdict])} aria-hidden />
+                  <span className="min-w-0 flex-1 text-stone-700">{c.libelle}</span>
+                  <span className="min-w-0 max-w-[55%] break-words text-right font-semibold tabular-nums text-gray-900">
+                    {c.detail}
+                  </span>
+                  <span className="sr-only">
+                    {c.verdict === "favorable" ? "favorable" : c.verdict === "defavorable" ? "défavorable" : "neutre"}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
       </div>
     </details>
   );
@@ -480,25 +499,11 @@ export function OutsiderCarte({ o, compact = false }: { o: Outsider; compact?: b
           </div>
         </div>
 
-        {/* Bilan de l'analyse (compact) */}
-        {compact && <ResumeAnalyse a={o.analyse} />}
+        {/* L'essentiel : le bilan des critères en une ligne */}
+        <ResumeAnalyse a={o.analyse} />
 
-        {/* Raisons */}
-        {!compact && o.raisons.length > 0 && (
-          <ul className="mt-4 space-y-1.5 border-t border-stone-200 pt-3">
-            {o.raisons.map((r) => (
-              <li key={r} className="flex gap-2 text-[13px] leading-5 text-stone-700">
-                <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-amber-100 ring-1 ring-amber-200">
-                  <Check className="h-2.5 w-2.5 text-amber-700" aria-hidden />
-                </span>
-                <span className="min-w-0 break-words">{r}</span>
-              </li>
-            ))}
-          </ul>
-        )}
-
-        {/* Fiche complète (dépliable) */}
-        {!compact && <FicheAnalyse a={o.analyse} />}
+        {/* Le détail (raisons + fiche complète), fermé au départ */}
+        {!compact && <FicheAnalyse a={o.analyse} raisons={o.raisons} />}
 
         {/* Pied */}
         <div className="mt-auto flex flex-wrap items-center justify-between gap-2 pt-4">

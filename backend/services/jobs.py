@@ -742,26 +742,25 @@ async def job_outsiders_signaux() -> None:
     entraînement au worker par jour au lieu d'attendre la nuit — jamais ici : le
     scheduler est plafonné à 1 Gio."""
     from db.database import AsyncSessionLocal
-    from ml.outsider_brain import en_service
+    from ml.outsider_brain import VERSION, en_service
     from services.outsiders import rafraichir_signaux
 
     try:
         art = en_service()
-        # Absent, ou d'une version d'avant les critères placés dans le champ (pas de
-        # `sens`) : un entraînement par jour est demandé au worker. Un cerveau
-        # ancien continue de servir en attendant ; sans cerveau, on s'arrête là.
-        if art is None or "sens" not in art:
+        # Absent ou d'une génération antérieure : un entraînement par jour est demandé
+        # au worker, et RIEN n'est publié en attendant (décision Thomas du 07/10 :
+        # repartir de zéro avec le nouveau cerveau, pas de signal de l'ancien).
+        if art is None or art.get("version", 1) < VERSION:
             import redis as sync_redis
             from rq import Queue
             from api.config import get_settings
             from datetime import date as _date
             r = sync_redis.from_url(get_settings().redis_url)
-            if r.set(f"ml:outsider_brain:amorce:v2:{_date.today().isoformat()}", "1", nx=True, ex=86400):
+            if r.set(f"ml:outsider_brain:amorce:v{VERSION}:{_date.today().isoformat()}", "1", nx=True, ex=86400):
                 Queue("ml", connection=r, default_timeout=1800).enqueue(
                     "ml.outsider_brain.entrainer_sync", result_ttl=86400, failure_ttl=ML_FAILURE_TTL_S)
                 log.info("jobs.outsiders.amorce_entrainement", ancien=art is not None)
-            if art is None:
-                return
+            return
         async with AsyncSessionLocal() as session:
             res = await rafraichir_signaux(session)
         log.info("jobs.outsiders.signaux", **res)
