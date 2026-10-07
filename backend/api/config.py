@@ -80,13 +80,20 @@ class Settings(BaseSettings):
     resend_webhook_secret: str = ""
     email_from: str = "noreply@blackturf.fr"
     email_from_name: str = "BlackTurf"
-    # Secours SMTP quand Resend est à court de quota (ex. Brevo gratuit :
-    # smtp-relay.brevo.com:587, 300 mails/jour). Vide = pas de secours.
+    # Relais SMTP gratuits (cf. services/alerts.send_email) : les mails de masse
+    # passent par eux, Resend reste réservé aux mails vitaux. Vide = relais absent.
+    # SMTP_*  : Brevo   — smtp-relay.brevo.com:587, 300 mails/jour.
+    # SMTP2_* : Mailjet — in-v3.mailjet.com:587, 200 mails/jour.
     smtp_host: str = ""
     smtp_port: int = 587
     smtp_user: str = ""
     smtp_password: str = ""
     smtp_from: str = ""   # expéditeur validé chez le fournisseur ; défaut = email_from
+    smtp2_host: str = ""
+    smtp2_port: int = 587
+    smtp2_user: str = ""
+    smtp2_password: str = ""
+    smtp2_from: str = ""
     openweather_api_key: str = ""
 
     # IndexNow : signale à Bing, Yandex, Naver et Seznam qu'une URL vient de changer.

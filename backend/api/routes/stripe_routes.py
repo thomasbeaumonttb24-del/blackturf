@@ -1145,7 +1145,7 @@ async def _mails_resiliation(user: User, cancelled_via_stripe: bool) -> None:
     await send_email(
         to=user.email,
         subject="BlackTurf — Votre demande de résiliation",
-        html=html, text=texte,
+        html=html, text=texte, transactionnel=True,
     )
 
 

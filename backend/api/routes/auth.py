@@ -424,7 +424,7 @@ async def _envoyer_verification(user_id: str, email: str, nonce: Optional[str] =
         await send_email(
             to=email,
             subject="BlackTurf — Confirmez votre adresse e-mail",
-            html=html, text=texte,
+            html=html, text=texte, transactionnel=True,
         )
         log.info("auth.verification.envoyee", user_id=user_id)
         return True
@@ -481,7 +481,8 @@ async def _envoyer_lien_reinitialisation(user: User) -> None:
         await r.aclose()
     reset_url = f"{settings.frontend_url}/reinitialiser-mot-de-passe?token={token}"
     html, texte = reinitialisation_mot_de_passe(user.prenom, reset_url)
-    await send_email(to=user.email, subject="BlackTurf — Réinitialisation de mot de passe", html=html, text=texte)
+    await send_email(to=user.email, subject="BlackTurf — Réinitialisation de mot de passe", html=html, text=texte,
+                     transactionnel=True)
 
 
 @router.post("/register", response_model=RegisterResponse)
@@ -634,7 +635,7 @@ async def _prevenir_titulaire(user_id: str, email: str, prenom: Optional[str]) -
         await send_email(
             to=email,
             subject="BlackTurf — Vous avez déjà un compte",
-            html=html, text=texte,
+            html=html, text=texte, transactionnel=True,
         )
     except Exception as e:  # noqa: BLE001
         log.warning("auth.register.avis_titulaire_echoue", user_id=user_id, error=str(e))

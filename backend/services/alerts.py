@@ -124,8 +124,14 @@ async def send_email(
     *,
     idempotency_key: Optional[str] = None,
     unsubscribe_url: Optional[str] = None,
+    transactionnel: bool = False,
 ) -> ResultatEnvoi:
-    """Envoie un email via Resend API."""
+    """Envoie un email : Resend pour les mails vitaux, relais SMTP gratuits sinon.
+
+    `transactionnel=True` pour ce qu'un utilisateur ATTEND (vérification
+    d'adresse, mot de passe, paiement) : ces mails passent d'abord par Resend,
+    dont le quota leur est réservé, puis par les relais SMTP en secours.
+    """
     # Un test ne doit JAMAIS envoyer de vrai e-mail. `backend/.env` porte une
     # `RESEND_API_KEY` valide, que pydantic charge aussi sous pytest : la suite
     # d'abonnements a expédié des dizaines de messages réels à l'exploitant, au
@@ -139,7 +145,7 @@ async def send_email(
     # L'absence de clé se diagnostique AVANT le blocage de test : sinon un envoi
     # mal configuré rendrait « bloqué sous pytest » au lieu de sa vraie cause, et
     # l'invariant qui exige qu'un échec porte sa raison tomberait.
-    if not settings.resend_api_key and not _smtp_configure():
+    if not settings.resend_api_key and not _relais_smtp():
         log.warning("alerts.email.no_api_key")
         return ResultatEnvoi(False, "RESEND_API_KEY absente")
 
@@ -147,49 +153,76 @@ async def send_email(
         log.info("alerts.email.bloque_en_test", to=masquer_email(to), subject=subject[:80])
         return ResultatEnvoi(False, "envoi bloqué sous pytest")
 
-    # Resend d'abord, SMTP gratuit (Brevo…) en secours. Le secours ne part QUE si
-    # Resend a répondu NON (code HTTP d'erreur) ou est en pause de quota : un délai
+    # CHAÎNE DE FOURNISSEURS GRATUITS. Resend (100/j) est RÉSERVÉ aux mails
+    # vitaux (inscription, mot de passe, paiement) : avant, les alertes et digests
+    # le vidaient et plus aucune inscription ne pouvait être confirmée (07/10/2026).
+    # Le reste part par les relais SMTP gratuits (Brevo 300/j, Mailjet 200/j) ;
+    # Resend ne sert aux mails de masse que si aucun relais n'est configuré.
+    #
+    # On ne passe au fournisseur suivant QUE sur un refus explicite : un délai
     # dépassé est ambigu — le mail est peut-être parti — et le doubler serait pire.
-    resultat: Optional[ResultatEnvoi] = None
-    if settings.resend_api_key and not _resend_en_pause():
-        resultat = await _envoi_resend(to, subject, html, text,
-                                       idempotency_key=idempotency_key,
-                                       unsubscribe_url=unsubscribe_url)
-        if resultat or not (resultat.erreur or "").startswith("HTTP "):
-            return resultat
+    relais = _relais_smtp()
+    ordre: list[str] = []
+    if transactionnel or not relais:
+        ordre.append("resend")
+    ordre += [r["nom"] for r in relais]
 
-    if _smtp_configure():
-        secours = await _envoi_smtp(to, subject, html, text, unsubscribe_url=unsubscribe_url)
-        if secours or resultat is None:
-            return secours
-        return ResultatEnvoi(False, f"{resultat.erreur} | secours SMTP : {secours.erreur}"[:400])
+    erreurs: list[str] = []
+    for nom in ordre:
+        if _en_pause(nom):
+            erreurs.append(f"{nom}: en pause (quota)")
+            continue
+        if nom == "resend":
+            if not settings.resend_api_key:
+                continue
+            res = await _envoi_resend(to, subject, html, text,
+                                      idempotency_key=idempotency_key,
+                                      unsubscribe_url=unsubscribe_url)
+        else:
+            cfg = next(r for r in relais if r["nom"] == nom)
+            res = await _envoi_smtp(to, subject, html, text,
+                                    unsubscribe_url=unsubscribe_url, relais=cfg)
+        if res:
+            return res
+        erreurs.append(f"{nom}: {res.erreur}")
+        if not _refus_explicite(res):
+            break
+    return ResultatEnvoi(False, (" | ".join(erreurs) or "aucun fournisseur disponible")[:400])
 
-    if resultat is None:
-        return ResultatEnvoi(False, "Resend en pause (quota atteint) et aucun SMTP de secours configuré")
-    return resultat
+
+# Pause d'un fournisseur après un refus de quota : inutile de brûler un
+# aller-retour (et de retarder l'inscription) à chaque mail tant que le compteur
+# n'est pas remis à zéro. Les quotas journaliers repartent à minuit UTC ; on
+# retente à ce moment-là, ce qui re-sonde aussi chaque jour un quota MENSUEL épuisé.
+_pauses: dict[str, datetime] = {}
 
 
-# Pause Resend après un refus de quota : inutile de brûler un aller-retour (et de
-# retarder l'inscription) à chaque mail tant que le compteur n'est pas remis à zéro.
-# Le quota journalier repart à minuit UTC ; on retente à ce moment-là, ce qui
-# re-sonde aussi chaque jour un quota MENSUEL épuisé.
-_resend_pause_jusqua: Optional[datetime] = None
+def _en_pause(nom: str) -> bool:
+    fin = _pauses.get(nom)
+    return fin is not None and datetime.now(timezone.utc) < fin
 
 
-def _resend_en_pause() -> bool:
-    return _resend_pause_jusqua is not None and datetime.now(timezone.utc) < _resend_pause_jusqua
-
-
-def _mettre_resend_en_pause() -> None:
-    global _resend_pause_jusqua
+def _mettre_en_pause(nom: str) -> None:
     demain = (datetime.now(timezone.utc) + timedelta(days=1)).replace(
         hour=0, minute=5, second=0, microsecond=0)
-    _resend_pause_jusqua = demain
-    log.warning("alerts.email.resend_quota_pause", jusqua=demain.isoformat())
+    _pauses[nom] = demain
+    log.warning("alerts.email.quota_pause", fournisseur=nom, jusqua=demain.isoformat())
 
 
-def _smtp_configure() -> bool:
-    return bool(settings.smtp_host and settings.smtp_user and settings.smtp_password)
+def _refus_explicite(res: "ResultatEnvoi") -> bool:
+    """Le fournisseur a-t-il clairement REFUSÉ (rien n'est parti) ?"""
+    return (res.erreur or "").startswith(("HTTP ", "SMTP-REFUS "))
+
+
+def _relais_smtp() -> list[dict]:
+    """Relais SMTP configurés, dans l'ordre (SMTP_* puis SMTP2_*)."""
+    relais = []
+    for nom, pre in (("smtp", "smtp_"), ("smtp2", "smtp2_")):
+        cfg = {k: getattr(settings, pre + k, "") for k in ("host", "port", "user", "password", "from")}
+        if cfg["host"] and cfg["user"] and cfg["password"]:
+            cfg["nom"] = f"{nom}:{cfg['host']}"
+            relais.append(cfg)
+    return relais
 
 
 async def _envoi_resend(to, subject, html, text, *, idempotency_key, unsubscribe_url) -> ResultatEnvoi:
@@ -230,20 +263,20 @@ async def _envoi_resend(to, subject, html, text, *, idempotency_key, unsubscribe
     corps = resp.text[:300]
     # Resend : 429 + `daily_quota_exceeded` / `monthly_quota_exceeded`.
     if "quota" in corps.lower():
-        _mettre_resend_en_pause()
+        _mettre_en_pause("resend")
     log.error("alerts.email.failed", to=masquer_email(to), status=resp.status_code, error=corps)
     return ResultatEnvoi(False, f"HTTP {resp.status_code} Resend: {corps}"[:400])
 
 
-async def _envoi_smtp(to, subject, html, text, *, unsubscribe_url) -> ResultatEnvoi:
-    """Secours SMTP (Brevo gratuit : 300 mails/jour, sans abonnement)."""
+async def _envoi_smtp(to, subject, html, text, *, unsubscribe_url, relais: dict) -> ResultatEnvoi:
+    """Relais SMTP gratuit (Brevo 300/j, Mailjet 200/j…), sans abonnement."""
     import asyncio
     import re
     import smtplib
     from email.message import EmailMessage
     from email.utils import formataddr, make_msgid
 
-    expediteur = settings.smtp_from or settings.email_from
+    expediteur = relais.get("from") or settings.email_from
     msg = EmailMessage()
     msg["From"] = formataddr((settings.email_from_name, expediteur))
     msg["To"] = to
@@ -261,23 +294,35 @@ async def _envoi_smtp(to, subject, html, text, *, unsubscribe_url) -> ResultatEn
     msg.add_alternative(html, subtype="html")
 
     def _envoyer() -> None:
-        port = int(settings.smtp_port or 587)
+        port = int(relais.get("port") or 587)
         if port == 465:
-            serveur = smtplib.SMTP_SSL(settings.smtp_host, port, timeout=20)
+            serveur = smtplib.SMTP_SSL(relais["host"], port, timeout=20)
         else:
-            serveur = smtplib.SMTP(settings.smtp_host, port, timeout=20)
+            serveur = smtplib.SMTP(relais["host"], port, timeout=20)
         with serveur:
             if port != 465:
                 serveur.starttls()
-            serveur.login(settings.smtp_user, settings.smtp_password)
+            serveur.login(relais["user"], relais["password"])
             serveur.send_message(msg)
 
     try:
         await asyncio.to_thread(_envoyer)
-        log.info("alerts.email.smtp_ok", to=masquer_email(to), host=settings.smtp_host)
-        return ResultatEnvoi(True, provider_id=f"smtp:{msg['Message-ID']}")
+        log.info("alerts.email.smtp_ok", to=masquer_email(to), relais=relais["nom"])
+        return ResultatEnvoi(True, provider_id=f"{relais['nom']}:{msg['Message-ID']}")
+    except (TimeoutError, smtplib.SMTPServerDisconnected) as e:
+        # Ambigu : le serveur a peut-être accepté le mail avant de couper.
+        log.error("alerts.email.smtp_failed", to=masquer_email(to), relais=relais["nom"], error=str(e))
+        return ResultatEnvoi(False, f"SMTP {type(e).__name__}: {e}"[:400])
+    except (smtplib.SMTPException, OSError) as e:
+        # Refus du serveur ou connexion impossible : rien n'est parti, le
+        # fournisseur suivant peut prendre le relais.
+        texte = str(e).lower()
+        if any(m in texte for m in ("quota", "limit", "exceeded", "too many")):
+            _mettre_en_pause(relais["nom"])
+        log.error("alerts.email.smtp_refus", to=masquer_email(to), relais=relais["nom"], error=str(e))
+        return ResultatEnvoi(False, f"SMTP-REFUS {type(e).__name__}: {e}"[:400])
     except Exception as e:
-        log.error("alerts.email.smtp_failed", to=masquer_email(to), error=str(e))
+        log.error("alerts.email.smtp_failed", to=masquer_email(to), relais=relais["nom"], error=str(e))
         return ResultatEnvoi(False, f"SMTP {type(e).__name__}: {e}"[:400])
 
 

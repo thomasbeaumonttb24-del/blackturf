@@ -353,7 +353,7 @@ async def envoyer_confirmation_pass(user, p) -> None:
     html, texte = confirmation_pass(user.prenom, libelle, p.montant_cents, p.debut, p.fin,
                                     RENONCIATION_TEXTE, p.renonciation_at)
     await send_email(to=user.email, subject=f"BlackTurf — {libelle} confirmé",
-                     html=html, text=texte)
+                     html=html, text=texte, transactionnel=True)
 
 def fin_pass(prenom: Optional[str]) -> tuple[str, str]:
     """Fin d'un pass sans renouvellement : on propose la suite, l'abonnement Expert."""
@@ -391,4 +391,4 @@ async def envoyer_fin_pass(user) -> None:
     from services.alerts import send_email
 
     html, texte = fin_pass(user.prenom)
-    await send_email(to=user.email, subject="BlackTurf — Votre pass est terminé", html=html, text=texte)
+    await send_email(to=user.email, subject="BlackTurf — Votre pass est terminé", html=html, text=texte, transactionnel=True)
