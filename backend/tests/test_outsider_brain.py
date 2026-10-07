@@ -65,6 +65,8 @@ def test_entrainer_promeut_un_cerveau_qui_voit_le_signal(monkeypatch):
     assert sel.groupby("course_id").size().max() <= ob.MAX_PAR_COURSE
     assert set(sel["niveau"]) <= {"fort", "a_suivre"}
     assert all(isinstance(r, list) for r in s["raisons"])
+    assert all(a["lus"] == len(art["colonnes"]) and a["criteres"] for a in s["analyse"])
+    assert any(c.startswith("r_") for c in art["colonnes"])
 
 
 def test_sans_cerveau_aucune_selection():
@@ -99,3 +101,27 @@ def test_non_abonne_ne_recoit_rien_d_identifiant_sur_une_course_a_venir():
     for plan in ("standard", "starter", "expert", "pro"):
         assert acces_complet(SimpleNamespace(plan=plan, is_admin=False))
     assert acces_complet(SimpleNamespace(plan="free", is_admin=True))
+
+
+def test_lire_musique():
+    assert ob.lire_musique("1a3a(25)Da0a5a7a") == ("1a 3a Da 0a 5a", 2, 5)
+    assert ob.lire_musique(None) == (None, None, 0)
+    assert ob.lire_musique("") == (None, None, 0)
+
+
+def test_fiche_place_chaque_critere_dans_le_champ():
+    row = pd.Series({"n_champ": 9, "partants": 9, "cote_figee": 21.0, "cote_premiere": 30.0,
+                     "rang_predit": 1, "musique": "2a1a3a",
+                     "f_taux_top3": 0.6, "r_taux_top3": 1.0,          # meilleur du champ
+                     "f_jours_repos": 120.0, "r_jours_repos": 1.0,    # le plus long repos : mauvais
+                     "f_cote_unibet": 12.0})
+    f = ob.fiche(row, {"colonnes": ["a"] * 456, "sens": {"taux_top3": 1}})
+    par = {c["libelle"]: c for c in f["criteres"]}
+    assert f["lus"] == 456
+    assert par["Podiums sur ses dernières courses"]["detail"] == "1er sur 9 · 60 %"
+    assert par["Podiums sur ses dernières courses"]["verdict"] == "favorable"
+    assert par["Jours depuis sa dernière course"]["verdict"] == "defavorable"
+    assert par["Musique (5 dernières)"]["verdict"] == "favorable"
+    assert par["Cote ailleurs qu'au PMU"]["detail"] == "12 ailleurs contre 21 au PMU"
+    assert par["Mouvement de cote"]["verdict"] == "favorable"
+    assert f["favorables"] >= 4 and f["defavorables"] >= 1

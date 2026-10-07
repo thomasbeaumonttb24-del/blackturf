@@ -17,7 +17,7 @@
 import { useId, useState, type ReactNode } from "react";
 import useSWR from "swr";
 import Link from "next/link";
-import { ArrowRight, ArrowUpRight, Check, Flame, Lock, Rocket, Target, Trophy } from "lucide-react";
+import { ArrowRight, ArrowUpRight, Check, ChevronDown, Flame, Lock, Rocket, Target, Trophy } from "lucide-react";
 import { outsidersApi } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { Tilt, useReveal } from "@/components/track-record/effets";
@@ -39,6 +39,8 @@ export interface Outsider {
   niveau: "fort" | "a_suivre";
   places_payees: number;
   raisons: string[];
+  /** Fiche d'analyse : chaque critère placé dans le champ du jour. */
+  analyse?: Analyse;
   non_partant: boolean;
   termine: boolean;
   position: number | null;
@@ -48,6 +50,21 @@ export interface Outsider {
   rapport_gagnant: number | null;
   /** Course à venir vue par un non-abonné : le serveur n'envoie alors QUE le niveau. */
   verrouille?: boolean;
+}
+
+export interface Critere {
+  libelle: string;
+  verdict: "favorable" | "defavorable" | "neutre";
+  detail: string;
+  position: number | null;
+  sur: number | null;
+}
+
+export interface Analyse {
+  lus?: number;
+  criteres?: Critere[];
+  favorables?: number;
+  defavorables?: number;
 }
 
 interface JourResp {
@@ -325,6 +342,70 @@ function CarteVerrouillee({ niveau }: { niveau: Outsider["niveau"] }) {
   );
 }
 
+/* ─── Fiche d'analyse ────────────────────────────────────────────────────── */
+
+const PASTILLE: Record<Critere["verdict"], string> = {
+  favorable: "bg-emerald-500 ring-emerald-200",
+  defavorable: "bg-rose-500 ring-rose-200",
+  neutre: "bg-stone-300 ring-stone-200",
+};
+
+function ResumeAnalyse({ a }: { a?: Analyse }) {
+  const n = a?.criteres?.length ?? 0;
+  if (!n) return null;
+  return (
+    <div className="mt-3 flex flex-wrap items-center gap-1.5 text-[11px] font-semibold">
+      <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-emerald-700 ring-1 ring-emerald-200">
+        <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" aria-hidden /> {a?.favorables ?? 0} favorables
+      </span>
+      <span className="inline-flex items-center gap-1 rounded-full bg-rose-50 px-2 py-0.5 text-rose-700 ring-1 ring-rose-200">
+        <span className="h-1.5 w-1.5 rounded-full bg-rose-500" aria-hidden /> {a?.defavorables ?? 0} défavorables
+      </span>
+      <span className="text-stone-400">sur {n} critères</span>
+    </div>
+  );
+}
+
+function FicheAnalyse({ a }: { a?: Analyse }) {
+  const criteres = a?.criteres ?? [];
+  if (criteres.length === 0) return null;
+  return (
+    <details className="group/fiche relative z-10 mt-4 rounded-2xl bg-stone-50/80 ring-1 ring-stone-200 open:bg-white">
+      <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-2 px-3 py-2.5 [&::-webkit-details-marker]:hidden">
+        <span className="text-[13px] font-bold text-gray-900">Analyse complète · {criteres.length} critères</span>
+        <span className="flex items-center gap-1.5 text-[11px] font-semibold">
+          <span className="text-emerald-700">{a?.favorables ?? 0} ✓</span>
+          <span className="text-stone-300">/</span>
+          <span className="text-rose-700">{a?.defavorables ?? 0} ✗</span>
+          <ChevronDown className="h-4 w-4 text-stone-400 transition-transform group-open/fiche:rotate-180" aria-hidden />
+        </span>
+      </summary>
+      <div className="border-t border-stone-200 px-3 pb-3 pt-2">
+        {a?.lus ? (
+          <p className="mb-2 text-[11.5px] leading-4 text-stone-500">
+            Le cerveau a lu {a.lus} signaux (valeurs et rang face aux adversaires du jour). Voici les critères qu&apos;un
+            turfiste regarde, chacun placé dans le champ.
+          </p>
+        ) : null}
+        <ul className="divide-y divide-stone-100">
+          {criteres.map((c) => (
+            <li key={c.libelle} className="flex items-start gap-2 py-1.5 text-[12.5px] leading-5">
+              <span className={cn("mt-1.5 h-2 w-2 shrink-0 rounded-full ring-2", PASTILLE[c.verdict])} aria-hidden />
+              <span className="min-w-0 flex-1 text-stone-700">{c.libelle}</span>
+              <span className="min-w-0 max-w-[55%] break-words text-right font-semibold tabular-nums text-gray-900">
+                {c.detail}
+              </span>
+              <span className="sr-only">
+                {c.verdict === "favorable" ? "favorable" : c.verdict === "defavorable" ? "défavorable" : "neutre"}
+              </span>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </details>
+  );
+}
+
 /* ─── Carte ──────────────────────────────────────────────────────────────── */
 
 export function OutsiderCarte({ o, compact = false }: { o: Outsider; compact?: boolean }) {
@@ -332,12 +413,10 @@ export function OutsiderCarte({ o, compact = false }: { o: Outsider; compact?: b
   const t = THEME[o.niveau];
   return (
     <Tilt max={4} className="h-full">
-      <Link
-        href={`/courses/${o.course_id}`}
-        aria-label={`Course ${o.code}${o.nom_cheval ? ` — ${titre(o.nom_cheval)}` : ""}`}
+      <article
         className={cn(
-          "group flex h-full flex-col rounded-3xl bg-gradient-to-b from-white to-[#FFFBF3] p-4 ring-1 transition-shadow sm:p-5",
-          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500",
+          "group relative flex h-full flex-col rounded-3xl bg-gradient-to-b from-white to-[#FFFBF3] p-4 ring-1 transition-shadow sm:p-5",
+          "focus-within:ring-2 focus-within:ring-amber-500",
           t.halo,
           o.termine && !o.place && "opacity-80",
         )}
@@ -401,6 +480,9 @@ export function OutsiderCarte({ o, compact = false }: { o: Outsider; compact?: b
           </div>
         </div>
 
+        {/* Bilan de l'analyse (compact) */}
+        {compact && <ResumeAnalyse a={o.analyse} />}
+
         {/* Raisons */}
         {!compact && o.raisons.length > 0 && (
           <ul className="mt-4 space-y-1.5 border-t border-stone-200 pt-3">
@@ -415,21 +497,33 @@ export function OutsiderCarte({ o, compact = false }: { o: Outsider; compact?: b
           </ul>
         )}
 
+        {/* Fiche complète (dépliable) */}
+        {!compact && <FicheAnalyse a={o.analyse} />}
+
         {/* Pied */}
         <div className="mt-auto flex flex-wrap items-center justify-between gap-2 pt-4">
           <Resultat o={o} />
-          <span className="inline-flex items-center gap-1 text-xs font-semibold text-stone-500 transition-colors group-hover:text-amber-700">
+          {/* Lien étiré : toute la carte mène à la course, sauf la fiche (z-10). */}
+          <Link
+            href={`/courses/${o.course_id}`}
+            aria-label={`Voir la course ${o.code}${o.nom_cheval ? ` — ${titre(o.nom_cheval)}` : ""}`}
+            className="inline-flex items-center gap-1 text-xs font-semibold text-stone-500 transition-colors after:absolute after:inset-0 after:rounded-3xl after:content-[''] focus-visible:outline-none group-hover:text-amber-700"
+          >
             Voir la course <ArrowUpRight className="h-3.5 w-3.5" aria-hidden />
-          </span>
+          </Link>
         </div>
-      </Link>
+      </article>
     </Tilt>
   );
 }
 
-function Grille({ children, cols = 3 }: { children: ReactNode; cols?: 2 | 3 }) {
+/** `depliable` : cartes avec fiche d'analyse — alignées en haut, pour qu'une fiche
+ *  ouverte n'étire pas sa voisine à vide. */
+function Grille({ children, cols = 3, depliable = false }: { children: ReactNode; cols?: 2 | 3; depliable?: boolean }) {
   return (
-    <div className={cn("grid grid-cols-1 gap-4 sm:grid-cols-2", cols === 3 && "lg:grid-cols-3")}>{children}</div>
+    <div className={cn("grid grid-cols-1 gap-4 sm:grid-cols-2", cols === 3 && "lg:grid-cols-3", depliable && "items-start [&>*]:h-auto")}>
+      {children}
+    </div>
   );
 }
 
@@ -588,7 +682,7 @@ export function OutsidersCourse({ courseId }: { courseId: string }) {
       <p className="-mt-2 mb-4 text-sm text-stone-500">
         Cote 15 ou plus, que le cerveau des outsiders juge capable de finir dans les {liste[0].places_payees} premiers.
       </p>
-      <Grille cols={2}>
+      <Grille cols={2} depliable>
         {liste.map((o, i) => (
           <OutsiderCarte key={`${o.numero ?? "x"}-${i}`} o={o} />
         ))}
@@ -652,7 +746,7 @@ export function OutsidersPage() {
             pas de signal.
           </p>
         ) : (
-          <Grille cols={2}>
+          <Grille cols={2} depliable>
             {aVenir.map((o, i) => (
               <OutsiderCarte key={o.verrouille ? `v-${i}` : `${o.course_id}-${o.numero ?? i}`} o={o} />
             ))}
@@ -663,7 +757,7 @@ export function OutsidersPage() {
         {finis.length > 0 && (
           <div className="mt-10">
             <TitreScene>Déjà courus aujourd&apos;hui</TitreScene>
-            <Grille cols={2}>
+            <Grille cols={2} depliable>
               {finis.map((o, i) => (
                 <OutsiderCarte key={`${o.course_id}-${o.numero ?? i}`} o={o} />
               ))}

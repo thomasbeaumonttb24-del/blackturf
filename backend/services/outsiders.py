@@ -69,17 +69,19 @@ async def rafraichir_signaux(session: AsyncSession, maintenant: Optional[datetim
     for r in retenus:
         await session.execute(text("""
             INSERT INTO outsider_signaux (participation_id, course_id, numero, chance_place,
-                cote_signal, niveau, places_payees, raisons, modele_entraine_le, actif)
-            VALUES (:pid, :cid, :num, :chance, :cote, :niveau, :places, CAST(:raisons AS jsonb), :ent, true)
+                cote_signal, niveau, places_payees, raisons, analyse, modele_entraine_le, actif)
+            VALUES (:pid, :cid, :num, :chance, :cote, :niveau, :places, CAST(:raisons AS jsonb),
+                    CAST(:analyse AS jsonb), :ent, true)
             ON CONFLICT (participation_id) DO UPDATE SET
                 chance_place = EXCLUDED.chance_place, cote_signal = EXCLUDED.cote_signal,
                 niveau = EXCLUDED.niveau, places_payees = EXCLUDED.places_payees,
-                raisons = EXCLUDED.raisons, modele_entraine_le = EXCLUDED.modele_entraine_le,
+                raisons = EXCLUDED.raisons, analyse = EXCLUDED.analyse, modele_entraine_le = EXCLUDED.modele_entraine_le,
                 actif = true, maj_at = now()
         """), {"pid": r["participation_id"], "cid": r["course_id"], "num": int(r["numero"]),
                "chance": round(float(r["chance"]), 4), "cote": float(r["cote_figee"]),
                "niveau": r["niveau"], "places": int(r["places"]),
                "raisons": json.dumps(list(r["raisons"]), ensure_ascii=False),
+               "analyse": json.dumps(r.get("analyse") or {}, ensure_ascii=False, default=float),
                "ent": art.get("entraine_le")})
     await session.commit()
     return {"status": "ok", "courses": len(cids), "signaux": len(retenus)}
@@ -119,7 +121,7 @@ def _position(classement, numero: int) -> Optional[int]:
 
 _SQL_LISTE = """
 SELECT o.participation_id, o.course_id, o.numero, o.chance_place, o.cote_signal, o.niveau,
-       o.places_payees, o.raisons, o.premier_signal_at,
+       o.places_payees, o.raisons, o.analyse, o.premier_signal_at,
        c.date_heure, c.hippodrome_nom, c.discipline, c.numero_reunion, c.numero AS numero_course,
        c.nom AS nom_course, c.statut, c.est_quinte,
        ch.nom AS nom_cheval, p.cote_pmu, p.non_partant, p.casaque_image_url, j.nom AS nom_jockey,
@@ -158,6 +160,7 @@ def _ligne(r) -> dict:
         "niveau": r["niveau"],
         "places_payees": r["places_payees"],
         "raisons": r["raisons"] if isinstance(r["raisons"], list) else json.loads(r["raisons"] or "[]"),
+        "analyse": r["analyse"] if isinstance(r["analyse"], dict) else json.loads(r["analyse"] or "{}"),
         "non_partant": bool(r["non_partant"]),
         "termine": termine,
         "position": position,

@@ -15,6 +15,11 @@ chance d'un outsider de finir dans les places payées au Simple Placé (3 premie
   Betfair (un outsider plus généreux au PMU qu'ailleurs est sous-coté au PMU), et la
   dérive de sa cote depuis le premier pronostic du jour (un outsider « joué »).
 
+- sa place DANS LE CHAMP du jour pour chacun de ces critères : rang de forme,
+  d'ELO, de podiums, de jockey, de vitesse… parmi TOUS les partants de la course
+  (ajouté le 2026-10-07 : AUC +0,005 sur les 3 mêmes découpes, log-loss
+  meilleure partout ; un critère ne vaut que comparé aux adversaires du jour).
+
 Sa sortie est mélangée à parts égales avec la proba placé du modèle général
 recalibrée sur la réalité des outsiders (isotone) : les deux se trompent autrement.
 
@@ -51,6 +56,7 @@ import json
 import math
 import os
 import pickle
+import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional, Sequence
@@ -68,7 +74,7 @@ COTE_OUTSIDER_MIN = 15.0          # n'affiche que ≥ 15
 SEUIL_A_SUIVRE = 0.22             # chance de place estimée
 SEUIL_FORT = 0.28
 MAX_PAR_COURSE = 2
-JOURS_HISTORIQUE = 180
+JOURS_HISTORIQUE = 120   # tous les partants sont lus : ~70 k lignes, mémoire du worker
 VALIDATION_JOURS = 14
 MIN_LIGNES_ENTRAINEMENT = 5_000
 MIN_LIGNES_VALIDATION = 1_500
@@ -116,7 +122,7 @@ WITH last AS (
     AND s.observed_at <= s.course_start_at AND {filtre}
   ORDER BY s.participation_id, s.observed_at ASC
 )
-SELECT l.participation_id, l.course_id, p.numero, p.cheval_id,
+SELECT l.participation_id, l.course_id, p.numero, p.cheval_id, p.musique,
        l.cote_figee, f.cote_premiere, l.proba_top1, l.proba_top3, l.rang_predit,
        l.features, l.observed_at,
        (SELECT count(*) FROM participations p2
@@ -138,8 +144,10 @@ _COLONNES_RESULTAT = """,
 async def charger_snapshots(session: AsyncSession, *, depuis: Optional[datetime] = None,
                             course_ids: Optional[Sequence[str]] = None,
                             avec_resultat: bool = False,
-                            cote_min: float = COTE_APPRENTISSAGE_MIN) -> pd.DataFrame:
-    """Snapshots pré-course (dernier + cote du premier) des partants cotés ≥ cote_min."""
+                            cote_min: float = 1.0) -> pd.DataFrame:
+    """Snapshots pré-course (dernier + cote du premier) de TOUS les partants
+    (le rang de chaque critère se mesure contre tout le champ ; `preparer` ne
+    garde ensuite que les cotes ≥ 10)."""
     params: dict = {"cote_min": cote_min}
     if course_ids is not None:
         if not course_ids:
@@ -175,12 +183,13 @@ def _features_dict(brut) -> dict:
     return {}
 
 
-def preparer(df: pd.DataFrame) -> pd.DataFrame:
-    """Ajoute les colonnes dérivées et aplatit le vecteur servi (préfixe `f_`).
+def preparer(df: pd.DataFrame, cote_min: float = COTE_APPRENTISSAGE_MIN) -> pd.DataFrame:
+    """Aplatit le vecteur servi (préfixe `f_`), place chaque critère dans le champ
+    (préfixe `r_`, rang centile parmi TOUS les partants lus de la course), puis ne
+    garde que les partants cotés ≥ `cote_min` et ajoute les colonnes dérivées.
 
-    `df` : une ligne par partant coté ≥ 10, colonnes du SQL ci-dessus. Les rangs
-    relatifs se calculent parmi CES lignes (les outsiders de la course), comme à
-    l'entraînement.
+    Les rangs « parmi les outsiders » (`p3_rank`, `p3_rel`) se calculent, eux,
+    après ce filtre — comme à l'entraînement.
     """
     d = df.reset_index(drop=True).copy()
     feats = pd.DataFrame([_features_dict(x) for x in d["features"]])
@@ -190,6 +199,17 @@ def preparer(df: pd.DataFrame) -> pd.DataFrame:
     d = pd.concat([d.drop(columns=["features"]), feats], axis=1)
     for c in ("cote_figee", "cote_premiere", "proba_top1", "proba_top3", "rang_predit", "partants"):
         d[c] = pd.to_numeric(d.get(c), errors="coerce")
+
+    fcols = list(feats.columns)
+    g = d.groupby("course_id")
+    rangs = g[fcols].rank(pct=True)
+    rangs.columns = [f"r_{c[2:]}" for c in fcols]
+    d = pd.concat([d, rangs], axis=1)
+    d["r_p3"] = g["proba_top3"].rank(pct=True)
+    d["r_p1"] = g["proba_top1"].rank(pct=True)
+    d["n_champ"] = g["course_id"].transform("size")
+    d = d[d["cote_figee"] >= cote_min].reset_index(drop=True)
+
     d["cote_premiere"] = d["cote_premiere"].fillna(d["cote_figee"])
     d["lc"] = np.log(d["cote_figee"].clip(lower=1.01))
     d["derive"] = np.log(d["cote_figee"].clip(lower=1.01) / d["cote_premiere"].clip(lower=1.01))
@@ -239,7 +259,8 @@ def entrainer_sur(d: pd.DataFrame, fin_train: pd.Timestamp) -> dict:
     import lightgbm as lgb
     from sklearn.isotonic import IsotonicRegression
 
-    colonnes = [c for c in d.columns if c.startswith("f_")] + COLONNES_DERIVEES
+    colonnes = ([c for c in d.columns if c.startswith("f_")]
+                + [c for c in d.columns if c.startswith("r_")] + COLONNES_DERIVEES)
     tr = d["jour"] < fin_train
     va = (~tr) & (d["cote_figee"] >= COTE_OUTSIDER_MIN)
     tr15 = tr & (d["cote_figee"] >= COTE_OUTSIDER_MIN)
@@ -279,6 +300,7 @@ def entrainer_sur(d: pd.DataFrame, fin_train: pd.Timestamp) -> dict:
     iso_final.fit(d.loc[tout15, "proba_top3"], y[tout15.to_numpy()])
     out["status"] = "promu"
     out["artefact"] = {"cerveau": clf_final, "iso_general": iso_final, "colonnes": colonnes,
+                       "sens": sens_criteres(d[tout15.to_numpy()], y[tout15.to_numpy()]),
                        "entraine_le": datetime.now(timezone.utc).isoformat(),
                        "validation": {k: v for k, v in out.items() if k != "artefact"}}
     return out
@@ -447,14 +469,156 @@ def raisons(contribs: np.ndarray, colonnes: Sequence[str], row: pd.Series,
     return out
 
 
+# Critères détaillés sur la fiche de chaque outsider. Le cerveau en lit plus de
+# 400 (valeur brute + rang dans le champ) ; ceux-ci sont ceux qu'un turfiste
+# lit, chacun placé contre les adversaires du jour. Le SENS (plus haut = mieux,
+# ou l'inverse) est appris sur les arrivées des outsiders (`sens_criteres`).
+FICHE: list[tuple[str, str, Optional[str]]] = [
+    ("taux_top3", "Podiums sur ses dernières courses", "pct"),
+    ("time_decay_form", "Forme récente (pondérée)", None),
+    ("forme_5_courses", "Forme sur 5 courses", None),
+    ("forme_1_course", "Dernière course", None),
+    ("proximite_vainqueur", "Écart au vainqueur (dernières courses)", None),
+    ("recent_win_rate", "Victoires récentes", "pct"),
+    ("taux_podium_carriere", "Podiums en carrière", "pct"),
+    ("career_win_rate", "Victoires en carrière", "pct"),
+    ("regularite", "Régularité", None),
+    ("elo_global", "Niveau ELO", "entier"),
+    ("elo_vs_champ", "ELO face aux adversaires du jour", "signe"),
+    ("gains_par_course_log", "Gains par course", None),
+    ("speed_figure_recent", "Vitesse récente", None),
+    ("speed_figure_best", "Meilleure vitesse", None),
+    ("dyn_reduction_km_moy", "Réduction kilométrique moyenne", None),
+    ("pref_distance_actuelle", "Aptitude à la distance du jour", "pct"),
+    ("pref_terrain_actuel", "Aptitude au terrain du jour", "pct"),
+    ("pref_hippodrome", "Aptitude à l'hippodrome", "pct"),
+    ("jockey_forme_30j", "Jockey : réussite sur 30 jours", "pct"),
+    ("jockey_taux_place_global", "Jockey : taux de places", "pct"),
+    ("entraineur_forme_30j", "Entraîneur : réussite sur 30 jours", "pct"),
+    ("entraineur_taux_place", "Entraîneur : taux de places", "pct"),
+    ("presse_consensus_score", "Avis de la presse", None),
+    ("nb_courses_90j", "Courses disputées sur 90 jours", "nb"),
+    ("jours_repos", "Jours depuis sa dernière course", "jours"),
+    ("class_drop_ratio_reel", "Niveau de la course face à ses précédentes", None),
+    ("valeur_latente", "Valeur latente", None),
+]
+# Sens par défaut tant qu'aucun cerveau n'a appris le sien (mesuré le 07/10 sur
+# 18 255 outsiders : seuls ces trois-là jouent à l'envers).
+_SENS_DEFAUT = {"jours_repos": -1, "dyn_reduction_km_moy": -1, "class_drop_ratio_reel": -1}
+# Absent = 0 dans le vecteur servi pour ces critères (trot seulement, ou pas de chrono).
+_ZERO_ABSENT = {"dyn_reduction_km_moy", "speed_figure_recent", "speed_figure_best"}
+
+
+def sens_criteres(d: pd.DataFrame, y: np.ndarray) -> dict:
+    """+1 si un rang plus haut dans le champ va avec plus de places, −1 sinon."""
+    out = {}
+    yy = pd.Series(y, index=d.index)
+    for nom, _, _ in FICHE:
+        col = f"r_{nom}"
+        if col not in d:
+            continue
+        c = d[col].corr(yy, method="spearman")
+        if c == c:  # pas NaN
+            out[nom] = 1 if c >= 0 else -1
+    return out
+
+
+def _valeur(v: float, fmt: Optional[str]) -> Optional[str]:
+    if fmt == "pct":
+        return f"{v * 100:.0f} %" if v <= 1.5 else None
+    if fmt == "jours":
+        return f"{v:.0f} j"
+    if fmt in ("nb", "entier"):
+        return f"{v:.0f}"
+    if fmt == "signe":
+        return f"{v:+.0f}"
+    return None
+
+
+_MUSIQUE_RE = re.compile(r"(\d+|[A-Za-z])([a-z])")
+
+
+def lire_musique(musique) -> tuple[Optional[str], Optional[int], int]:
+    """(5 dernières perfs lisibles, nb de podiums dedans, nb lues). PMU : « 1a3a(25)Da… »."""
+    if not isinstance(musique, str) or not musique.strip():
+        return None, None, 0
+    brut = re.sub(r"\(\d+\)", " ", musique)
+    perfs = [m.group(1).upper() + m.group(2) for m in _MUSIQUE_RE.finditer(brut)][:5]
+    if not perfs:
+        return None, None, 0
+    podiums = sum(1 for p in perfs if p[:-1].isdigit() and 1 <= int(p[:-1]) <= 3)
+    return " ".join(perfs), podiums, len(perfs)
+
+
+def _eme(p: int) -> str:
+    return f"{p}{'er' if p == 1 else 'e'}"
+
+
+def fiche(row: pd.Series, art: dict) -> dict:
+    """Fiche d'analyse d'un outsider : chaque critère avec sa place dans le champ."""
+    sens = {**_SENS_DEFAUT, **(art.get("sens") or {})}
+    n = int(_f(row, "n_champ") or _f(row, "partants") or 0)
+    criteres: list[dict] = []
+
+    def ajoute(libelle, verdict, detail, position=None):
+        criteres.append({"libelle": libelle, "verdict": verdict, "detail": detail,
+                         "position": position, "sur": n or None})
+
+    perfs, podiums, lues = lire_musique(row.get("musique"))
+    if perfs:
+        ajoute("Musique (5 dernières)", "favorable" if podiums and podiums >= 2 else
+               "defavorable" if lues >= 4 and not podiums else "neutre",
+               f"{perfs} — {podiums} podium{'s' if (podiums or 0) > 1 else ''} sur {lues}")
+
+    cote = _f(row, "cote_figee")
+    autres = [v for v in (_f(row, c) for c in ("f_cote_betfair_exchange", "f_cote_unibet",
+                                               "f_cote_winamax", "f_cote_betclic", "f_cote_bzh"))
+              if v and cote and cote * 0.35 <= v]
+    if autres and cote:
+        meilleur = min(autres)
+        ajoute("Cote ailleurs qu'au PMU", "favorable" if meilleur < cote * 0.85 else
+               "defavorable" if meilleur > cote * 1.15 else "neutre",
+               f"{meilleur:.0f} ailleurs contre {cote:.0f} au PMU")
+    prem = _f(row, "cote_premiere")
+    if prem and cote and abs(cote / prem - 1) >= 0.1:
+        ajoute("Mouvement de cote", "favorable" if cote < prem else "defavorable",
+               f"{prem:.0f} → {cote:.0f} depuis le premier pronostic")
+    rang = _f(row, "rang_predit")
+    if rang and n:
+        ajoute("Classement de notre modèle général",
+               "favorable" if rang <= max(1, round(n / 3)) else
+               "defavorable" if rang > n - n // 3 else "neutre",
+               f"{_eme(int(rang))} sur {n}", int(rang))
+
+    for nom, libelle, fmt in FICHE:
+        v, r = _f(row, f"f_{nom}"), _f(row, f"r_{nom}")
+        if v is None or r is None or not n or (nom in _ZERO_ABSENT and v == 0):
+            continue
+        rang_bas = max(1, min(n, round(r * n)))              # 1 = plus petite valeur
+        position = rang_bas if sens.get(nom, 1) < 0 else n - rang_bas + 1
+        tiers = max(1, n // 3)
+        verdict = ("favorable" if position <= tiers else
+                   "defavorable" if position > n - tiers else "neutre")
+        val = _valeur(v, fmt)
+        ajoute(libelle, verdict, f"{_eme(position)} sur {n}" + (f" · {val}" if val else ""), position)
+
+    return {
+        "lus": len(art.get("colonnes") or []),
+        "criteres": criteres,
+        "favorables": sum(1 for c in criteres if c["verdict"] == "favorable"),
+        "defavorables": sum(1 for c in criteres if c["verdict"] == "defavorable"),
+    }
+
+
 def scorer(d: pd.DataFrame, art: Optional[dict]) -> pd.DataFrame:
     """Chance de place estimée + raisons pour des lignes préparées (≥ 10)."""
     if d.empty:
-        return d.assign(chance=[], raisons=[])
+        return d.assign(chance=[], raisons=[], analyse=[])
     if art is None:
         # Pas de cerveau en service : proba placé du modèle général, jamais affichée
         # comme chance réelle (le module refuse alors de sélectionner, cf. selection).
-        return d.assign(chance=np.nan, raisons=[[] for _ in range(len(d))])
+        return d.assign(chance=np.nan, raisons=[[] for _ in range(len(d))],
+                        analyse=[{} for _ in range(len(d))])
     cols = art["colonnes"]
     X = matrice(d, cols)
     p_brain = art["cerveau"].predict_proba(X)[:, 1]
@@ -463,7 +627,8 @@ def scorer(d: pd.DataFrame, art: Optional[dict]) -> pd.DataFrame:
     contrib = art["cerveau"].booster_.predict(X, pred_contrib=True)
     n_out = d.groupby("course_id")["course_id"].transform("size").to_numpy()
     rs = [raisons(contrib[i, :-1], cols, d.iloc[i], int(n_out[i])) for i in range(len(d))]
-    return d.assign(chance=chance, raisons=rs)
+    analyses = [fiche(d.iloc[i], art) for i in range(len(d))]
+    return d.assign(chance=chance, raisons=rs, analyse=analyses)
 
 
 def selection(scored: pd.DataFrame) -> pd.DataFrame:
