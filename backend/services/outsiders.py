@@ -66,7 +66,7 @@ async def rafraichir_signaux(session: AsyncSession, maintenant: Optional[datetim
     if not brut.empty:
         brut = brut[brut["partants"] >= 4]
         if not brut.empty:
-            d = ob.preparer(brut)
+            d = ob.preparer(ob.cote_du_moment(brut))
             retenus = ob.selection(ob.scorer(d, art)).to_dict("records")
 
     # Courses encore ouvertes : on désactive puis on réactive ce qui est retenu.

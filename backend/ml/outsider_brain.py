@@ -125,7 +125,7 @@ WITH last AS (
     AND {filtre}
   ORDER BY s.participation_id, s.observed_at DESC
 )
-SELECT l.participation_id, l.course_id, p.numero, p.cheval_id, p.musique,
+SELECT l.participation_id, l.course_id, p.numero, p.cheval_id, p.musique, p.cote_pmu AS cote_live,
        l.cote_figee, p.cote_reference AS cote_premiere, l.proba_top1, l.proba_top3, l.rang_predit,
        l.features, l.observed_at,
        (SELECT count(*) FROM participations p2
@@ -183,6 +183,20 @@ def _features_dict(brut) -> dict:
         except ValueError:
             return {}
     return {}
+
+
+def cote_du_moment(df: pd.DataFrame) -> pd.DataFrame:
+    """En service : remplace la cote du dernier pronostic par la cote PMU LIVE.
+
+    La cote d'un snapshot peut dater de 20 minutes ou plus ; vu le 07/10/2026,
+    un outsider « coté 15 » au pronostic était à 5,2 au PMU au même moment, et
+    le site l'affichait encore comme une grosse cote. Sélection (≥ 15), fiche et
+    affichage se font donc sur la cote live ; sans cote live, celle du pronostic.
+    Jamais à l'entraînement (la cote live y est celle du départ : fuite)."""
+    d = df.copy()
+    live = pd.to_numeric(d.get("cote_live"), errors="coerce")
+    d["cote_figee"] = live.where(live > 1.0, pd.to_numeric(d["cote_figee"], errors="coerce"))
+    return d
 
 
 def preparer(df: pd.DataFrame, cote_min: float = COTE_APPRENTISSAGE_MIN) -> pd.DataFrame:

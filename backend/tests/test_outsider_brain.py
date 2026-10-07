@@ -162,3 +162,15 @@ def test_colonne_analyse_toujours_entre_guillemets():
     sql = "\n".join(l for l in src.splitlines() if not l.strip().startswith("#"))
     nus = re.findall(r'(?<![":\w])analyse(?![":\w])', sql)
     assert nus == [], f"« analyse » non cité dans le SQL : {len(nus)} occurrence(s)"
+
+
+def test_selection_sur_la_cote_live():
+    df = _jeu(4)
+    df["cote_live"] = df["cote_figee"]
+    df.loc[0, ["cote_figee", "cote_live"]] = [15.0, 5.2]       # joué : plus un outsider
+    df.loc[1, ["cote_figee", "cote_live"]] = [12.0, 18.0]      # devenu outsider
+    df.loc[2, ["cote_figee", "cote_live"]] = [20.0, None]      # pas de cote live : celle du pronostic
+    d = ob.cote_du_moment(df)
+    assert list(d["cote_figee"][:3]) == [5.2, 18.0, 20.0]
+    prep = ob.preparer(d)
+    assert "p0_0" not in set(prep["participation_id"])          # 5,2 < 10 : écarté
