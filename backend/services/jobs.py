@@ -90,6 +90,107 @@ async def job_retrain_trigger() -> None:
         log.error("jobs.retrain.error", error=str(e))
 
 
+# ── Rattrapage du retrain nocturne ──────────────────────────────────────────
+# Nuit du 06→07/10/2026 : un redémarrage de maintenance du VPS, programmé à
+# 02:00 UTC, a tué le retrain quatre secondes après son lancement. Le trigger de
+# 02:00 ne tire qu'UNE fois et le scheduler, en mémoire, oublie au redémarrage
+# ce qu'il a manqué : le modèle, les calibrations et les 28 apprentissages qui
+# suivent seraient restés sur la veille jusqu'à la nuit suivante, sans que rien
+# ne les relance. Ce job relit l'état PERSISTANT (`learning_step_runs`) et
+# relance le retrain s'il n'a pas conclu — quelle que soit la cause (reboot,
+# OOM, scheduler arrêté à 02:00).
+#
+# Fenêtre : de 02:15 à 06:45 UTC. Au-delà, le retrain finirait en pleine
+# matinée de courses ; mieux vaut alors laisser le rapport rouge et la nuit
+# suivante faire le travail.
+RATTRAPAGE_RETRAIN_HEURES_UTC = "2-6"
+RATTRAPAGE_RETRAIN_MINUTES = "15,45"
+# Deux relances au plus par nuit : un retrain qui meurt deux fois de suite a un
+# problème que relancer ne corrigera pas (et chaque relance pèse 1,5 Gio).
+RATTRAPAGE_RETRAIN_MAX = 2
+_RATTRAPAGE_RETRAIN_KEY = "ml:retrain:rattrapage:{jour}"
+_RETRAIN_FUNCS = ("ml.pipeline.retrain_if_needed",
+                  "ml.pipeline.run_incremental_retraining_sync")
+
+
+def decision_rattrapage_retrain(run: dict | None, maintenant, *, bail_actif: bool,
+                                en_file: bool, deja_relances: int) -> str:
+    """Faut-il relancer le retrain de la nuit ? Fonction PURE → testable.
+
+    Renvoie :
+      - ``"fait"``      : le retrain de cette nuit a conclu (succès OU échec
+                          applicatif — une exception se reproduirait à
+                          l'identique, le rapport du matin la signale) ;
+      - ``"en_cours"``  : un retrain tient le bail ou attend dans la file ;
+      - ``"plafond"``   : déjà relancé ``RATTRAPAGE_RETRAIN_MAX`` fois ;
+      - ``"relancer"``  : démarré puis disparu (« en_cours » sans bail vivant),
+                          ou jamais démarré cette nuit.
+
+    Le bail Redis est posé AVANT `demarrer_etape` et vit 2 h, plus que le
+    plafond RQ d'une heure : « en_cours » sans bail signifie donc que le
+    processus est mort sans écrire son issue.
+    """
+    from datetime import timedelta
+
+    # Même ancrage que le rapport du matin : la nuit commence au créneau de
+    # 02:00 UTC moins une heure de tolérance.
+    debut_nuit = maintenant.replace(hour=2, minute=0, second=0, microsecond=0) \
+        - timedelta(hours=1)
+    attempt = (run or {}).get("last_attempt_at")
+    statut = (run or {}).get("last_status")
+    if attempt is not None and attempt >= debut_nuit and statut != "en_cours":
+        return "fait"
+    if bail_actif or en_file:
+        return "en_cours"
+    if deja_relances >= RATTRAPAGE_RETRAIN_MAX:
+        return "plafond"
+    return "relancer"
+
+
+async def job_rattrapage_retrain() -> None:
+    """Relance le retrain nocturne s'il n'a pas conclu (reboot, OOM, scheduler absent)."""
+    from datetime import datetime, timezone
+
+    try:
+        import redis as sync_redis
+        from rq import Queue
+        from api.config import get_settings
+        from db.database import AsyncSessionLocal
+        from ml.learning_steps import dernier_run
+        from ml.pipeline import _RETRAIN_LEASE_KEY
+
+        maintenant = datetime.now(timezone.utc)
+        async with AsyncSessionLocal() as session:
+            run = await dernier_run(session, "retrain")
+
+        r = sync_redis.from_url(get_settings().redis_url)
+        q = Queue("ml", connection=r, default_timeout=3600)
+        en_file = any(j is not None and j.func_name in _RETRAIN_FUNCS
+                      for j in q.get_jobs())
+        cle = _RATTRAPAGE_RETRAIN_KEY.format(jour=maintenant.strftime("%Y-%m-%d"))
+        deja = int(r.get(cle) or 0)
+
+        decision = decision_rattrapage_retrain(
+            run, maintenant,
+            bail_actif=bool(r.exists(_RETRAIN_LEASE_KEY)),
+            en_file=en_file, deja_relances=deja)
+        if decision != "relancer":
+            log.info("jobs.retrain_rattrapage.rien", decision=decision,
+                     statut=(run or {}).get("last_status"), relances=deja)
+            return
+
+        r.incr(cle)
+        r.expire(cle, 36 * 3600)
+        job = q.enqueue("ml.pipeline.retrain_if_needed", result_ttl=86400,
+                        failure_ttl=ML_FAILURE_TTL_S)
+        log.warning("jobs.retrain_rattrapage.relance", job_id=job.id,
+                    tentative=deja + 1,
+                    statut_precedent=(run or {}).get("last_status"),
+                    demarre_le=str((run or {}).get("last_attempt_at")))
+    except Exception as e:  # noqa: BLE001
+        log.error("jobs.retrain_rattrapage.erreur", err=str(e)[:200])
+
+
 async def job_meta_learner_retrain() -> None:
     """
     03:00 UTC (après nightly retrain) — réentraîne le meta-learner contextuel.
@@ -680,6 +781,19 @@ def start_scheduler() -> None:
         id="retrain_trigger",
         replace_existing=True,
         misfire_grace_time=3600,
+    )
+
+    # Rattrapage du retrain — 02:15 → 06:45 UTC, toutes les 30 min : relance le
+    # retrain de la nuit s'il est mort sans conclure (reboot du 07/10/2026).
+    scheduler.add_job(
+        job_rattrapage_retrain,
+        CronTrigger(hour=RATTRAPAGE_RETRAIN_HEURES_UTC,
+                    minute=RATTRAPAGE_RETRAIN_MINUTES, timezone="UTC"),
+        id="rattrapage_retrain",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=600,
     )
 
     # Results polling — every 3 minutes between 10:00 and 22:00 Paris

@@ -672,3 +672,56 @@ def test_une_etape_perimee_dit_pourquoi(mod):
     })
     assert "PÉRIMÉ" in html
     assert "DataError" in html
+
+
+# ── Redémarrage du serveur pendant le retrain (nuit du 06→07/10/2026) ───────
+# Un reboot de maintenance programmé à 02:00 UTC a tué le retrain 4 s après son
+# départ. Le rapport accusait « OOM-kill ou plafond RQ » et envoyait lire
+# `dmesg`, vide puisque le noyau venait de redémarrer.
+
+def test_reboot_apres_le_demarrage_est_nomme_comme_tel(mod):
+    debut = datetime(2026, 10, 7, 2, 0, 2, tzinfo=timezone.utc)
+    boot = datetime(2026, 10, 7, 2, 0, 24, tzinfo=timezone.utc)
+    statut = mod._verdict(_db(statut_etape="en_cours", attempt_at=debut, boot_at=boot),
+                          LOGS_ABSENTS, {"version": 557})
+    assert statut == "redemarre"
+    assert mod.VERDICTS[statut][0] == "🔴"
+    assert "rattrapage" in mod.VERDICTS[statut][2]
+
+
+def test_reboot_anterieur_au_demarrage_ne_change_rien(mod):
+    """Machine redémarrée la veille : l'interruption a une autre cause."""
+    debut = datetime(2026, 10, 7, 2, 0, 2, tzinfo=timezone.utc)
+    boot = debut - timedelta(days=3)
+    assert mod._verdict(_db(statut_etape="en_cours", attempt_at=debut, boot_at=boot),
+                        LOGS_ABSENTS, {"version": 557}) == "interrompu"
+
+
+def test_reboot_apres_un_retrain_termine_ne_le_rend_pas_rouge(mod):
+    """Le retrain avait conclu avant le reboot : son issue fait foi."""
+    debut = datetime(2026, 10, 7, 2, 0, 2, tzinfo=timezone.utc)
+    assert mod._verdict(_db(issue="promu", attempt_at=debut,
+                            boot_at=debut + timedelta(hours=1)),
+                        LOGS_ABSENTS, {"version": 558, "age_jours": 0}) == "promu"
+
+
+def test_heure_de_demarrage_lue_dans_proc_stat(mod, tmp_path):
+    f = tmp_path / "stat"
+    f.write_text("cpu  1 2 3\nbtime 1791338424\nprocesses 9\n", encoding="ascii")
+    assert mod._heure_demarrage_machine(str(f)) == \
+        datetime.fromtimestamp(1791338424, timezone.utc)
+
+
+def test_heure_de_demarrage_illisible_ne_s_invente_pas(mod, tmp_path):
+    assert mod._heure_demarrage_machine(str(tmp_path / "absent")) is None
+    f = tmp_path / "stat"
+    f.write_text("cpu 1 2 3\n", encoding="ascii")
+    assert mod._heure_demarrage_machine(str(f)) is None
+
+
+def test_la_source_du_verdict_nomme_le_reboot(mod):
+    debut = datetime(2026, 10, 7, 2, 0, 2, tzinfo=timezone.utc)
+    boot = datetime(2026, 10, 7, 2, 0, 24, tzinfo=timezone.utc)
+    bloc = mod._bloc_source(_db(statut_etape="en_cours", attempt_at=debut, boot_at=boot),
+                            LOGS_ABSENTS)
+    assert "serveur redémarré à 07/10 02:00:24 UTC" in bloc

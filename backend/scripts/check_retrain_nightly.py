@@ -219,8 +219,9 @@ VERDICTS = {
         "recréé depuis (déploiement) — `docker logs` ne remonte pas au-delà de "
         "l'instance courante. Rien à faire."),
     "absent": ("🔴", "Aucun retrain n'a démarré cette nuit",
-               "Le job planifié 02:00 UTC ne s'est pas déclenché. Vérifier que le "
-               "conteneur scheduler tourne et que le job est bien enregistré."),
+               "Le job planifié 02:00 UTC ne s'est pas déclenché, et le "
+               "rattrapage (02:15 → 06:45 UTC) non plus. Vérifier que le "
+               "conteneur scheduler tourne et que les jobs sont bien enregistrés."),
     # Le retrain a été VU démarrer par la base (`learning_step_runs` = en_cours)
     # et n'a jamais écrit son issue : le processus a disparu en cours de route.
     # Sans la trace de démarrage, ce cas était indiscernable de « le scheduler
@@ -229,7 +230,20 @@ VERDICTS = {
                    "Le processus a été tué en cours d'exécution — OOM-kill "
                    "(`dmesg -T | grep -i oom` sur le VPS le confirme en une "
                    "commande) ou dépassement du plafond RQ d'une heure. Le job "
-                   "est dans la FailedJobRegistry de la file `ml`."),
+                   "est dans la FailedJobRegistry de la file `ml`. Le scheduler "
+                   "le relance seul (`job_rattrapage_retrain`, 02:15 → 06:45 UTC, "
+                   "2 fois au plus) ; si ce rapport reste rouge, c'est que les "
+                   "relances ont échoué elles aussi."),
+    # Le serveur ENTIER a redémarré pendant le retrain (07/10/2026 : reboot de
+    # maintenance programmé à 02:00 UTC). Le rapport accusait l'OOM ou le
+    # plafond RQ et envoyait chercher dans `dmesg`, qui ne montrait rien — le
+    # journal du noyau d'avant le reboot n'y est plus.
+    "redemarre": ("🔴", "Le serveur a redémarré pendant le retrain",
+                  "Ce n'est ni un OOM ni le plafond RQ : la machine elle-même a "
+                  "redémarré (`journalctl --list-boots`, puis `journalctl -b -1 "
+                  "-n 80` pour la cause). Le scheduler relance le retrain seul "
+                  "(`job_rattrapage_retrain`, 02:15 → 06:45 UTC). Ne JAMAIS "
+                  "programmer de maintenance entre 01:45 et 03:00 UTC."),
     # Le retrain vient de démarrer et n'a pas encore conclu : ce n'est PAS une
     # panne. Le dire en rouge ferait chercher une cause à un travail en cours,
     # et c'est ainsi qu'on apprend à ignorer les alertes.
@@ -263,6 +277,22 @@ def _debut_fenetre(maintenant: datetime) -> datetime:
     if debut > maintenant:
         debut -= timedelta(days=1)
     return debut - timedelta(hours=TOLERANCE_AVANT_H)
+
+
+def _heure_demarrage_machine(chemin: str = "/proc/stat") -> datetime | None:
+    """Heure du dernier démarrage du NOYAU (ligne `btime` de /proc/stat).
+
+    `btime` n'est pas isolé par les namespaces : lu depuis un conteneur, c'est
+    bien le démarrage de l'hôte. None si illisible — jamais une date inventée.
+    """
+    try:
+        with open(chemin, encoding="ascii") as fh:
+            for ligne in fh:
+                if ligne.startswith("btime "):
+                    return datetime.fromtimestamp(int(ligne.split()[1]), timezone.utc)
+    except (OSError, ValueError, IndexError):
+        pass
+    return None
 
 
 async def _etat_retrain_db() -> dict:
@@ -307,6 +337,7 @@ async def _etat_retrain_db() -> dict:
         "statut_etape": run.get("last_status"),
         "erreur": run.get("last_error"),
         "attempt_at": attempt,
+        "boot_at": _heure_demarrage_machine(),
         "detail": detail,
         "issue": (detail or {}).get("issue"),
         "raison": (detail or {}).get("raison"),
@@ -336,6 +367,12 @@ def _verdict(db: dict, logs: dict, modele: dict) -> str:
             # c'est l'ÂGE du démarrage qui tranche : en deçà du plafond RQ, le
             # retrain travaille peut-être encore ; au-delà, il est mort sans
             # avoir pu écrire quoi que ce soit.
+            #
+            # Sauf si la machine a redémarré APRÈS le démarrage : alors le
+            # processus est mort, quel que soit son âge, et la cause est connue.
+            _boot, _debut = db.get("boot_at"), db.get("attempt_at")
+            if _boot is not None and _debut is not None and _boot > _debut:
+                return "redemarre"
             if oom:
                 return "oom"
             return "interrompu" if db.get("demarre_depuis_trop_longtemps", True) \
@@ -786,6 +823,9 @@ def _bloc_source(db: dict | None, logs: dict | None) -> str:
         }.get(issue, f"issue non enregistrée (statut « {db.get('statut_etape')} »)")
         if raison:
             detail_txt += f" — motif <code>{raison}</code>"
+        boot = db.get("boot_at")
+        if boot is not None and quand is not None and boot > quand:
+            detail_txt += f" — <b>serveur redémarré à {boot.strftime('%d/%m %H:%M:%S UTC')}</b>"
         provenance = (f"base <code>learning_step_runs</code> : démarré {quand_txt}, "
                       f"{detail_txt}")
     elif db.get("lisible"):
