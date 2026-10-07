@@ -13,6 +13,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -85,8 +86,65 @@ def _euros(cents: Optional[int]) -> str:
     return f"{cents / 100:.2f} €".replace(".", ",") if cents else "—"
 
 
+PARIS = ZoneInfo("Europe/Paris")
+
+
 def _jour(d: Optional[datetime]) -> str:
-    return d.strftime("%d/%m/%Y à %H:%M") if d else "—"
+    # Heure de Paris : l'exploitant lisait « 17:57 » (UTC) sur un mail reçu à 19:57.
+    if not d:
+        return "—"
+    return (d if d.tzinfo else d.replace(tzinfo=timezone.utc)).astimezone(PARIS) \
+        .strftime("%d/%m/%Y à %H:%M")
+
+
+def _paiement_echoue_explique(event: SubscriptionEvent) -> tuple[str, str, list[tuple[str, str]]]:
+    """Libellé, explication et lignes propres à un paiement refusé.
+
+    Un seul libellé « Paiement en échec — accès coupé » couvrait deux situations
+    opposées (2026-10-07) : le prospect dont la carte est refusée À L'INSCRIPTION
+    (il n'a jamais eu accès, rien n'est « coupé ») et l'abonné dont le
+    renouvellement est refusé. La « fin de période » affichée pour le premier était
+    celle d'un mois jamais payé, ce qui ajoutait à la confusion.
+    """
+    from services.relances_paiement import TENTATIVES_MAX
+
+    d = event.detail or {}
+    tentative = int(d.get("tentative") or 1)
+    premier = d.get("motif") == "subscription_create"
+    lignes: list[tuple[str, str]] = []
+
+    if d.get("acces_ouvert"):
+        libelle = "Paiement refusé — accès maintenu par un autre abonnement"
+        explication = ("Une facture a été refusée, mais le compte garde son accès "
+                       "grâce à un autre abonnement encore payé.")
+    elif premier and tentative <= 1:
+        libelle = "Carte refusée à l'inscription — abonnement non ouvert"
+        explication = ("Le client a voulu s'abonner mais sa banque a refusé le paiement. "
+                       "Il n'a jamais eu accès à la formule et reste en Gratuit : "
+                       "aucun accès n'a été retiré.")
+    elif tentative > 1:
+        libelle = "Relance refusée — toujours impayé"
+        explication = ("La nouvelle tentative de prélèvement a encore été refusée. "
+                       "Le compte reste en Gratuit.")
+    else:
+        libelle = "Renouvellement refusé — accès coupé"
+        explication = ("L'abonné payait, mais le prélèvement de la nouvelle période a été "
+                       "refusé. Il repasse en Gratuit jusqu'à ce qu'un paiement passe.")
+
+    lignes.append(("Tentative", f"{tentative} sur {TENTATIVES_MAX}"))
+    relance = d.get("prochaine_relance")
+    lignes.append(("Prochaine relance",
+                   _jour(datetime.fromtimestamp(relance, timezone.utc)) if relance
+                   else "aucune — abonnement clos au prochain passage des relances"))
+    if d.get("acces_ouvert"):
+        a_faire = "Rien."
+    elif premier and tentative <= 1:
+        a_faire = ("Rien d'obligatoire. Un mot au client (« ta carte a été refusée, "
+                   "réessaie avec une autre ») peut sauver la vente.")
+    else:
+        a_faire = "Rien : relance automatique, accès rendu dès qu'un paiement passe."
+    lignes.append(("À faire", a_faire))
+    return libelle, explication, lignes
 
 
 async def journaliser(
@@ -162,6 +220,11 @@ async def _notifier_admin(event: SubscriptionEvent) -> None:
         from services.alerts import send_email
 
         libelle = LIBELLES.get(event.type, event.type)
+        explication, lignes_propres = "", []
+        if event.type == "paiement_echoue":
+            libelle, explication, lignes_propres = _paiement_echoue_explique(event)
+        premier_refus = (event.type == "paiement_echoue"
+                         and (event.detail or {}).get("motif") == "subscription_create")
         lignes = [
             ("Compte", event.email or "—"),
             ("Mouvement", libelle),
@@ -173,13 +236,16 @@ async def _notifier_admin(event: SubscriptionEvent) -> None:
             lignes.append(("Montant", _euros(event.montant_cents)))
         if event.essai_fin:
             lignes.append(("Fin d'essai", _jour(event.essai_fin)))
-        if event.periode_fin:
+        # Après une carte refusée à l'inscription, la « fin de période » est celle
+        # d'un mois jamais payé : la montrer laissait croire à un accès en cours.
+        if event.periode_fin and not premier_refus:
             lignes.append(("Fin de période", _jour(event.periode_fin)))
         if event.pendant_essai is not None:
             lignes.append(("Survenu pendant l'essai",
                            "oui" if event.pendant_essai else "non"))
         if event.stripe_subscription_id:
             lignes.append(("Abonnement Stripe", event.stripe_subscription_id))
+        lignes.extend(lignes_propres)
 
         corps = "".join(
             f"<tr><td style='padding:4px 12px 4px 0;color:#666;'>{k}</td>"
@@ -189,7 +255,9 @@ async def _notifier_admin(event: SubscriptionEvent) -> None:
         await send_email(
             to=settings.admin_email,
             subject=f"[BlackTurf] {libelle} — {event.email or 'compte inconnu'}",
-            html=f"<p>{libelle}</p><table>{corps}</table>"
+            html=f"<p>{libelle}</p>"
+                 + (f"<p style='color:#444;'>{explication}</p>" if explication else "")
+                 + f"<table>{corps}</table>"
                  f"<p style='color:#666;font-size:11px;'>"
                  f"Suivi complet : {settings.frontend_url}/admin</p>",
         )
