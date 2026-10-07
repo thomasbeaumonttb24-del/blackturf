@@ -134,8 +134,10 @@ def generer_recommandations_course(
     recos = []
 
     # ── 🟢 SAFE — Simple Placé ────────────────────────────────────────────
-    if top1 and top1.get("proba_top3", 0) >= 0.50:
-        cote = top1.get("cote_pmu", 3.0)
+    # Un partant sans cote PMU publiée porte `cote_pmu = None` (plus de 5,0
+    # fabriqué depuis le 2026-10-07) : pas de pari conseillé sur un prix inconnu.
+    if top1 and top1.get("proba_top3", 0) >= 0.50 and _cote_connue(top1):
+        cote = float(top1["cote_pmu"])
         mise = _kelly_mise(top1.get("ev_max", 0), cote, bankroll, fraction=0.5)
         mise = max(mise, 1.50)
         recos.append({
@@ -175,10 +177,10 @@ def generer_recommandations_course(
 
     # ── 🔵 ÉQUILIBRÉ — Simple Gagnant + Couplé Gagnant + 2sur4 + Trio ────
     # Value bets avec EV > 0.10
-    vbs = [p for p in pred_sorted if p.get("ev_max", 0) > 0.10]
+    vbs = [p for p in pred_sorted if p.get("ev_max", 0) > 0.10 and _cote_connue(p)]
     if vbs:
         best_vb = vbs[0]
-        cote = best_vb.get("cote_pmu", 5.0)
+        cote = float(best_vb["cote_pmu"])
         mise = _kelly_mise(best_vb.get("ev_max", 0), cote, bankroll)
         mise = max(mise, 1.50)
         recos.append({
@@ -327,13 +329,21 @@ def generer_recommandations_course(
     return recos
 
 
+def _cote_connue(p: dict) -> bool:
+    """Vraie cote PMU publiée (> 1) — un partant sans cote n'a pas de prix à jouer."""
+    try:
+        return float(p.get("cote_pmu")) > 1.0
+    except (TypeError, ValueError):
+        return False
+
+
 def _kelly_mise(ev: float, cote: float, bankroll: float, fraction: float = 0.5) -> float:
     """Mise Kelly demi-fraction, plafonnée à 5% bankroll.
 
     f* = EV / (cote − 1) (pas EV / cote). EV ≤ 0 ⇒ pas de valeur ⇒ pas de mise (0),
     on ne force plus un stake plancher de 2€ sur un pari sans espérance positive.
     """
-    if ev <= 0 or cote <= 1.0:
+    if not ev or ev <= 0 or cote is None or cote <= 1.0:
         return 0.0
     mise = (ev * bankroll / (cote - 1.0)) * fraction
     return min(mise, bankroll * 0.05)

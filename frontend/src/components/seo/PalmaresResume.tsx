@@ -59,7 +59,7 @@ export function PalmaresResume({ tr }: { tr: SeoTrackRecord | null }) {
           k: "Rendement du favori de l'algorithme",
           v: pct(g.favori_roi),
           // Le ROI se mesure sur les seules courses dont le rapport est connu.
-          s: `sur ${(g.favori_mise_totale ?? g.nb_favoris_evalues).toLocaleString("fr-FR")} courses, 1 € Gagnant`,
+          s: `sur ${(g.favori_mise_totale || g.nb_favoris_evalues).toLocaleString("fr-FR")} courses, 1 € Gagnant`,
           icon: TrendingDown, ton: "from-rose-400 to-rose-600 text-white",
           jauge: null, hasard: null,
         },
@@ -153,7 +153,7 @@ export function PalmaresResume({ tr }: { tr: SeoTrackRecord | null }) {
                 <p className="text-sm leading-relaxed text-brand-charcoal">
                   <strong className="text-brand-dark">Ce que cela ne veut pas dire.</strong> Miser 1 €
                   Gagnant sur le favori de l&apos;algorithme, sur ces{" "}
-                  {(g.favori_mise_totale ?? g.nb_favoris_evalues).toLocaleString("fr-FR")} courses, aurait rendu{" "}
+                  {(g.favori_mise_totale || g.nb_favoris_evalues).toLocaleString("fr-FR")} courses, aurait rendu{" "}
                   {pct(g.favori_roi)} — autrement dit une perte. Le PMU prélève environ 20 % des
                   enjeux avant toute redistribution : le pari hippique est un jeu à somme négative,
                   et mieux classer les chevaux que le hasard ne suffit pas à le renverser. BlackTurf

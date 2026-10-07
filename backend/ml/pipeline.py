@@ -3399,7 +3399,13 @@ async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Option
             "est_tierce": course.est_tierce,
             "est_2sur4": course.est_2sur4,
         }
-        recos = generer_recommandations_course(predictions, course_info, bankroll=user_bankroll)
+        # Les recommandations sont un complément d'affichage : leur échec ne doit
+        # jamais annuler les prédictions de la course (même transaction).
+        try:
+            recos = generer_recommandations_course(predictions, course_info, bankroll=user_bankroll)
+        except Exception as e:  # noqa: BLE001
+            log.warning("pipeline.recommandations_echec", course_id=course_id, err=str(e)[:160])
+            recos = []
 
         # ── Remplacer les EV/probas HARDCODÉS des paris combinés par les valeurs
         # RÉELLES du moteur Plackett-Luce (intégrité : aucune valeur inventée). ──

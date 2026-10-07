@@ -510,6 +510,9 @@ async def run_backtest(
         if not arrivee:
             continue
 
+        # NB : le repli sur `p.cote_pmu` ne sert qu'aux pronostics ANTÉRIEURS à la
+        # colonne `cote_figee` ; depuis le 2026-10-07 un NULL veut dire « pas de cote
+        # au gel » et ce partant retombe sur sa cote de clôture (biais rare, connu).
         # Partants + cotes + proba prédite. `cote_selection` rejoue honnêtement ce
         # que le moteur connaissait avant le départ ; `cote_finale` ne sert JAMAIS à
         # sélectionner, uniquement au règlement du gain après l'arrivée.

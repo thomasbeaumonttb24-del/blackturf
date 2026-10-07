@@ -1319,6 +1319,9 @@ def _tickets_quinte_coups(ctx: dict, interdits: list[list[int]]) -> list[list[in
                                                                  len(_rep))]
     # Pieds intermédiaires (rangs 6 à 8) absents des tickets du modéré : d'autres
     # chevaux que lui, pas seulement d'autres combinaisons des mêmes.
+    # Numéros des tentatives : l'affichage les marque « coup » quel que soit leur
+    # rang (sur un petit champ, elles ne sont pas hors du top 8).
+    ctx["tentatives"] = {int(parts[i]["numero"]) for i in tentatives}
     deja = {i for t in interdits for i in t}
     milieu = [i for i in ordre[QUINTE_COUP_BASES:] if i not in tentatives
               and _rang(i) <= QUINTE_VIVIER and i not in deja][:2]
@@ -1409,6 +1412,7 @@ def _combinaisons_quinte_tickets(preds: list[dict], profil: str = "agressif",
         return {"tickets": tickets, "proba_gain": round(float(cinq.mean()), 4),
                 "proba_bonus": round(float((retour & ~cinq).mean()), 4),
                 "appui": ctx["appui"], "rang": ctx["rang"],
+                "tentatives": sorted(ctx.get("tentatives") or []),
                 "chevaux_moderes": sorted({int(ctx["parts"][i]["numero"])
                                            for t in probables for i in t})}
     except Exception as e:  # noqa: BLE001 — module indisponible plutôt que faux
@@ -1443,9 +1447,10 @@ def _module_quinte_tickets(preds: list[dict], montant: int, base: dict, profil: 
     par_num = {int(p["numero"]): p for p in preds}
     joues = list(dict.fromkeys(n_ for t in tickets for n_ in t["numeros"]))
 
+    tentatives_nums = set(res.get("tentatives") or [])
+
     def _role(num: int) -> str:
-        r = rang_par_num.get(num) or 99
-        if profil == "agressif" and r > QUINTE_VIVIER:
+        if profil == "agressif" and num in tentatives_nums:
             return "tentative"
         return "base"
 
@@ -1465,8 +1470,12 @@ def _module_quinte_tickets(preds: list[dict], montant: int, base: dict, profil: 
     rapports = sorted(t["rapport_estime"] for t in tickets)
     if profil == "agressif":
         n_tent = sum(1 for c in chevaux if c["role"] == "tentative")
+        _hors = (f"classé hors du top {QUINTE_VIVIER}"
+                 if all((rang_par_num.get(c["numero"]) or 99) > QUINTE_VIVIER
+                        for c in chevaux if c["role"] == "tentative")
+                 else "parmi les derniers du classement (petit champ)")
         resume = (f"{n} tickets « coups » : chacun garde au moins deux des meilleurs "
-                  f"chevaux et tente un outsider classé hors du top {QUINTE_VIVIER} "
+                  f"chevaux et tente un outsider {_hors} "
                   f"({n_tent} outsider{'s' if n_tent > 1 else ''} retenu"
                   f"{'s' if n_tent > 1 else ''} sur leurs signaux : détection, écart de "
                   "prix, argent qui rentre, forme). Aucun ticket n'est celui du profil modéré.")
@@ -4586,7 +4595,10 @@ def reprice_plan_live(plan: dict, predictions: list[dict], course_info: dict) ->
             cotes_live[int(p["numero"])] = c_
 
     ev_pondere = 0.0
-    montant = float(plan.get("montant_total") or 0) or None
+    # Même dénominateur qu'à la génération (`_assemble_plan` : le plan PRINCIPAL) —
+    # `montant_total` inclut le Quinté+ et divisait l'EV live par deux sur un plan
+    # modéré de 10 € (10 € de Quinté+ ajoutés).
+    montant = float(plan.get("montant_joue") or plan.get("montant_total") or 0) or None
     for niv in plan.get("niveaux", []):
         m_niv = 0.0
         for p in niv.get("paris", []):

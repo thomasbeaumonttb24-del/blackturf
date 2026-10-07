@@ -849,11 +849,12 @@ def _rapport_place(p: dict, nb_partants: Optional[int] = None) -> Optional[float
         return None
     if cote <= 1.0:
         return None
-    p_win_marche = TRJ["Simple Gagnant"] / cote
-    q_place = min(0.95, p_win_marche / _P1_FROM_P3)
-    if nb_partants is not None and nb_partants < 8:
-        # 2 places payées (4-7 partants) : top-2 ≈ 2/3 du top-3.
-        q_place = min(0.95, q_place * 2.0 / 3.0)
+    p_win_marche = min(TRJ["Simple Gagnant"] / cote, 0.95)
+    # Chance de place du marché ≈ 1 − (1 − p)^k, k = places payées. La règle
+    # linéaire p / 0,35 saturait dès la cote 3 (q = 0,81 → rapport 1,05 contre
+    # ~1,3 payé en réalité) et rayait le Simple Placé de tout favori.
+    places = 2 if (nb_partants is not None and nb_partants < 8) else 3
+    q_place = min(0.95, 1.0 - (1.0 - p_win_marche) ** places)
     return max(1.05, TRJ["Simple Placé"] / q_place)
 
 
@@ -1121,7 +1122,9 @@ def dutching_calculator(
     if all(p is not None for p in probas_modele):
         proba_un_gagne = min(1.0, sum(max(0.0, float(p)) for p in probas_modele))
         esperance = proba_un_gagne * retour_si_un_gagne - total_cost
-        is_profitable = esperance > 0 and dutch_value > 1.0
+        # Tolérance d'un centime : avec proba = 1/cote, l'espérance vaut 0 au bruit
+        # flottant près et ne doit jamais s'afficher « positive ».
+        is_profitable = esperance > 0.01 and dutch_value > 1.0
     else:
         proba_un_gagne = None
         esperance = None

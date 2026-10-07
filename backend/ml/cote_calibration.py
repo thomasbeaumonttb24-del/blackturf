@@ -67,7 +67,10 @@ async def compute_cote_calibration(session: AsyncSession) -> dict:
     _p1c = "COALESCE(pr.proba_top1_raw, pr.proba_top1)" if _AF.calib_on_raw else "pr.proba_top1"
     _p3c = "COALESCE(pr.proba_top3_raw, pr.proba_top3)" if _AF.calib_on_raw else "pr.proba_top3"
     rows = (await session.execute(text(f"""
-        SELECT COALESCE(pr.cote_figee, pa.cote_pmu) AS cote,
+        -- Cote FIGÉE seule : depuis le 2026-10-07 elle vaut NULL quand aucune cote
+        -- n'était publiée au gel ; retomber sur `participations.cote_pmu` (la cote
+        -- de clôture, connue après la course) réintroduirait du hindsight.
+        SELECT pr.cote_figee AS cote,
                {_p1c} AS p1, {_p3c} AS p3,
                {sql_est_gagnant("pa.numero")} AS win,
                -- Placé = `position` 1 à 3 (dead-heat compris), pas les 3 premiers
@@ -83,7 +86,7 @@ async def compute_cote_calibration(session: AsyncSession) -> dict:
         JOIN participations pa ON pa.participation_id = pr.participation_id
         JOIN courses c ON c.course_id = pr.course_id AND c.statut = 'termine'
         JOIN resultats r ON r.course_id = pr.course_id
-        WHERE COALESCE(pr.cote_figee, pa.cote_pmu) > 1
+        WHERE pr.cote_figee > 1
           AND jsonb_typeof(r.classement) = 'array'
           AND pr.created_at IS NOT NULL
           AND c.date_heure IS NOT NULL

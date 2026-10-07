@@ -2116,10 +2116,23 @@ async def get_mise_plan(
                 "positifs": exp.get("facteurs_positifs", []),
                 "negatifs": exp.get("facteurs_negatifs", []),
             }
-            horse_contexts[n] = build_horse_context(feats or {}, computed_at)
     except Exception:
         signal_mults = {}
         facteurs_chevaux = {}
+    # Contexte des chevaux dans SON PROPRE essai : il entre dans la sélection (appui
+    # des signaux) ; une panne de signal_performance ou de la narration ne doit pas
+    # l'effacer du plan servi alors que le plan figé (profil_learning) le garde.
+    try:
+        from ml.horse_context import build_horse_context
+        from db.models import FeatureML as _FMc
+        fqc = (_s(Participation.numero, _FMc.features, _FMc.computed_at)
+               .join(_FMc, _FMc.participation_id == Participation.participation_id)
+               .where(Participation.course_id == course_id))
+        horse_contexts = {int(numero): build_horse_context(feats or {}, computed_at)
+                          for numero, feats, computed_at in (await db.execute(fqc)).all()}
+    except Exception as e:  # noqa: BLE001
+        log.warning("mise_plan.contexte_chevaux_indisponible", course_id=course_id,
+                    err=str(e)[:160])
         horse_contexts = {}
 
     # respect_montant : le montant du plan — saisi par l'utilisateur ou montant de

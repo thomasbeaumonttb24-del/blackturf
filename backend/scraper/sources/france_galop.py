@@ -50,7 +50,10 @@ class FranceGalopScraper(BaseScraper):
         France Galop publie le coefficient dans le bulletin de réunion.
         """
         results: list[PenetrometreScrape] = []
-        today = date.today().isoformat()
+        # Jour des courses à PARIS : date.today() (UTC en conteneur) visait la veille
+        # entre 0 h et 2 h, et la mesure n'était propagée à aucune course.
+        from services.temps_courses import jour_courses
+        today = jour_courses().isoformat()
 
         ok = await self.safe_goto(PROGRAMME_URL)
         if not ok:

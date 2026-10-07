@@ -607,6 +607,14 @@ async def settle_catchup(session: AsyncSession, timeout_days: int = CATCHUP_TIME
             log.warning("profil_learning.reglement_partiel_skip",
                         log_id=log_id, err=str(e)[:120])
             continue
+        # Un pari 'en_attente' est TOUJOURS un gagnant sans rapport publié
+        # (services.bet_settlement.settle_plan) : le retirer garderait toutes les
+        # pertes du run et lui ôterait un gain certain — ROI appris biaisé à la
+        # baisse. Un tel run part donc en 'expired' (ci-dessous), comme avant ; seul
+        # un bilan sans pari en attente et avec une mise réelle est réglé ici.
+        if n_exclus > 0 or float(bilan_p.get("total_mise") or 0) <= 0:
+            continue
+        bilan_p.pop("total_avec_quinte", None)
         await session.execute(text("""
             UPDATE profil_run_log
             SET resultat = CAST(:res AS jsonb), roi_reel = :roi, statut = 'settled',
