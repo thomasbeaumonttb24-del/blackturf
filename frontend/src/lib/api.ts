@@ -203,6 +203,15 @@ export const predictionsApi = {
   modelVersion: () => api.get("/model/version"),
 };
 
+// ─── Outsiders du jour (cerveau des outsiders) ─────────────────────────────
+// Publics : une course à venir revient sans nom ni cote pour un non-abonné
+// (`verrouille`), une course terminée est complète pour tous.
+export const outsidersApi = {
+  jour: (jour?: string) => api.get("/outsiders/jour", { params: jour ? { jour } : {}, tolere401: true }),
+  course: (courseId: string) => api.get(`/outsiders/course/${courseId}`, { tolere401: true }),
+  bilan: (jours = 30) => api.get("/outsiders/bilan", { params: { jours }, tolere401: true }),
+};
+
 export const pronosticEmailApi = {
   // Capture sur la fiche course (popup) : envoi transactionnel du pronostic de
   // CETTE course précise, pas la newsletter hebdo. Public, aucun compte requis.

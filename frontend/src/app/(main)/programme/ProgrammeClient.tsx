@@ -34,6 +34,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { formatTime, cn } from "@/lib/utils";
 import { jourParis } from "@/lib/seo";
 import { BandeauOnglet, IconeTuile, Pastille, PastilleDirect, SG } from "@/components/courses/course-ui";
+import { OutsidersDuJour } from "@/components/outsiders/Outsiders";
 
 /* ─── Types ─────────────────────────────────────────────── */
 interface CourseSummary {
@@ -1275,6 +1276,13 @@ export default function ProgrammeClient({
             href={user ? "/tarifs#passes" : "/inscription?plan=standard&suite=%2Fprogramme"}
             libelle={!user ? "Créer un compte gratuit" : "Débloquer dès 5 €"}
           />
+        )}
+
+        {/* ── Outsiders du jour (grosses cotes capables de se placer) ── */}
+        {isToday && (
+          <div className="rounded-[24px] bg-white p-4 ring-1 ring-inset ring-stone-200 sm:p-5">
+            <OutsidersDuJour max={3} />
+          </div>
         )}
 
         {/* ── Contrôles ── */}

@@ -28,6 +28,7 @@ const R = RUBRIQUES;
 const NAV_LINKS_PUBLIC: NavLink[] = [
   R.coursesDuJour,
   R.quinte,
+  R.outsiders,
   R.resultats,
   { ...R.parisDeValeur, prive: true },
   R.performances,
@@ -41,6 +42,7 @@ const NAV_LINKS_AUTH: NavLink[] = [
   { ...R.monEspace, icon: LayoutDashboard, prive: true },
   R.coursesDuJour,
   R.quinte,
+  R.outsiders,
   R.resultats,
   { ...R.parisDeValeur, prive: true },
   R.performances,
