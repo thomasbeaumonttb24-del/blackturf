@@ -746,17 +746,22 @@ async def job_outsiders_signaux() -> None:
     from services.outsiders import rafraichir_signaux
 
     try:
-        if en_service() is None:
+        art = en_service()
+        # Absent, ou d'une version d'avant les critères placés dans le champ (pas de
+        # `sens`) : un entraînement par jour est demandé au worker. Un cerveau
+        # ancien continue de servir en attendant ; sans cerveau, on s'arrête là.
+        if art is None or "sens" not in art:
             import redis as sync_redis
             from rq import Queue
             from api.config import get_settings
             from datetime import date as _date
             r = sync_redis.from_url(get_settings().redis_url)
-            if r.set(f"ml:outsider_brain:amorce:{_date.today().isoformat()}", "1", nx=True, ex=86400):
+            if r.set(f"ml:outsider_brain:amorce:v2:{_date.today().isoformat()}", "1", nx=True, ex=86400):
                 Queue("ml", connection=r, default_timeout=1800).enqueue(
                     "ml.outsider_brain.entrainer_sync", result_ttl=86400, failure_ttl=ML_FAILURE_TTL_S)
-                log.info("jobs.outsiders.amorce_entrainement")
-            return
+                log.info("jobs.outsiders.amorce_entrainement", ancien=art is not None)
+            if art is None:
+                return
         async with AsyncSessionLocal() as session:
             res = await rafraichir_signaux(session)
         log.info("jobs.outsiders.signaux", **res)
