@@ -163,5 +163,6 @@ def test_coupon_premier_paiement_seulement(monkeypatch):
     assert cree["duration"] == "once"
     assert "duration_in_months" not in cree
     assert cree["percent_off"] == 50
+    assert len(cree["name"]) <= 40  # limite Stripe, sinon le coupon (et le paiement) échoue
     assert cree["redeem_by"] == int(vrai.FIN.timestamp())
     assert cree["applies_to"] == {"products": ["prod_exp", "prod_std"]}
