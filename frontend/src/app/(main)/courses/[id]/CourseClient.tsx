@@ -2656,6 +2656,12 @@ export default function CoursePage({
   const topVBFranc = topVB && topVB.value_bet!.niveau >= 3 ? topVB : undefined;
 
   const disc = discMask(course.discipline);
+  // Partants RÉELS (non-partants exclus), comme le comparateur et le marché plus
+  // haut : `nb_partants` compte les déclarés, et affichait « 14 partants » pour une
+  // course qui n'en aligne que 12. Repli sur le champ déclaré si la liste manque.
+  const nbPartantsActifs = course.partants?.length
+    ? course.partants.filter((p) => !p.non_partant).length
+    : course.nb_partants;
   const statutMeta = course.statut === "en_cours"
     ? { label: "En cours", fg: CX.emDeep, bg: CX.emBg, bd: CX.emBd, dot: CX.emLight }
     : course.statut === "termine"
@@ -2667,7 +2673,7 @@ export default function CoursePage({
   // visiteur vient voir.
   const ONGLETS = [
     { cle: "synthese" as const, label: "Synthèse", icone: Sparkles, pastille: null as number | null },
-    { cle: "partants" as const, label: "Partants", icone: Users, pastille: course.nb_partants },
+    { cle: "partants" as const, label: "Partants", icone: Users, pastille: nbPartantsActifs },
     { cle: "marche" as const, label: "Marché", icone: TrendingUp, pastille: null as number | null },
     { cle: "plan" as const, label: "Plan de mise", icone: Calculator, pastille: null as number | null },
     { cle: "defi" as const, label: "Défi du mois", icone: Medal, pastille: null as number | null },
@@ -2811,7 +2817,7 @@ export default function CoursePage({
               <span className="text-stone-300" aria-hidden="true">|</span>
               <span className="tabular-nums">{course.distance} m</span>
               <span className="text-stone-300" aria-hidden="true">|</span>
-              <span className="tabular-nums">{course.nb_partants} partants</span>
+              <span className="tabular-nums">{nbPartantsActifs} partants</span>
               <span className="text-stone-300" aria-hidden="true">|</span>
               <span className="inline-flex items-center gap-1.5">
                 <Clock className="h-3.5 w-3.5 text-stone-600" aria-hidden="true" /> {formatDateTime(course.date_heure)}
@@ -2914,7 +2920,7 @@ export default function CoursePage({
                 apercu={apercu}
                 statut={course.statut}
                 partants={course.partants}
-                nbPartants={course.nb_partants}
+                nbPartants={nbPartantsActifs}
                 connecte={Boolean(user)}
                 abonne={abonne}
               />
@@ -2922,7 +2928,7 @@ export default function CoursePage({
             {/* Non-abonné, course à venir : les quatre cartes de l'abonné, le nom
                 des chevaux en moins. */}
             {!predsVue?.length && apercu?.disponible && !apercu.revele && (
-              <StatsApercu apercu={apercu} nbPartants={course.nb_partants} connecte={Boolean(user)} />
+              <StatsApercu apercu={apercu} nbPartants={nbPartantsActifs} connecte={Boolean(user)} />
             )}
         {/* ── 4 STAT CARDS ── */}
         {predsVue && predsVue.length > 0 && (() => {
@@ -2997,11 +3003,11 @@ export default function CoursePage({
               <div className={cn(CARTE_CLS, "cx-fade p-3.5 sm:p-4")} style={{ animationDelay: ".16s" }}>
                 <p className="m-0 text-[10.5px] font-bold uppercase tracking-[.1em] text-stone-500">Le champ</p>
                 <div className="mt-2 flex items-baseline gap-1.5">
-                  <span className="text-[26px] font-bold leading-none text-stone-900" style={{ fontFamily: CX.sg }}>{course.nb_partants}</span>
+                  <span className="text-[26px] font-bold leading-none text-stone-900" style={{ fontFamily: CX.sg }}>{nbPartantsActifs}</span>
                   <span className="text-[11px] text-stone-500">partants</span>
                 </div>
                 <p className="m-0 mt-2 text-[11.5px] text-stone-500">
-                  {course.nb_partants >= 14 ? "Champ ouvert" : course.nb_partants >= 10 ? "Champ moyen" : "Petit champ"}
+                  {nbPartantsActifs >= 14 ? "Champ ouvert" : nbPartantsActifs >= 10 ? "Champ moyen" : "Petit champ"}
                 </p>
               </div>
             </div>

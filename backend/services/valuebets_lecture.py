@@ -15,6 +15,7 @@ from typing import Any, Optional
 from sqlalchemy import desc, select
 
 from db.models import Cheval, Course, Entraineur, Jockey, Participation, Prediction, ValueBet
+from services.cote_juste import cote_juste as _cote_juste
 
 # Opérateurs retenus pour la meilleure cote et le compte des sources. `cote_geny`
 # en est exclue, comme sur la fiche course : elle porte trop souvent sur un autre
@@ -96,7 +97,14 @@ def ligne(vb: ValueBet, part: Participation, cheval: Cheval, course: Course,
         "proba_top3": _r(pred.proba_top3, 4) if pred else None,
         "rang_predit": pred.rang_predit if pred else None,
         "confiance": _r(pred.confidence_score, 1) if pred else None,
-        "cote_juste": round(1 / proba, 2) if proba else None,
+        # Même conversion que la fiche course (`services.cote_juste`) : plafond 999 et
+        # précision adaptée. `round(1/p, 2)` donnait 1 250,00 pour p = 0,0008.
+        "cote_juste": _cote_juste(proba),
+        # Cote à laquelle l'espérance a été CALCULÉE : la cote PMU figée avec le
+        # pronostic rattaché à ce pari. `cote_figee` est réécrite à chaque cycle de
+        # calcul, comme l'EV (upsert de `save_value_bet`), puis gelée à T-10 min. La
+        # cote PMU courante, affichée à côté, a pu bouger depuis — l'EV ne la suit pas.
+        "cote_detection": _r(pred.cote_figee, 2) if pred and pred.cote_figee and pred.cote_figee > 1 else None,
         # Marché
         "cote_pmu": part.cote_pmu,
         "cote_reference": part.cote_reference,

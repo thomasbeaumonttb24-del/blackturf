@@ -259,7 +259,10 @@ export default async function PronosticsIaPage() {
               {g && g.favori_roi !== null && g.favori_roi !== undefined && (
                 <p className="mt-2">
                   Chiffre à l&apos;appui : miser 1 € Gagnant sur le favori de l&apos;algorithme, sur{" "}
-                  {nb(g.nb_favoris_evalues)} courses, aurait rendu <strong>{pct(g.favori_roi)}</strong>.
+                  {/* Dénominateur du ROI = courses dont le rapport officiel est publié
+                      (1 € par course : `favori_mise_totale`), pas `nb_favoris_evalues`,
+                      qui compte aussi les arrivées sans rapport. */}
+                  {nb(g.favori_mise_totale ?? g.nb_favoris_evalues)} courses, aurait rendu <strong>{pct(g.favori_roi)}</strong>.
                   Une perte. Nous le publions parce que c&apos;est vrai, et parce qu&apos;un site qui
                   promettrait l&apos;inverse mentirait.
                 </p>

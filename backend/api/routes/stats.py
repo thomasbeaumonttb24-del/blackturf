@@ -153,6 +153,24 @@ def _winner_entry(classement) -> Optional[dict]:
     return best
 
 
+def _rapport_gagnant(rapports) -> Optional[float]:
+    """Rapport Simple Gagnant réellement payé pour 1 € (France, sinon étranger).
+
+    `participations.cote_pmu` est la cote AFFICHÉE, pas le prix encaissé : en pari
+    mutuel le rapport n'est arrêté qu'au départ. C'est donc `resultats.rapports`
+    qui règle le pari, et c'est aussi ce qu'affiche le palmarès public — les deux
+    chiffres deviennent enfin le même. Partagé par le rendement du favori IA et par
+    la performance des value bets (`vb_performance`) : une seule règle de règlement.
+    """
+    if not isinstance(rapports, dict):
+        return None
+    for cle in ("e_simple_gagnant", "simple_gagnant_international"):
+        v = rapports.get(cle)
+        if isinstance(v, (int, float)) and v > 0:
+            return float(v)
+    return None
+
+
 async def _vb_flat_backtest(db: AsyncSession, since_days: int = 180, mise: float = 10.0, start: float = 1000.0) -> dict:
     """Backtest HONNÊTE : 10€ flat en Simple Gagnant sur chaque value bet ★★★+
     (niveau ≥ 3) des `since_days` derniers jours, réglé sur l'arrivée RÉELLE à la
@@ -900,12 +918,25 @@ async def _compute_track_record(db: AsyncSession) -> dict:
         })
 
     # ── 5. VB performance par niveau ─────────────────────────
+    # Simple Gagnant 10 € flat sur chaque value bet résolu, émis AVANT le départ.
+    #
+    # Corrigé le 2026-10-07 (quatre biais, tous dans le même sens : chiffre faux) :
+    #   • `.limit(2000)` SANS `order_by` → échantillon arbitraire, différent d'une
+    #     exécution à l'autre. La cohorte est désormais ordonnée (plus récents
+    #     d'abord) et la borne explicite ;
+    #   • non-partant compté perdant alors qu'il est REMBOURSÉ → exclu (ni mise,
+    #     ni gain), comme pour le favori IA ;
+    #   • réglé à `cote_pmu` (cote AFFICHÉE) au lieu du rapport PMU réellement payé
+    #     → réglé par `_rapport_gagnant`, la même règle que le favori IA ;
+    #   • gagnant SANS cote compté perdant (`else` du test `vb_cote > 1`) → une
+    #     course dont le rapport n'est pas publié n'est pas réglée du tout.
+    VB_PERF_MAX = 2000
     vb_stats: dict[int, dict] = {n: {"nb": 0, "wins": 0, "mise": 0.0, "gains": 0.0} for n in range(1, 5)}
     # PERF : projection des seules colonnes lues ci-dessous. Charger les entites
     # ORM completes materialisait 3 objets par ligne, dont Resultat et son JSON.
     q_vbs = (
-        select(ValueBet.niveau, Participation.numero, Participation.cote_pmu,
-               Resultat.classement)
+        select(ValueBet.niveau, Participation.numero,
+               Resultat.classement, Resultat.rapports)
         .join(Participation, Participation.participation_id == ValueBet.participation_id)
         .join(Course, Course.course_id == ValueBet.course_id)
         .join(PredictionEvaluation, PredictionEvaluation.prediction_id == ValueBet.prediction_id)
@@ -916,25 +947,30 @@ async def _compute_track_record(db: AsyncSession) -> dict:
             ValueBet.detecte_a < Course.date_heure,
             PredictionEvaluation.created_at.is_not(None),
             PredictionEvaluation.created_at < Course.date_heure,
+            # Non-partant = mise remboursée : hors win-rate ET hors ROI.
+            Participation.non_partant.is_(False),
         )
-        .limit(2000)
+        .order_by(Course.date_heure.desc(), ValueBet.vb_id.desc())
+        .limit(VB_PERF_MAX)
     )
     vb_rows = (await db.execute(q_vbs)).all()
-    for n, vb_numero, vb_cote, vb_classement in vb_rows:
+    for n, vb_numero, vb_classement, vb_rapports in vb_rows:
         if n not in vb_stats:
             continue
         # Pas d'arrivée publiée (outerjoin → classement None) : on NE règle PAS le pari.
-        # Avant, il tombait dans le `else` et était compté perdant → ROI faussé à la baisse.
         if not (isinstance(vb_classement, list) and vb_classement):
+            continue
+        # Pas de rapport officiel publié : pari non réglé (ni perdu, ni gagné).
+        rapport = _rapport_gagnant(vb_rapports)
+        if rapport is None:
             continue
         mise = 10.0
         vb_stats[n]["nb"] += 1
         vb_stats[n]["mise"] += mise
         _w = _winner_entry(vb_classement)
-        gagne = bool(_w and _w.get("numero") == vb_numero)
-        if gagne and vb_cote and vb_cote > 1:
+        if _w and _w.get("numero") == vb_numero:
             vb_stats[n]["wins"] += 1
-            vb_stats[n]["gains"] += (vb_cote - 1) * mise
+            vb_stats[n]["gains"] += (rapport - 1) * mise
         else:
             vb_stats[n]["gains"] -= mise
 
@@ -942,8 +978,10 @@ async def _compute_track_record(db: AsyncSession) -> dict:
         {
             "niveau": n,
             "nb_vbs": v["nb"],
-            "win_rate": round(v["wins"] / v["nb"] * 100, 1) if v["nb"] else 0.0,
-            "roi": round(v["gains"] / v["mise"] * 100, 1) if v["mise"] else 0.0,
+            # None (et non 0,0) quand rien n'est réglé : « 0 % » se lirait comme un
+            # résultat mesuré.
+            "win_rate": round(v["wins"] / v["nb"] * 100, 1) if v["nb"] else None,
+            "roi": round(v["gains"] / v["mise"] * 100, 1) if v["mise"] else None,
         }
         for n, v in sorted(vb_stats.items())
     ]
@@ -1017,22 +1055,6 @@ async def _compute_track_record(db: AsyncSession) -> dict:
                 return int(p) if isinstance(p, (int, float)) else None
         return None
 
-    def _rapport_gagnant(rapports) -> float | None:
-        """Rapport Simple Gagnant réellement payé pour 1 € (France, sinon étranger).
-
-        `participations.cote_pmu` est la cote AFFICHÉE, pas le prix encaissé : en pari
-        mutuel le rapport n'est arrêté qu'au départ. C'est donc `resultats.rapports`
-        qui règle le pari, et c'est aussi ce qu'affiche le palmarès public — les deux
-        chiffres deviennent enfin le même.
-        """
-        if not isinstance(rapports, dict):
-            return None
-        for cle in ("e_simple_gagnant", "simple_gagnant_international"):
-            v = rapports.get(cle)
-            if isinstance(v, (int, float)) and v > 0:
-                return float(v)
-        return None
-
     fav_total = fav_wins = fav_places = 0
     # Rendement RÉEL : 1 € Simple Gagnant sur le favori IA de chaque course, réglé au
     # rapport PMU payé. Aucune valeur inventée, et aucune course escamotée — une
@@ -1092,7 +1114,31 @@ async def _compute_track_record(db: AsyncSession) -> dict:
     favori_win_rate = round(fav_wins / fav_total * 100, 1) if fav_total else 0.0
     favori_place_rate = round(fav_places / fav_total * 100, 1) if fav_total else 0.0
     net_fav = round(gain_fav - mise_fav, 2)
-    roi_fav = round(net_fav / mise_fav * 100, 1) if mise_fav else 0.0
+    # None (et non 0,0) quand aucun rapport n'est publié : « rendement 0 % » se lirait
+    # comme un pari à l'équilibre alors que rien n'a été mesuré.
+    roi_fav = round(net_fav / mise_fav * 100, 1) if mise_fav else None
+    # Dénominateur EXACT du rendement : 1 € par course dont le rapport est publié.
+    # `nb_favoris_evalues` (taux gagnant/placé) compte aussi les arrivées sans
+    # rapport — l'afficher à côté du ROI annonçait un échantillon qui n'est pas le sien.
+    nb_favoris_regles = int(round(mise_fav))
+
+    # Repère « hasard » sur la MÊME cohorte que `favori_win_rate` (1 / partants
+    # réels, non-partants exclus). `hasard_top1` porte sur `race_learning_log` :
+    # comparer les deux dans une même phrase, c'était opposer deux populations.
+    favori_hasard_top1 = None
+    if course_ids:
+        try:
+            n_actifs = (await db.execute(
+                select(Participation.course_id, func.count())
+                .where(Participation.course_id.in_(course_ids),
+                       Participation.non_partant.is_(False))
+                .group_by(Participation.course_id)
+            )).all()
+            inv = [1.0 / n for _cid, n in n_actifs if n]
+            if inv:
+                favori_hasard_top1 = round(sum(inv) / len(inv) * 100, 1)
+        except Exception as e:
+            log.warning("track_record.favori_hasard_failed", error=str(e))
 
     # ── 6. Adaptive learning state ────────────────────────────
     al_state = (await db.execute(
@@ -1106,46 +1152,58 @@ async def _compute_track_record(db: AsyncSession) -> dict:
             "brier_ema": round(al_state.brier_ema, 4),
         }
 
-    # ── CLV (Closing Line Value) : l'IA bat-elle la ligne de clôture ? ──────
-    # Pour chaque favori IA (rang 1), compare la cote d'OUVERTURE (1ère relevée)
-    # à la cote de CLÔTURE (dernière relevée). Si la cote baisse, le marché a
-    # bougé VERS le pick → l'IA a anticipé = vrai signal d'edge. Données réelles
-    # (cotes_historique). CLV robuste : % de picks battant la ligne + médiane +
-    # gain de proba implicite moyen (insensible aux outliers de cote).
+    # ── CLV (Closing Line Value) : le marché va-t-il vers notre favori ? ──────
+    # Pour chaque favori IA (rang 1), compare la cote AU MOMENT DU PRONOSTIC à la
+    # dernière cote relevée AVANT LE DÉPART. Si elle baisse, le marché a bougé VERS
+    # le pick après nous. Données réelles (cotes_historique).
+    #
+    # Corrigé le 2026-10-07 — l'ancienne mesure surestimait le pourcentage :
+    #   • « ouverture » = 1ʳᵉ cote JAMAIS relevée (parfois des jours avant le
+    #     pronostic) au lieu de la cote figée AVEC le pronostic (`cote_figee`,
+    #     sinon dernière cote relevée avant `created_at`) ;
+    #   • « clôture » = dernière cote relevée, SANS borne : une cote postérieure au
+    #     départ pouvait servir de référence → bornée à `h.time <= c.date_heure` ;
+    #   • `WHERE o <> c` retirait du dénominateur les cotes inchangées (qui ne
+    #     battent pas la ligne) → elles comptent désormais, comme « non battues » ;
+    #   • non-partants inclus (remboursés, pas de ligne à battre) → exclus.
     clv = None
     try:
-        # PERF : ne JAMAIS agreger cotes_historique en entier. L'ecriture naive
-        # (GROUP BY participation_id sur toute la table, puis JOIN fav) agregeait
-        # 5,8 M lignes / 11 chunks TimescaleDB -- 20 s, 6 M buffers -- pour n'en
-        # garder que ~3 700 : le filtre `fav` ne peut pas descendre sous le GROUP BY.
-        # On inverse : on part des ~3 700 favoris et on va chercher pour chacun sa
-        # premiere et sa derniere cote via l'index (participation_id, time).
-        # Valeur identique : memes filtres, et la PK UNIQUE (time, participation_id)
-        # interdit les ex aequo, donc ORDER BY time LIMIT 1 == (array_agg(...))[1].
+        # PERF : on part des ~3 700 favoris et on va chercher pour chacun ses deux
+        # cotes via l'index (participation_id, time) — jamais un GROUP BY sur toute
+        # la table cotes_historique (5,8 M lignes).
         clv_row = (await db.execute(text("""
             WITH fav AS MATERIALIZED (
-                SELECT p.participation_id FROM prediction_evaluation p
+                SELECT p.participation_id, p.cote_figee, p.created_at, c.date_heure
+                FROM prediction_evaluation p
                 JOIN courses c ON c.course_id = p.course_id
+                JOIN participations pa ON pa.participation_id = p.participation_id
                 WHERE p.rang_predit = 1 AND c.statut = 'termine'
                   AND c.date_heure IS NOT NULL AND p.created_at IS NOT NULL
                   AND p.created_at < c.date_heure
+                  AND pa.non_partant = false
             ),
             ch AS MATERIALIZED (
                 SELECT f.participation_id,
+                       COALESCE(
+                           CASE WHEN f.cote_figee > 1 THEN f.cote_figee END,
+                           (SELECT h.cote FROM cotes_historique h
+                             WHERE h.participation_id = f.participation_id AND h.cote > 1
+                               AND h.time <= f.created_at
+                             ORDER BY h.time DESC LIMIT 1)
+                       ) AS o,
                        (SELECT h.cote FROM cotes_historique h
                          WHERE h.participation_id = f.participation_id AND h.cote > 1
-                         ORDER BY h.time ASC  LIMIT 1) AS o,
-                       (SELECT h.cote FROM cotes_historique h
-                         WHERE h.participation_id = f.participation_id AND h.cote > 1
+                           AND h.time <= f.date_heure
                          ORDER BY h.time DESC LIMIT 1) AS c
                 FROM fav f
             )
             SELECT count(*) AS n,
                    round((count(*) FILTER (WHERE o > c)::numeric / nullif(count(*),0) * 100), 1) AS pct_beat,
                    round(avg(1.0/c - 1.0/o)::numeric * 100, 2) AS clv_implied,
-                   round((percentile_cont(0.5) WITHIN GROUP (ORDER BY o/c - 1))::numeric * 100, 1) AS clv_median
+                   round((percentile_cont(0.5) WITHIN GROUP (ORDER BY o/c - 1))::numeric * 100, 1) AS clv_median,
+                   round((count(*) FILTER (WHERE o = c)::numeric / nullif(count(*),0) * 100), 1) AS pct_inchangee
             FROM ch
-            WHERE o IS NOT NULL AND c IS NOT NULL AND o <> c
+            WHERE o IS NOT NULL AND c IS NOT NULL
         """))).first()
         if clv_row and clv_row[0] and clv_row[0] >= 10:
             clv = {
@@ -1153,6 +1211,9 @@ async def _compute_track_record(db: AsyncSession) -> dict:
                 "pct_beat_line": float(clv_row[1] or 0),
                 "clv_implied": float(clv_row[2] or 0),
                 "clv_median": float(clv_row[3] or 0),
+                # Part des favoris dont la cote n'a pas bougé (comptés « non battus »).
+                "pct_inchangee": float(clv_row[4] or 0),
+                "reference": "cote_au_pronostic_vs_derniere_cote_avant_depart",
             }
     except Exception as e:
         log.warning("track_record.clv_failed", error=str(e))
@@ -1273,6 +1334,9 @@ async def _compute_track_record(db: AsyncSession) -> dict:
             "nb_favoris_evalues": fav_total,
             # ROI réel : 1€ Gagnant sur le favori IA, réglé sur l'arrivée réelle
             "favori_roi": roi_fav,
+            # Nombre de courses sur lesquelles `favori_roi` est calculé (rapport publié).
+            "nb_favoris_regles": nb_favoris_regles,
+            "favori_hasard_top1": favori_hasard_top1,
             "favori_mise_totale": round(mise_fav, 0),
             "favori_gain_total": round(gain_fav, 2),
             "favori_net": net_fav,
@@ -1365,11 +1429,17 @@ async def _palmares_rows(db: AsyncSession) -> dict:
     except Exception:
         return {"gagnants": [], "top_gains": [], "n": 0, "n_courses": 0,
                 "n_courses_reglees": 0, "by_profil": {}, "total_gain": 0.0,
-                "total_mise": 0.0, "integrite": _PALMARES_INTEGRITE}
+                "total_mise": 0.0, "mise_cohorte": 0.0, "retour_cohorte": 0.0,
+                "integrite": _PALMARES_INTEGRITE}
 
     PROFIL_LBL = {"conservateur": "Prudent", "equilibre": "Modéré", "agressif": "Risqué"}
     gagnants = []
     courses_reglees: set = set()
+    # Mise et retour de TOUTE la cohorte réglée (paris perdus compris) — pas
+    # seulement des paris gagnés. Sans eux, « +X € encaissés » se lit comme un
+    # bénéfice alors que c'est un retour brut (biais du survivant).
+    mise_cohorte = 0.0
+    retour_cohorte = 0.0
     by_profil: dict = {p: {"courses": set(), "mise": 0.0, "gain": 0.0,
                            "courses_benef": 0, "paris_gagnes": 0} for p in PROFIL_LBL}
     for profil, resultat, settled_at, created_at, hippo, dh, cid, n_reunion, n_course, plan in rows:
@@ -1384,6 +1454,8 @@ async def _palmares_rows(db: AsyncSession) -> dict:
         # profil (un ticket risqué figé à ×14,1 payé ×3,3 le 2026-08-27 à Saratoga).
         vise = _rapports_vises(plan)
         courses_reglees.add(cid)
+        mise_cohorte += float(res.get("total_mise") or 0)
+        retour_cohorte += float(res.get("total_gain") or 0)
         agg = by_profil.get(profil)
         if agg is not None:
             agg["courses"].add(cid)
@@ -1438,7 +1510,12 @@ async def _palmares_rows(db: AsyncSession) -> dict:
         "by_profil": by_profil,
         "profil_labels": PROFIL_LBL,
         "total_gain": round(sum(x["gain"] for x in gagnants), 2),
+        # Mise des seuls paris GAGNÉS (sert au bénéfice ligne à ligne, pas au bilan).
         "total_mise": round(sum(x["mise"] for x in gagnants), 2),
+        # Bilan de la cohorte entière : mises de tous les paris réglés (perdus
+        # compris, remboursés exclus) et retours encaissés.
+        "mise_cohorte": round(mise_cohorte, 2),
+        "retour_cohorte": round(retour_cohorte, 2),
         "integrite": _PALMARES_INTEGRITE,
     }
 
@@ -1789,8 +1866,14 @@ async def stats_palmares_public(
         gagnants : sans ce dénominateur, n'afficher que les paris gagnants serait un
         biais du survivant. Le front doit présenter les deux ensemble.
 
-    Ce qui N'EST PAS exposé : le ROI, la mise, le bénéfice net et les agrégats par
-    profil restent réservés à l'admin — seul le total brut `total_gain` est public.
+    Mise et net de la cohorte (2026-10-07) : `total_gain` seul, présenté en
+    « +X € gains encaissés », se lisait comme un bénéfice. C'est un retour BRUT :
+    il ne dit rien sans la mise engagée sur TOUTES les courses réglées, perdantes
+    comprises. `total_mise_engagee` et `total_net` portent sur la même cohorte que
+    `total_gain` et `nb_courses_reglees` (même requête `_palmares_rows`).
+
+    Ce qui N'EST PAS exposé : le ROI en pourcentage et les agrégats par profil
+    restent réservés à l'admin.
     """
     CACHE_KEY = "stats:palmares-public"
     cached = await _cache_get(redis, CACHE_KEY)
@@ -1812,9 +1895,13 @@ async def stats_palmares_public(
         "nb_courses_reglees": data["n_courses_reglees"],
         # Gains bruts encaissés (somme des rapports officiels des paris gagnés) :
         # c'est le chiffre phare du hero de la page track-record, qui doit être le
-        # même pour un visiteur et pour un membre. La mise, le bénéfice net et le
-        # ROI restent, eux, réservés à l'admin.
+        # même pour un visiteur et pour un membre. Il n'est JAMAIS affiché seul :
+        # la mise engagée et le net de la même cohorte l'accompagnent ci-dessous.
         "total_gain": data["total_gain"],
+        # Mise engagée sur TOUTES les courses réglées de la même cohorte, et le net
+        # qui en résulte : sans eux, le retour brut ci-dessus serait trompeur.
+        "total_mise_engagee": data["mise_cohorte"],
+        "total_net": round(data["retour_cohorte"] - data["mise_cohorte"], 2),
         # Ticket Quinté+ : ligne SÉPARÉE, jamais mêlée aux paris ni aux totaux
         # ci-dessus. Version publique = comptages seulement (pas de ROI ni de
         # montants agrégés, cf. _quinte_public) ; l'admin a le bloc complet.
@@ -1955,7 +2042,11 @@ async def stats_palmares_gagnants(
         "n_courses": data["n_courses"],
         "nb_courses_reglees": data["n_courses_reglees"],
         "total_gain": data["total_gain"],
-        "total_benefice": round(data["total_gain"] - data["total_mise"], 2),
+        # Bénéfice de la cohorte ENTIÈRE (mises perdues comprises). L'ancien calcul
+        # retranchait la seule mise des paris gagnés : un bénéfice de survivant.
+        "total_benefice": round(data["retour_cohorte"] - data["mise_cohorte"], 2),
+        "total_mise_engagee": data["mise_cohorte"],
+        "total_net": round(data["retour_cohorte"] - data["mise_cohorte"], 2),
         "profils": profils,
         # Ligne à part, hors totaux ci-dessus (ses tickets gagnants figurent dans les listes).
         "quinte": {k: v for k, v in quinte.items() if k != "gagnants"},

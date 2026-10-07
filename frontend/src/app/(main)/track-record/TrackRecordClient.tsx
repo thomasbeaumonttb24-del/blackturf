@@ -44,12 +44,17 @@ export interface TrackRecord {
     favori_win_rate: number;
     favori_place_rate: number;
     nb_favoris_evalues: number;
-    favori_roi: number;
+    // Null tant qu'aucun rapport n'est publié (pas de mise, pas de rendement).
+    favori_roi: number | null;
+    /** Courses sur lesquelles `favori_roi` est calculé (rapport officiel publié). */
+    nb_favoris_regles?: number;
+    /** Hasard Top-1 sur la MÊME cohorte que `favori_win_rate` (partants réels). */
+    favori_hasard_top1?: number | null;
     favori_mise_totale: number;
     favori_gain_total: number;
     favori_net: number;
   };
-  clv?: { n: number; pct_beat_line: number; clv_implied: number; clv_median: number } | null;
+  clv?: { n: number; pct_beat_line: number; clv_implied: number; clv_median: number; pct_inchangee?: number } | null;
   updated_at?: string;
   by_day: Array<{
     jour: string;
@@ -103,8 +108,8 @@ export interface TrackRecord {
   vb_performance: Array<{
     niveau: number;
     nb_vbs: number;
-    win_rate: number;
-    roi: number;
+    win_rate: number | null;
+    roi: number | null;
   }>;
   adaptive_learning: {
     temperature?: number;
@@ -497,6 +502,8 @@ const TendanceChart = dynamic(() => import("@/components/track-record/TendanceCh
 // Paris RÉELLEMENT gagnés par l'algorithme, par profil (pronos émis réglés)
 type PalmaresData = {
   gagnants: WinningBet[]; top_gains?: WinningBet[]; n: number; n_courses?: number; total_gain?: number; total_benefice?: number;
+  /** Mise engagée sur TOUTES les courses réglées (perdues comprises) et net qui en résulte. */
+  total_mise_engagee?: number; total_net?: number;
   profils?: Array<{ profil: string; label: string; nb_courses: number; mise_totale?: number; gain_total?: number; gain_net: number; roi: number | null; paris_gagnes: number; taux_courses_beneficiaires: number | null }>;
   quinte?: QuintePalmaresData | null;   // ligne Quinté+ à part (hors de tous les totaux)
   updated_at?: string;
@@ -512,6 +519,8 @@ function versPalmares(pub: PalmaresPublicBrut): PalmaresData {
     n: pub.nb_paris_gagnes ?? 0,
     n_courses: pub.nb_courses_reglees ?? 0,
     total_gain: pub.total_gain,
+    total_mise_engagee: pub.total_mise_engagee,
+    total_net: pub.total_net,
     quinte: pub.quinte ?? null,
     updated_at: pub.updated_at,
   };
@@ -563,7 +572,9 @@ export default function TrackRecordPage({ initialTrackRecord, initialPalmares }:
   // publique sans la remplacer tant qu'elle n'est pas arrivée — pas de saut visuel.
   const { data: adminData, mutate: mutateAdmin } = useSWR<PalmaresData>(
     !authEnCours && estAdmin ? "palmares-gagnants-admin" : null,
-    () => statsApi.palmaresGagnants().then((r) => r.data),
+    // `n_courses` de la version admin compte les courses GAGNANTES ; le dénominateur
+    // affiché (« sur N courses réglées ») est `nb_courses_reglees`, comme en public.
+    () => statsApi.palmaresGagnants().then((r) => ({ ...r.data, n_courses: r.data.nb_courses_reglees ?? r.data.n_courses })),
     { refreshInterval: 60_000, revalidateOnFocus: true, shouldRetryOnError: false },
   );
   const gagnantsData = adminData ?? publicData;
@@ -644,6 +655,16 @@ export default function TrackRecordPage({ initialTrackRecord, initialPalmares }:
   const gainConnu = typeof gagnantsData?.total_gain === "number" && (gagnantsData?.total_gain ?? 0) > 0;
   const nbGagnants = gagnantsData?.n ?? 0;
   const nbCoursesReglees = gagnantsData?.n_courses ?? 0;
+  // Mise et net de la MÊME cohorte que les retours bruts : sans eux, « +X € » se lit
+  // comme un bénéfice alors que c'est ce qu'ont rapporté les seuls paris gagnés.
+  const miseEngagee = typeof gagnantsData?.total_mise_engagee === "number" && gagnantsData.total_mise_engagee > 0
+    ? gagnantsData.total_mise_engagee : null;
+  const netCohorte = miseEngagee != null && typeof gagnantsData?.total_net === "number" ? gagnantsData.total_net : null;
+  const eur = (v: number) => `${nf(Math.round(v))} €`;
+  const eurSigne = (v: number) => `${v > 0 ? "+" : v < 0 ? "−" : ""}${nf(Math.abs(Math.round(v)))} €`;
+  const bilanCohorte = miseEngagee != null
+    ? `Pour ${eur(miseEngagee)} misés sur ${nf(nbCoursesReglees)} courses réglées${netCohorte != null ? ` · net ${eurSigne(netCohorte)}` : ""}`
+    : `Sur ${nf(nbCoursesReglees)} courses réglées`;
   const hasard3 = g.hasard_top3 ?? null;
   const hasard1 = g.hasard_top1 ?? null;
   const facteur3 = hasard3 && hasard3 > 0 ? g.accuracy_top3 / hasard3 : null;
@@ -654,7 +675,10 @@ export default function TrackRecordPage({ initialTrackRecord, initialPalmares }:
   // `hasard_top1` reste le bon repère des deux côtés — c'est une espérance calculée
   // par course (1/nb_partants), pas une propriété de la cohorte.
   const favoriGagne = g.favori_win_rate;
-  const facteur1 = hasard1 && hasard1 > 0 ? favoriGagne / hasard1 : null;
+  // Hasard calculé sur la MÊME cohorte que `favori_win_rate` (repli : celui du journal
+  // d'analyse, pour un cache antérieur au champ).
+  const hasardFav = g.favori_hasard_top1 ?? hasard1;
+  const facteur1 = hasardFav && hasardFav > 0 ? favoriGagne / hasardFav : null;
   const depuis = g.mesure_depuis
     ? new Date(g.mesure_depuis).toLocaleDateString("fr-FR", { timeZone: "Europe/Paris", day: "numeric", month: "long", year: "numeric" })
     : null;
@@ -687,7 +711,7 @@ export default function TrackRecordPage({ initialTrackRecord, initialPalmares }:
           {
             value: <CountUp value={favoriGagne} decimals={1} suffix=" %" />,
             label: "Favori qui gagne",
-            note: hasard1 != null ? `Hasard : ${nf(hasard1, 1)} %` : undefined,
+            note: hasardFav != null ? `Hasard : ${nf(hasardFav, 1)} %` : undefined,
             cls: "text-emerald-300",
           },
           {
@@ -697,10 +721,12 @@ export default function TrackRecordPage({ initialTrackRecord, initialPalmares }:
           },
           {
             value: !gagnantsData ? "—" : gainConnu
-              ? <CountUpEuro value={gagnantsData.total_gain ?? 0} prefix="+" />
+              ? <CountUpEuro value={gagnantsData.total_gain ?? 0} />
               : <CountUp value={nbGagnants} />,
-            label: gainConnu ? "Gains encaissés" : "Paris gagnés",
-            note: gainConnu ? `${nf(nbGagnants)} paris gagnés` : `Sur ${nf(nbCoursesReglees)} courses réglées`,
+            // Retour BRUT (somme des rapports des paris gagnés), jamais présenté seul :
+            // la mise de toutes les courses réglées et le net l'accompagnent.
+            label: gainConnu ? "Retours bruts encaissés" : "Paris gagnés",
+            note: bilanCohorte,
           },
         ]}
       />
@@ -816,7 +842,7 @@ export default function TrackRecordPage({ initialTrackRecord, initialPalmares }:
             eyebrow="Vue d'ensemble"
             title="Les paris qui sont passés"
             description={gainConnu
-              ? "Les gains encaissés, profil par profil, avec le nombre de courses réglées en face."
+              ? "Les retours encaissés, avec en face le nombre de courses réglées et la mise engagée sur toutes — perdantes comprises."
               : "Le total des paris gagnés — et, juste à côté, le nombre de courses réglées. Sans ce second chiffre, n'afficher que les gagnants serait malhonnête."}
             icon={Coins}
           />
@@ -844,7 +870,6 @@ export default function TrackRecordPage({ initialTrackRecord, initialPalmares }:
                       {gainConnu ? (
                         <CountUpEuro
                           value={gagnantsData.total_gain ?? 0}
-                          prefix="+"
                           className="tr-pop mt-4 block font-display text-5xl font-black leading-none tabular-nums sm:text-7xl"
                         />
                       ) : (
@@ -852,7 +877,7 @@ export default function TrackRecordPage({ initialTrackRecord, initialPalmares }:
                       )}
                       <p className="mt-4 max-w-md text-sm leading-6 text-emerald-50/85">
                         {gainConnu
-                          ? `${nf(nbGagnants)} paris gagnés, sur ${nf(nbCoursesReglees)} courses réglées.`
+                          ? `Retours bruts de ${nf(nbGagnants)} paris gagnés, sur ${nf(nbCoursesReglees)} courses réglées.${miseEngagee != null ? ` Mises engagées sur ces courses : ${eur(miseEngagee)}${netCohorte != null ? `, soit un résultat net de ${eurSigne(netCohorte)}` : ""}.` : ""}`
                           : `paris gagnés, tous profils confondus, sur ${nf(nbCoursesReglees)} courses réglées. Chacun est consultable sur sa course.`}
                       </p>
                     </div>
@@ -984,7 +1009,7 @@ export default function TrackRecordPage({ initialTrackRecord, initialPalmares }:
                 label="Notre favori gagne la course"
                 aide="Le cheval classé numéro 1 par l'algorithme franchit la ligne en tête."
                 nous={favoriGagne}
-                hasard={hasard1}
+                hasard={hasardFav}
                 facteur={facteur1}
                 teinte="emeraude"
               />
@@ -1134,7 +1159,7 @@ export default function TrackRecordPage({ initialTrackRecord, initialPalmares }:
                     <CountUp value={g.favori_win_rate} decimals={1} suffix=" %" />
                   </p>
                   <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                    Il gagne franchement la course, contre {hasard1 != null ? `${nf(hasard1, 1)} %` : "—"} pour un
+                    Il gagne franchement la course, contre {hasardFav != null ? `${nf(hasardFav, 1)} %` : "—"} pour un
                     choix au hasard sur le même champ.
                   </p>
                 </Tilt>
@@ -1149,7 +1174,8 @@ export default function TrackRecordPage({ initialTrackRecord, initialPalmares }:
                       </p>
                       <p className="max-w-md text-sm leading-6 text-muted-foreground">
                         de nos favoris voient leur cote <strong className="font-semibold text-foreground">baisser</strong> entre
-                        notre pronostic et le départ, sur {nf(clv.n)} courses mesurées.
+                        la cote figée avec notre pronostic et la dernière cote relevée avant le départ, sur {nf(clv.n)} courses
+                        mesurées (non-partants exclus{clv.pct_inchangee != null && clv.pct_inchangee > 0 ? `, ${nf(clv.pct_inchangee, 1)} % de cotes inchangées comptées comme non battues` : ""}).
                       </p>
                     </div>
                   ) : (

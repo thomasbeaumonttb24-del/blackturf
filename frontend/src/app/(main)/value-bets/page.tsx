@@ -67,6 +67,8 @@ type VB = {
   nb_sources?: number;
   /** Positif = la cote a BAISSÉ depuis l'ouverture (l'argent arrive dessus). */
   mouvement_cote_pct?: number | null;
+  /** Cote PMU à laquelle l'espérance a été calculée (figée avec le pronostic). */
+  cote_detection?: number | null;
 };
 
 const NIVEAU_LABEL: Record<number, string> = { 1: "Intéressant", 2: "Bon signal", 3: "Fort signal", 4: "Exceptionnel" };
@@ -124,6 +126,24 @@ function Ecart({ vb }: { vb: VB }) {
         <span className="w-12 shrink-0 text-right tabular-nums text-stone-600">{pct(implicite)}</span>
       </div>
     </div>
+  );
+}
+
+/**
+ * L'espérance affichée est calculée à la cote du pronostic, pas à la cote PMU
+ * courante affichée juste à côté : on le dit, avec la cote et l'heure de repérage.
+ * Si la cote a bougé depuis, l'espérance au prix actuel n'est plus celle-là.
+ */
+function BaseEV({ vb, className, sansHeure }: { vb: VB; className?: string; sansHeure?: boolean }) {
+  if (vb.cote_detection == null) return null;
+  const quand = sansHeure ? null : vb.detecte_a;
+  const bouge = vb.cote_pmu != null && Math.abs(vb.cote_pmu - vb.cote_detection) >= 0.05;
+  return (
+    <p className={cn("text-[10px] leading-4 text-stone-500", className)}>
+      Espérance calculée à la cote {cote(vb.cote_detection)}
+      {quand ? ` (repéré à ${heureParis(quand)})` : ""}
+      {bouge ? <span className="text-amber-800"> · cote actuelle {cote(vb.cote_pmu)}</span> : null}
+    </p>
   );
 }
 
@@ -199,6 +219,8 @@ function CarteVB({ vb, isExpert }: { vb: VB; isExpert: boolean }) {
                 <div className="text-[10px] uppercase tracking-wider text-stone-400">Espérance</div>
               </div>
             </div>
+            {/* L'heure de repérage figure déjà au pied de la carte. */}
+            <BaseEV vb={vb} className="mt-1 text-right" sansHeure />
 
             <div className="mt-4"><Ecart vb={vb} /></div>
             {vb.proba_top1_low != null && vb.proba_top1_high != null && (
@@ -289,6 +311,11 @@ function LigneVB({ vb, isExpert }: { vb: VB; isExpert: boolean }) {
       <div className="text-right">
         <div className={cn("font-display text-lg font-medium tabular-nums", ev > 0 ? "text-emerald-700" : "text-rose-700")}>{ev > 0 ? "+" : ""}{ev}&nbsp;%</div>
         <div className="text-[10px] text-stone-400 sm:hidden">{pct(vb.proba_top1)} · cote {cote(vb.cote_pmu)}</div>
+        {vb.cote_detection != null && (
+          <div className="text-[10px] tabular-nums text-stone-400" title="Cote à laquelle l'espérance a été calculée">
+            à la cote {cote(vb.cote_detection)}
+          </div>
+        )}
       </div>
     </Link>
   );
@@ -319,6 +346,7 @@ function PariVedette({ vb }: { vb: VB }) {
               <div className="text-[10px] uppercase tracking-wider text-stone-400">Espérance</div>
             </div>
           </div>
+          <BaseEV vb={vb} className="mt-1 text-right" />
           <div className="mt-5"><Ecart vb={vb} /></div>
           <dl className="mt-5 grid grid-cols-3 gap-2 border-t border-stone-100 pt-4 text-center">
             <div><dt className="text-[10px] text-stone-500">Cote PMU</dt><dd className="font-display text-lg font-medium tabular-nums">{cote(vb.cote_pmu)}</dd></div>
