@@ -42,30 +42,52 @@ deux_fois() { # $1 = cle, $2 = vrai(1)/faux(0) ; retourne 0 si vrai deux fois de
 }
 db() { docker exec blackturf_db sh -c "psql -U \"\$POSTGRES_USER\" -d \"\$POSTGRES_DB\" -At -c \"$1\"" 2>/dev/null; }
 
-# ── 1. Connexions SSH reussies ───────────────────────────────────────────────
-# IP connues : postes de Thomas. Les deploiements GitHub viennent d'IP Azure
-# changeantes : une connexion suivie d'un `reset: moving to origin/main` dans les
-# 5 min est un deploiement. On juge donc les connexions vieilles de 6 a 30 min.
-CONNUES="$ETAT/ip_connues"
-# Liste tenue SUR LE SERVEUR uniquement (le depot est public). Absente = toute
-# connexion hors deploiement alerte, ce qui est le cote sur.
-[ -f "$CONNUES" ] || printf '127.0.0.1\n' > "$CONNUES"
+# ── 1. Connexions SSH reussies : on juge la CLE, pas l'IP ───────────────────
+# Jusqu'au 07/10/2026 la sentinelle jugeait l'IP : toute connexion hors liste et
+# hors deploiement alertait — une box qui change d'IP, une session Claude dans le
+# cloud ou un workflow GitHub (IP Azure) suffisaient. Un e-mail d'alerte ne doit
+# partir qu'en cas de doute reel, jamais pour nos propres interventions.
+#
+# Ce qui distingue « nous » d'un intrus, c'est la cle : toi, GitHub et Claude
+# entrez avec une cle deja presente dans authorized_keys. Une connexion par mot
+# de passe, ou par une cle absente de cette liste, alerte TOUJOURS. Ajouter une
+# cle (seul moyen pour un intrus de s'installer) alerte aussi toujours : voir 2.
+CLES_OK=$(cat /root/.ssh/authorized_keys /home/*/.ssh/authorized_keys 2>/dev/null \
+  | ssh-keygen -lf - 2>/dev/null | awk '{print $2}')
 VUES="$ETAT/ssh_vues"; touch "$VUES"
-RESETS=$(cd "$DEPOT" && git reflog --date=unix -50 2>/dev/null | grep "reset: moving to origin" | sed -E 's/.*HEAD@\{([0-9]+)\}.*/\1/')
-journalctl -u ssh --since "-30 min" --until "-6 min" -o short-unix --no-pager 2>/dev/null \
+NOUS="$ETAT/nous_derniere"          # derniere connexion par une cle autorisee
+INCONNU="$ETAT/inconnu_derniere"    # derniere connexion qui a alerte
+journalctl -u ssh --since "-30 min" -o short-unix --no-pager 2>/dev/null \
   | grep -E "Accepted (publickey|password|keyboard-interactive) for " | while read -r ts reste; do
     ip=$(echo "$reste" | grep -oE "from [0-9a-fA-F:.]+" | cut -d' ' -f2)
-    [ -n "$ip" ] || continue
-    t=${ts%.*}; cle="$t $ip"
+    t=${ts%.*}
+    empreinte=$(echo "$reste" | grep -oE "SHA256:[A-Za-z0-9+/=]+" | head -1)
+    if echo "$reste" | grep -q "Accepted publickey for " && [ -n "$empreinte" ] \
+       && echo "$CLES_OK" | grep -qxF "$empreinte"; then
+      d=$(cat "$NOUS" 2>/dev/null || echo 0); case "$d" in (*[!0-9]*|"") d=0 ;; esac
+      [ "$t" -gt "$d" ] && echo "$t" > "$NOUS"
+      continue
+    fi
+    cle="$t $ip"
     grep -qxF "$cle" "$VUES" && continue
     echo "$cle" >> "$VUES"
-    grep -qxF "$ip" "$CONNUES" && continue
-    deploi=0
-    for r in $RESETS; do [ "$r" -ge "$t" ] && [ "$r" -le $((t + 300)) ] && deploi=1; done
-    [ "$deploi" = 1 ] && continue
-    echo "SSH|Connexion SSH root reussie depuis une IP inconnue : <b>$ip</b> a $(date -u -d @"$t" '+%H:%M') UTC, sans deploiement GitHub derriere. Si ce n'est pas toi (nouvelle box, 4G...), c'est une INTRUSION : couper la cle SSH." >> "$ETAT/a_signaler"
+    echo "$t" > "$INCONNU"
+    methode=$(echo "$reste" | grep -oE "Accepted [a-z-]+" | cut -d' ' -f2)
+    echo "SSH|Connexion SSH reussie SANS cle autorisee connue (methode : <b>$methode</b>) depuis <b>$ip</b> a $(date -u -d @"$t" '+%H:%M') UTC. Ni toi, ni GitHub, ni Claude n'entrent ainsi : INTRUSION probable, couper l'acces SSH." >> "$ETAT/a_signaler"
   done
 tail -n 500 "$VUES" > "$VUES.tmp" && mv "$VUES.tmp" "$VUES"
+
+# « Nous intervenons » : une cle autorisee s'est connectee il y a moins de 30 min,
+# ou une session SSH est ouverte — et aucune connexion suspecte n'a eu lieu depuis
+# une heure. Pendant ce temps, ce que NOUS changeons (fichiers, code, ports,
+# conteneurs de test, charge) ne declenche pas d'e-mail ; c'est journalise.
+nous=$(cat "$NOUS" 2>/dev/null || echo 0); case "$nous" in (*[!0-9]*|"") nous=0 ;; esac
+inconnu=$(cat "$INCONNU" 2>/dev/null || echo 0); case "$inconnu" in (*[!0-9]*|"") inconnu=0 ;; esac
+sessions=$(ss -tnH state established '( sport = :22 )' 2>/dev/null | wc -l)
+NOUS_ACTIF=0
+{ [ $((MAINTENANT - nous)) -le 1800 ] || [ "$sessions" -gt 0 ]; } && NOUS_ACTIF=1
+[ $((MAINTENANT - inconnu)) -le 3600 ] && NOUS_ACTIF=0
+silence() { journal "pas d'e-mail (intervention connue en cours) : $*"; }
 
 # ── 2. Fichiers sensibles modifies ──────────────────────────────────────────
 EMPREINTES="$ETAT/empreintes"
@@ -82,27 +104,47 @@ calc_empreintes() {
 calc_empreintes > "$EMPREINTES.new"
 if [ -f "$EMPREINTES" ]; then
   diff <(cat "$EMPREINTES") "$EMPREINTES.new" | grep '^>' | awk '{print $3}' | while read -r f; do
-    echo "FICHIER_$f|Fichier systeme sensible MODIFIE : <b>$f</b>. Normal seulement si toi ou Claude venez d'intervenir sur le serveur." >> "$ETAT/a_signaler"
+    # Les PORTES D'ENTREE alertent toujours, meme pendant nos interventions : une
+    # cle ajoutee ou un sshd modifie est ce qu'un intrus fait pour rester.
+    case "$f" in
+      */authorized_keys|/etc/ssh/*)
+        echo "FICHIER_$f|Acces SSH MODIFIE : <b>$f</b>. Si ni toi ni Claude n'avez ajoute de cle ou change la config SSH a l'instant, c'est une INTRUSION." >> "$ETAT/a_signaler" ;;
+      *)
+        if [ "$NOUS_ACTIF" = 1 ]; then silence "fichier modifie $f"; continue; fi
+        echo "FICHIER_$f|Fichier systeme sensible MODIFIE : <b>$f</b>, sans intervention connue de notre part (ou pendant une connexion suspecte)." >> "$ETAT/a_signaler" ;;
+    esac
   done
 fi
 mv "$EMPREINTES.new" "$EMPREINTES"
 
 # Code en production modifie hors deploiement (le deploiement fait reset --hard).
 modifs=$(cd "$DEPOT" && git status --porcelain --untracked-files=no 2>/dev/null | head -5 | tr '\n' ' ')
-[ -n "$modifs" ] && alerte "code_modifie" "Code de production modifie sur le serveur hors deploiement : <b>$modifs</b>"
+if [ -n "$modifs" ]; then
+  if [ "$NOUS_ACTIF" = 1 ]; then silence "code modifie $modifs"
+  else alerte "code_modifie" "Code de production modifie sur le serveur hors deploiement, sans intervention connue de notre part : <b>$modifs</b>"; fi
+fi
 
 # ── 3. Ports en ecoute et conteneurs inattendus ─────────────────────────────
 PORTS=$(ss -tlnH 2>/dev/null | awk '{print $4}' | sort -u)
 if [ -f "$ETAT/ports" ]; then
   nouveaux=$(comm -13 "$ETAT/ports" <(echo "$PORTS") | tr '\n' ' ')
-  [ -n "${nouveaux// /}" ] && alerte "ports_$nouveaux" "Nouveau port en ecoute sur le serveur : <b>$nouveaux</b>"
+  if [ -n "${nouveaux// /}" ]; then
+    if [ "$NOUS_ACTIF" = 1 ]; then silence "nouveau port $nouveaux"
+    else alerte "ports_$nouveaux" "Nouveau port en ecoute sur le serveur : <b>$nouveaux</b>"; fi
+  fi
 fi
 # Union de tout ce qui a deja ete vu : un deploiement recree db/redis, leurs ports
 # disparaissent une minute puis reviennent — ce n'est pas un « nouveau » port.
 { cat "$ETAT/ports" 2>/dev/null; echo "$PORTS"; } | grep -v '^$' | sort -u > "$ETAT/ports.tmp" && mv "$ETAT/ports.tmp" "$ETAT/ports"
-CONTENEURS=$(docker ps --format '{{.Names}}' | sort)
-inconnus=$(echo "$CONTENEURS" | grep -vE '^blackturf_(api|frontend|worker|scheduler|scraper|db|redis|nginx)$' | grep -v '^$' | grep -vE '^(gate|test|verif|tmp)' | tr '\n' ' ')
-[ -n "${inconnus// /}" ] && alerte "conteneur_$inconnus" "Conteneur inconnu en marche : <b>$inconnus</b>"
+# Conteneurs jetables lances depuis NOS images (`blackturf-*` : gate de tests,
+# verifications) : ce sont les notres, quel que soit leur nom aleatoire.
+inconnus=$(docker ps --format '{{.Names}} {{.Image}}' \
+  | grep -vE '^blackturf_(api|frontend|worker|scheduler|scraper|db|redis|nginx) ' \
+  | grep -vE '^(gate|test|verif|tmp)' | awk '$2 !~ /^blackturf-/ {print $1}' | sort | tr '\n' ' ')
+if [ -n "${inconnus// /}" ]; then
+  if [ "$NOUS_ACTIF" = 1 ]; then silence "conteneur $inconnus"
+  else alerte "conteneur_$inconnus" "Conteneur inconnu en marche (image hors BlackTurf) : <b>$inconnus</b>"; fi
+fi
 for c in api frontend worker scheduler scraper db redis nginx; do
   etat=$(docker inspect -f '{{.State.Status}}' "blackturf_$c" 2>/dev/null || echo absent)
   if deux_fois "conteneur_$c" "$([ "$etat" != running ] && echo 1 || echo 0)"; then
@@ -163,6 +205,8 @@ en_build=0
 pgrep -f "^/usr/libexec/docker/cli-plugins/docker-compose" >/dev/null && en_build=1
 pgrep -x "docker-buildx" >/dev/null && en_build=1
 n=$(cat "$ETAT/charge_n" 2>/dev/null || echo 0)
+# Nos interventions (gate de tests : 8 min a pleine charge) valent un build.
+[ "$NOUS_ACTIF" = 1 ] && en_build=1
 if [ "$en_build" = 0 ] && [ "$charge" -gt $((coeurs * 3)) ]; then n=$((n + 1)); else n=0; fi
 echo "$n" > "$ETAT/charge_n"
 if [ "$n" -ge 5 ]; then
