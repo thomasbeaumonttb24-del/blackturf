@@ -15,9 +15,11 @@ type Props = {
   variant?: "brand" | "brand-outline" | "outline";
   size?: "default" | "lg" | "xl";
   className?: string;
+  // Code de l'offre anniversaire, déjà vérifié éligible par l'API (mensuel seulement).
+  codePromo?: string;
 };
 
-export function CheckoutButton({ plan, periodicite, label, variant = "brand", size = "lg", className }: Props) {
+export function CheckoutButton({ plan, periodicite, label, variant = "brand", size = "lg", className, codePromo }: Props) {
   const { user, loading: authLoading } = useAuth();
   const router = useRouter();
   const [loading, setLoading] = useState(false);
@@ -58,7 +60,8 @@ export function CheckoutButton({ plan, periodicite, label, variant = "brand", si
 
     setLoading(true);
     try {
-      let response = await api.post("/stripe/checkout", { plan, periodicite });
+      const code_promo = codePromo && !abonne && periodicite === "monthly" ? codePromo : undefined;
+      let response = await api.post("/stripe/checkout", { plan, periodicite, code_promo });
       // Compte déjà abonné à une AUTRE formule : rien n'est modifié tant que le
       // client n'a pas lu et accepté ce qui va se passer (montant prélevé
       // aujourd'hui, crédit, prochaine facture), chiffré par Stripe. Le

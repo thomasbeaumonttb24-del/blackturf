@@ -259,6 +259,8 @@ async def deliver(session, campaign, email, subject, html, plain, unsubscribe, n
         type_alerte = "digest_matin"
     elif campaign.startswith("strategie-"):
         type_alerte = "strategie_email"  # cf. services/alertes_strategies.py
+    elif campaign.startswith("promo-"):
+        type_alerte = "offre_email"  # cf. scripts/envoyer_mail_anniversaire.py
     else:
         type_alerte = "weekly_best_vb"
     await _log_alerte(session, user_id, type_alerte, "email", {"campagne": campaign, **(journal or {})},
