@@ -705,6 +705,28 @@ def _derniere_course(X: pd.DataFrame, masque: Optional[np.ndarray] = None) -> Op
     return ids.iloc[-1] if len(ids) else None
 
 
+async def _clore_lecture(session: AsyncSession) -> None:
+    """Referme la transaction de LECTURE avant un long calcul sans base.
+
+    Le rôle `bt_app` porte `idle_in_transaction_session_timeout = 10min`
+    (durcissement du 06/10/2026) : une transaction ouverte puis laissée inactive
+    plus de dix minutes est tuée par PostgreSQL. Le 07/10/2026, l'entraînement
+    (24 min) suivait la lecture du dataset dans la même transaction : connexion
+    coupée à 09:07:01, dix minutes pile après la lecture, et retrain en échec
+    après avoir tout calculé. N'appeler qu'après des LECTURES : rien n'est écrit
+    ici qui ne l'aurait été plus tard. `expire_on_commit=False` garde lisibles
+    les objets déjà chargés (cf. db/database.py).
+
+    Best-effort : un commit raté ne doit JAMAIS changer une décision (le duel
+    champion/challenger renvoyait sinon `None`). Les lectures sont déjà faites ;
+    on journalise et on continue, comme avant ce correctif.
+    """
+    try:
+        await session.commit()
+    except Exception as e:  # noqa: BLE001
+        log.warning("pipeline.retrain.cloture_lecture_impossible", err=str(e)[:160])
+
+
 async def _date_course(session: AsyncSession, course_id: Optional[str]):
     """`date_heure` d'une course, ou None. Best-effort : une colonne
     d'observabilité ne fait jamais échouer un retrain."""
@@ -861,6 +883,8 @@ async def _head_to_head_auc(
     except Exception as e:
         log.warning("pipeline.h2h.courses_query_failed", err=str(e)[:160])
         return None
+    # Le scoring qui suit ne touche plus la base (cf. _clore_lecture).
+    await _clore_lecture(session)
 
     mask = X_hold["course_id"].isin(oos_courses).to_numpy()
     n_rows = int(mask.sum())
@@ -2007,6 +2031,8 @@ async def _do_retraining(mois: int, label: str) -> dict:
             session, mois, max_rows=settings.retrain_max_rows
         )
         _log_rss(f"{label}.dataset_fetched", n_rows=len(X))
+        # L'entraînement dure ~20-25 min sans toucher la base (cf. _clore_lecture).
+        await _clore_lecture(session)
         # Seuil abaissé à 300 : amorçage sur vraies courses (le synthétique sert de
         # prior tant qu'on a peu de données réelles ; il sera remplacé dès qu'on a
         # un vrai modèle, cf. override est_synthetique ci-dessous).
@@ -2205,6 +2231,9 @@ async def _do_retraining(mois: int, label: str) -> dict:
             _refit_info: Optional[dict] = None
             _importance_servie = model.feature_importance
             if _refit:
+                # Le refit est un second entraînement complet (cf. _clore_lecture) :
+                # seules des lectures précèdent, `edge_monitor` committe lui-même.
+                await _clore_lecture(session)
                 _t_refit = datetime.now()
                 _log_rss(f"{label}.refit.start", n_rows=n_train_rows)
                 try:
