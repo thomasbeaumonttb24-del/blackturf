@@ -46,7 +46,8 @@ export interface Outsider {
   gagne: boolean | null;
   rapport_place: number | null;
   rapport_gagnant: number | null;
-  verrouille: boolean;
+  /** Course à venir vue par un non-abonné : le serveur n'envoie alors QUE le niveau. */
+  verrouille?: boolean;
 }
 
 interface JourResp {
@@ -277,9 +278,50 @@ function Resultat({ o }: { o: Outsider }) {
   );
 }
 
+/* ─── Carte verrouillée (non-abonné, course à venir) ─────────────────────── */
+
+/** Ne montre que le niveau : aucune course, heure, numéro, casaque, jockey ni
+ *  cote — le serveur ne les envoie d'ailleurs pas. */
+function CarteVerrouillee({ niveau }: { niveau: Outsider["niveau"] }) {
+  return (
+    <Link
+      href="/tarifs"
+      aria-label="Outsider réservé aux abonnés — voir les formules"
+      className={cn(
+        "group flex h-full flex-col rounded-3xl bg-gradient-to-b from-white to-[#FFFBF3] p-4 ring-1 sm:p-5",
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500",
+        THEME[niveau].halo,
+      )}
+    >
+      <div className="flex items-center justify-between gap-2">
+        <span className="rounded-lg bg-stone-100 px-2 py-1 text-[11px] font-bold uppercase tracking-wide text-stone-400 ring-1 ring-stone-200">
+          Course à venir
+        </span>
+        <Badge niveau={niveau} />
+      </div>
+      <div className="mt-4 flex items-center gap-3.5">
+        <span className="flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl bg-stone-100 ring-1 ring-stone-200 shadow-[inset_0_1px_0_#fff,0_14px_24px_-12px_rgba(28,25,23,.35)]">
+          <Lock className="h-6 w-6 text-stone-400" aria-hidden />
+        </span>
+        <div className="min-w-0 flex-1 space-y-2" aria-hidden>
+          <span className="block h-4 w-3/4 rounded-full bg-stone-200/80" />
+          <span className="block h-3 w-1/2 rounded-full bg-stone-200/60" />
+          <span className="block h-5 w-16 rounded-lg bg-stone-100 ring-1 ring-stone-200" />
+        </div>
+        <Jauge valeur={null} niveau={niveau} verrouille />
+      </div>
+      <div className="mt-auto flex items-center justify-between gap-2 pt-4">
+        <span className="text-xs font-semibold text-amber-700">Réservé aux abonnés Standard et Expert</span>
+        <ArrowUpRight className="h-3.5 w-3.5 text-stone-400 group-hover:text-amber-700" aria-hidden />
+      </div>
+    </Link>
+  );
+}
+
 /* ─── Carte ──────────────────────────────────────────────────────────────── */
 
 export function OutsiderCarte({ o, compact = false }: { o: Outsider; compact?: boolean }) {
+  if (o.verrouille) return <CarteVerrouillee niveau={o.niveau} />;
   const t = THEME[o.niveau];
   return (
     <Tilt max={4} className="h-full">
@@ -308,7 +350,7 @@ export function OutsiderCarte({ o, compact = false }: { o: Outsider; compact?: b
 
         {/* Cheval + jauge */}
         <div className="mt-4 flex items-center gap-3.5">
-          <Casaque numero={o.numero} url={o.casaque_image_url ?? null} niveau={o.niveau} verrouille={o.verrouille} />
+          <Casaque numero={o.numero} url={o.casaque_image_url ?? null} niveau={o.niveau} verrouille={!!o.verrouille} />
           <div className="min-w-0 flex-1">
             {o.verrouille ? (
               <>
@@ -345,7 +387,7 @@ export function OutsiderCarte({ o, compact = false }: { o: Outsider; compact?: b
             </div>
           </div>
           <div className="flex shrink-0 flex-col items-center">
-            <Jauge valeur={o.chance_place} niveau={o.niveau} verrouille={o.verrouille} />
+            <Jauge valeur={o.chance_place} niveau={o.niveau} verrouille={!!o.verrouille} />
             <span className="mt-1 whitespace-nowrap text-[9.5px] font-semibold uppercase tracking-[0.1em] text-stone-400">
               Chance top {o.places_payees}
             </span>
@@ -428,7 +470,10 @@ export function PreuveOutsiders({ bilan, sombre = true }: { bilan?: BilanResp; s
   return null;
 }
 
-function BandeauAbonnes({ texte = "Le nom, la cote et les raisons des outsiders à venir sont réservés aux abonnés." }: { texte?: string }) {
+const TEXTE_ABONNES =
+  "Les outsiders des prochaines courses — course, cheval, casaque, cote et raisons — sont réservés aux abonnés Standard et Expert.";
+
+function BandeauAbonnes({ texte = TEXTE_ABONNES }: { texte?: string }) {
   return (
     <div className="mt-5 flex flex-col gap-3 rounded-2xl bg-white/80 p-4 ring-1 ring-stone-200 sm:flex-row sm:items-center sm:justify-between">
       <p className="flex items-start gap-2 text-sm text-stone-700">
@@ -449,12 +494,15 @@ function BandeauAbonnes({ texte = "Le nom, la cote et les raisons des outsiders 
 export function OutsidersDuJour({ titreNiveau = "h2", max = 6 }: { titreNiveau?: "h2" | "h3"; max?: number }) {
   const { data, isLoading } = useOutsidersJour();
   const { data: bilan } = useOutsidersBilan(30);
+  const complet = !!data?.acces_complet;
   const liste = (data?.outsiders ?? []).filter((o) => !o.non_partant);
   const aVenir = liste.filter((o) => !o.termine);
-  const montres = [...aVenir, ...liste.filter((o) => o.termine)].slice(0, max);
+  const courus = liste.filter((o) => o.termine);
+  // Rien aujourd'hui : un non-abonné voit les plus beaux coups récents (courus).
+  const montres = (liste.length > 0 ? [...aVenir, ...courus] : complet ? [] : bilan?.plus_beaux ?? []).slice(0, max);
   const H = titreNiveau;
 
-  if (!isLoading && liste.length === 0) return null;
+  if (!isLoading && montres.length === 0) return null;
 
   return (
     <Scene className="p-5 sm:p-8">
@@ -469,7 +517,12 @@ export function OutsidersDuJour({ titreNiveau = "h2", max = 6 }: { titreNiveau?:
           </H>
           <p className="mt-2 max-w-2xl text-sm leading-6 text-stone-600">
             Cotes à 15 et plus que notre cerveau des outsiders juge sous-estimées, avec leur chance estimée de finir dans
-            les places.{aVenir.length > 0 ? ` ${aVenir.length} encore à courir aujourd'hui.` : ""}
+            les places.
+            {aVenir.length > 0
+              ? ` ${aVenir.length} détecté${aVenir.length > 1 ? "s" : ""} pour les prochaines courses.`
+              : liste.length === 0 && !complet
+                ? " Voici les derniers qu'il avait repérés, et ce qu'ils ont fait."
+                : ""}
           </p>
           <div className="mt-1.5">
             <PreuveOutsiders bilan={bilan} />
@@ -479,7 +532,7 @@ export function OutsidersDuJour({ titreNiveau = "h2", max = 6 }: { titreNiveau?:
           href="/outsiders"
           className="inline-flex shrink-0 items-center justify-center gap-1.5 self-start rounded-xl bg-gradient-to-b from-stone-800 to-stone-950 px-4 py-2.5 text-sm font-bold text-white shadow-[inset_0_1px_0_rgba(255,255,255,.15),0_12px_24px_-12px_rgba(28,25,23,.6)] hover:from-stone-700 hover:to-stone-900 lg:self-auto"
         >
-          Tous les outsiders <ArrowRight className="h-4 w-4" aria-hidden />
+          {complet ? "Tous les outsiders" : "Résultats et bilan"} <ArrowRight className="h-4 w-4" aria-hidden />
         </Link>
       </div>
       {isLoading ? (
@@ -487,11 +540,11 @@ export function OutsidersDuJour({ titreNiveau = "h2", max = 6 }: { titreNiveau?:
       ) : (
         <Grille cols={max >= 3 ? 3 : 2}>
           {montres.map((o, i) => (
-            <OutsiderCarte key={`${o.course_id}-${o.numero ?? i}`} o={o} compact />
+            <OutsiderCarte key={o.verrouille ? `v-${i}` : `${o.course_id}-${o.numero ?? i}`} o={o} compact />
           ))}
         </Grille>
       )}
-      {data && !data.acces_complet && aVenir.length > 0 && <BandeauAbonnes />}
+      {data && !complet && <BandeauAbonnes />}
     </Scene>
   );
 }
@@ -513,7 +566,13 @@ export function OutsidersCourse({ courseId }: { courseId: string }) {
           <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-rose-100 ring-1 ring-rose-200">
             <Rocket className="h-4 w-4 text-rose-600" aria-hidden />
           </span>
-          {liste.length > 1 ? "Outsiders repérés dans cette course" : "Outsider repéré dans cette course"}
+          {liste[0].termine
+            ? liste.length > 1
+              ? "Outsiders détectés avant le départ"
+              : "Outsider détecté avant le départ"
+            : liste.length > 1
+              ? "Outsiders repérés dans cette course"
+              : "Outsider repéré dans cette course"}
         </h2>
         <Link href="/outsiders" className="text-xs font-semibold text-stone-500 underline-offset-4 hover:text-amber-700 hover:underline">
           Tous les outsiders du jour
@@ -527,9 +586,6 @@ export function OutsidersCourse({ courseId }: { courseId: string }) {
           <OutsiderCarte key={`${o.numero ?? "x"}-${i}`} o={o} />
         ))}
       </Grille>
-      {data && !data.acces_complet && !liste[0].termine && (
-        <BandeauAbonnes texte="Débloquez le nom, la cote et les raisons de cet outsider." />
-      )}
     </Scene>
   );
 }
@@ -591,11 +647,11 @@ export function OutsidersPage() {
         ) : (
           <Grille cols={2}>
             {aVenir.map((o, i) => (
-              <OutsiderCarte key={`${o.course_id}-${o.numero ?? i}`} o={o} />
+              <OutsiderCarte key={o.verrouille ? `v-${i}` : `${o.course_id}-${o.numero ?? i}`} o={o} />
             ))}
           </Grille>
         )}
-        {data && !data.acces_complet && aVenir.length > 0 && <BandeauAbonnes />}
+        {data && !data.acces_complet && <BandeauAbonnes />}
 
         {finis.length > 0 && (
           <div className="mt-10">

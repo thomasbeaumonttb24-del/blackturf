@@ -1,10 +1,14 @@
 """
-Outsiders du jour — routes publiques (cerveau `ml.outsider_brain`).
+Outsiders du jour — routes (cerveau `ml.outsider_brain`).
 
-Tout le monde voit QUELLES courses ont un outsider repéré et le bilan réel ;
-le nom, la cote et les raisons d'un outsider de course À VENIR sont réservés aux
-abonnés (même liste blanche que les paris de valeur). Une course terminée est
-publique : le résultat ne se vend plus, il prouve.
+Accès (décisions Thomas, 07/10/2026) :
+- Standard et Expert (passes comprises, qui donnent le plan Expert) : tout,
+  courses à venir et courses courues.
+- Sans compte et compte gratuit : les courses COURUES en clair (l'outsider
+  détecté et son résultat) ; pour les courses à venir, des cartes verrouillées
+  qui ne portent QUE le niveau — rien qui permette de retrouver la course ou le
+  cheval. Sur une fiche course à venir : rien du tout (la page désigne déjà la
+  course). Le filtre est ici, côté serveur, jamais seulement à l'affichage.
 """
 from datetime import date
 from typing import Optional
@@ -17,13 +21,11 @@ from api.routes.auth import _access_token, get_current_user
 from db.database import get_db
 from db.models import User
 from services import outsiders
-from services.valuebets_visibilite import PLANS_AVEC_VALUE_BETS
 
 router = APIRouter()
 
-# La casaque et le jockey identifient le cheval autant que son nom : masqués aussi.
-_MASQUES = ("numero", "nom_cheval", "casaque_image_url", "jockey", "cote_signal", "cote_actuelle",
-            "chance_place", "raisons")
+# « starter » et « pro » : anciens noms de Standard et d'Expert.
+PLANS_OUTSIDERS = ("standard", "starter", "expert", "pro")
 
 
 async def _utilisateur_optionnel(
@@ -39,21 +41,27 @@ async def _utilisateur_optionnel(
 
 
 def acces_complet(user: Optional[User]) -> bool:
-    return bool(user) and (user.plan in PLANS_AVEC_VALUE_BETS or bool(getattr(user, "is_admin", False)))
+    return bool(user) and (user.plan in PLANS_OUTSIDERS or bool(getattr(user, "is_admin", False)))
 
 
-def masquer(lignes: list[dict], complet: bool) -> list[dict]:
+def verrouiller(l: dict) -> dict:
+    """Carte d'une course À VENIR pour un non-abonné : son niveau, rien d'autre.
+
+    Ni course, ni hippodrome, ni heure, ni numéro, casaque, jockey ou cote : la
+    moindre de ces données suffit à retrouver le cheval sur pmu.fr."""
+    return {"verrouille": True, "termine": False, "niveau": l["niveau"]}
+
+
+def filtrer(lignes: list[dict], complet: bool) -> list[dict]:
+    """Abonné : tout. Sinon : courses courues en clair (le résultat est public),
+    courses à venir réduites à une carte verrouillée anonyme."""
     if complet:
         return [dict(l, verrouille=False) for l in lignes]
-    out = []
-    for l in lignes:
-        if l["termine"]:
-            out.append(dict(l, verrouille=False))
-        else:
-            masque = {k: v for k, v in l.items() if k not in _MASQUES}
-            masque.update({k: None for k in _MASQUES}, raisons=[], verrouille=True)
-            out.append(masque)
-    return out
+    courus = [dict(l, verrouille=False) for l in lignes if l["termine"]]
+    a_venir = [verrouiller(l) for l in lignes if not l["termine"] and not l.get("non_partant")]
+    # Ordre neutre (forts d'abord) : l'ordre chronologique trahirait l'horaire.
+    a_venir.sort(key=lambda x: x["niveau"] != "fort")
+    return a_venir + courus
 
 
 @router.get("/outsiders/jour", dependencies=[Depends(rate_limit_public)])
@@ -65,7 +73,7 @@ async def outsiders_du_jour(
     lignes = await outsiders.lister(db, jour=jour)
     complet = acces_complet(user)
     return {"jour": (jour or outsiders.datetime.now(outsiders.PARIS).date()).isoformat(),
-            "acces_complet": complet, "outsiders": masquer(lignes, complet)}
+            "acces_complet": complet, "outsiders": filtrer(lignes, complet)}
 
 
 @router.get("/outsiders/course/{course_id}", dependencies=[Depends(rate_limit_public)])
@@ -76,7 +84,9 @@ async def outsiders_course(
 ):
     lignes = await outsiders.lister(db, course_id=course_id)
     complet = acces_complet(user)
-    return {"acces_complet": complet, "outsiders": masquer(lignes, complet)}
+    # Fiche course : une carte verrouillée y désignerait déjà la course.
+    visibles = filtrer(lignes, complet) if complet else [dict(l, verrouille=False) for l in lignes if l["termine"]]
+    return {"acces_complet": complet, "outsiders": visibles}
 
 
 @router.get("/outsiders/bilan", dependencies=[Depends(rate_limit_public)])

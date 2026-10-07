@@ -79,15 +79,23 @@ def test_raison_sous_cote_ignore_les_appariements_absurdes():
     assert "contre" not in ob._phrase("sous_cote_pmu", row, 5)
 
 
-def test_masquage_public():
-    from api.routes.outsiders import masquer
-    a_venir = {"numero": 7, "nom_cheval": "X", "cote_signal": 22.0, "cote_actuelle": 25.0,
-               "chance_place": 0.3, "raisons": ["a"], "termine": False, "code": "R1C1",
-               "casaque_image_url": "https://x/c.png", "jockey": "J. Dupont"}
-    fini = dict(a_venir, termine=True)
-    out = masquer([a_venir, fini], complet=False)
-    assert out[0]["verrouille"] and out[0]["nom_cheval"] is None and out[0]["raisons"] == []
-    assert out[0]["casaque_image_url"] is None and out[0]["jockey"] is None
-    assert out[0]["code"] == "R1C1"
-    assert not out[1]["verrouille"] and out[1]["nom_cheval"] == "X"
-    assert masquer([a_venir], complet=True)[0]["nom_cheval"] == "X"
+def test_non_abonne_ne_recoit_rien_d_identifiant_sur_une_course_a_venir():
+    from types import SimpleNamespace
+    from api.routes.outsiders import acces_complet, filtrer
+    a_venir = {"course_id": "07102026R1C1", "code": "R1C1", "hippodrome": "VINCENNES", "date_heure": "x",
+               "numero": 7, "nom_cheval": "X", "casaque_image_url": "u", "jockey": "J", "cote_signal": 22.0,
+               "cote_actuelle": 25.0, "chance_place": 0.3, "raisons": ["a"], "niveau": "a_suivre",
+               "termine": False, "non_partant": False}
+    fort = dict(a_venir, niveau="fort")
+    fini = dict(a_venir, termine=True, numero=3, nom_cheval="Y")
+    out = filtrer([a_venir, fort, fini], complet=False)
+    assert out[0] == {"verrouille": True, "termine": False, "niveau": "fort"}
+    assert out[1] == {"verrouille": True, "termine": False, "niveau": "a_suivre"}
+    assert out[2]["nom_cheval"] == "Y" and out[2]["verrouille"] is False
+    assert [l["nom_cheval"] for l in filtrer([a_venir, fini], complet=True)] == ["X", "Y"]
+    assert not acces_complet(None)
+    assert not acces_complet(SimpleNamespace(plan="free", is_admin=False))
+    assert not acces_complet(SimpleNamespace(plan="decouverte", is_admin=False))
+    for plan in ("standard", "starter", "expert", "pro"):
+        assert acces_complet(SimpleNamespace(plan=plan, is_admin=False))
+    assert acces_complet(SimpleNamespace(plan="free", is_admin=True))
