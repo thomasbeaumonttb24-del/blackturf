@@ -74,3 +74,16 @@ ignoreip = 127.0.0.1/8 ::1 172.17.0.0/16 172.18.0.0/16 <IP>
 [blackturf-aspiration]
 ignoreip = 127.0.0.1/8 ::1 172.17.0.0/16 172.18.0.0/16 <IP>
 ```
+
+## Prison `blackturf-pages`
+
+Complement de `blackturf-aspiration` : compte les PAGES (hors statiques), pas
+l'API. Le 2026-10-08, 176.146.154.55 (script `node`) a aspire `/resultats/<jour>`
+puis chaque `/courses/<id>` : 1 626 pages en 5 min, zero appel `/api/`. La prison
+API ne l'aurait jamais vu. Seuil **900 pages / 5 min** (pic humain mesure sur 30 j :
+585, pic robot : 652). Meme bannissement progressif (1 h → 1 semaine).
+
+**Nom de prison court obligatoire** : iptables refuse les chaines de plus de 28
+caracteres. `blackturf-aspiration-pages` passait `fail2ban-client -t` et le
+`reload`, puis CHAQUE bannissement echouait (« chain name too long ») dans
+`/var/log/fail2ban.log`. Toujours tester un `banip 198.51.100.1` apres ajout.

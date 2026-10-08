@@ -139,22 +139,23 @@ jobs:
               if [ -f $J/blackturf-nginx.conf ] && [ ! -f $J/blackturf-nginx.local ]; then
                 ip=$(awk '/^\[blackturf-scanners\]/{s=1;next} /^\[/{s=0} s && /^ignoreip/' $J/blackturf-nginx.conf)
                 if [ -n "$ip" ]; then
-                  printf '[blackturf-scanners]\n%s\n\n[blackturf-aspiration]\n%s\n' "$ip" "$ip" \
+                  printf '[blackturf-scanners]\n%s\n\n[blackturf-aspiration]\n%s\n\n[blackturf-pages]\n%s\n' "$ip" "$ip" "$ip" \
                     | $S tee $J/blackturf-nginx.local >/dev/null || return 1
                 fi
               fi
               sauve=$(mktemp -d)
-              for f in $J/blackturf-nginx.conf $F/blackturf-scanners.conf $F/blackturf-aspiration.conf; do
+              for f in $J/blackturf-nginx.conf $F/blackturf-scanners.conf $F/blackturf-aspiration.conf $F/blackturf-pages.conf; do
                 [ -f "$f" ] && cp "$f" "$sauve/"
               done
               $S cp deploy/fail2ban/jail.d/blackturf-nginx.conf $J/ \
-                && $S cp deploy/fail2ban/filter.d/blackturf-scanners.conf deploy/fail2ban/filter.d/blackturf-aspiration.conf $F/ \
+                && $S cp deploy/fail2ban/filter.d/blackturf-scanners.conf deploy/fail2ban/filter.d/blackturf-aspiration.conf deploy/fail2ban/filter.d/blackturf-pages.conf $F/ \
                 || return 1
               if ! $S fail2ban-client -t >/dev/null 2>&1; then
                 echo "config fail2ban invalide, restauration"
                 $S cp "$sauve/blackturf-nginx.conf" $J/ 2>/dev/null
                 $S cp "$sauve/blackturf-scanners.conf" $F/ 2>/dev/null
                 [ -f "$sauve/blackturf-aspiration.conf" ] || $S rm -f $F/blackturf-aspiration.conf
+                [ -f "$sauve/blackturf-pages.conf" ] || $S rm -f $F/blackturf-pages.conf
                 return 1
               fi
               $S fail2ban-client reload >/dev/null && $S fail2ban-client status | grep "Jail list"
