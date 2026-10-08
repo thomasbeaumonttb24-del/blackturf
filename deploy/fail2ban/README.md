@@ -58,3 +58,19 @@ Verifier le filtre sur les vrais journaux avant de recharger :
 fail2ban-regex /opt/blackturf/nginx/logs/access.log /etc/fail2ban/filter.d/blackturf-aspiration.conf | grep -E 'Failregex|Lines'
 fail2ban-client status blackturf-aspiration   # « File list » NE DOIT PAS etre vide
 ```
+
+## Installation automatique et IP de l'exploitant
+
+Le deploiement (`.github/workflows/deploy.yml`) recopie ces fichiers dans
+`/etc/fail2ban/` puis recharge fail2ban, sans jamais bloquer le deploiement
+(config invalide = ancienne config restauree). L'IP de l'exploitant va dans
+`/etc/fail2ban/jail.d/blackturf-nginx.local` SUR LE SERVEUR, que le deploiement
+ne touche jamais :
+
+```ini
+[blackturf-scanners]
+ignoreip = 127.0.0.1/8 ::1 172.17.0.0/16 172.18.0.0/16 <IP>
+
+[blackturf-aspiration]
+ignoreip = 127.0.0.1/8 ::1 172.17.0.0/16 172.18.0.0/16 <IP>
+```
