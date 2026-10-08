@@ -180,7 +180,7 @@ fi
 
 # ── 6. fail2ban : campagne de scan ──────────────────────────────────────────
 bans=0
-for j in blackturf-scanners sshd; do
+for j in blackturf-scanners blackturf-aspiration sshd; do
   n=$(fail2ban-client status "$j" 2>/dev/null | awk -F: '/Total banned/ {gsub(/ /,"",$2); print $2}')
   bans=$((bans + ${n:-0}))
 done

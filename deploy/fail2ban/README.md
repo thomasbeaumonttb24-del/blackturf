@@ -8,7 +8,8 @@ Toutes en 404 — mais elles noient le signal utile dans les journaux.
 ## Installation
 
 ```bash
-cp filter.d/blackturf-scanners.conf /etc/fail2ban/filter.d/
+cp filter.d/blackturf-scanners.conf   /etc/fail2ban/filter.d/
+cp filter.d/blackturf-aspiration.conf /etc/fail2ban/filter.d/
 cp jail.d/blackturf-nginx.conf      /etc/fail2ban/jail.d/
 fail2ban-client reload
 ```
@@ -42,3 +43,18 @@ Il ne bannit pas sur le code 404. Un 404 est aussi ce que produit un lien casse
 ou un explorateur legitime. Il bannit sur des CHEMINS qu'aucun visiteur ni aucun
 robot d'indexation ne demande jamais. Mesure sur les journaux reels au moment de
 sa mise en service : 8 946 correspondances sur 185 061 lignes, aucun faux positif.
+
+## Prison `blackturf-aspiration`
+
+Bannit une IP qui depasse **1 200 appels `/api/` en 5 min** (4/s soutenus).
+Ajoutee le 2026-10-08 apres qu'une IP inconnue a envoye 1 626 requetes en 5 min,
+sous la limite nginx de 20 r/s : rien ne l'arretait. Les OPTIONS (preflight
+CORS) et les fichiers statiques ne comptent pas. Bannissement d'1 h, double a
+chaque recidive, plafonne a une semaine.
+
+Verifier le filtre sur les vrais journaux avant de recharger :
+
+```bash
+fail2ban-regex /opt/blackturf/nginx/logs/access.log /etc/fail2ban/filter.d/blackturf-aspiration.conf | grep -E 'Failregex|Lines'
+fail2ban-client status blackturf-aspiration   # « File list » NE DOIT PAS etre vide
+```
