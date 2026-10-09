@@ -21,6 +21,7 @@ import { ArrowRight, ArrowUpRight, Check, ChevronDown, Flame, Lock, Rocket, Targ
 import { outsidersApi } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { Tilt, useReveal } from "@/components/track-record/effets";
+import { CARTE_CLS, IconeTuile, SG } from "@/components/courses/course-ui";
 
 export interface Outsider {
   course_id: string;
@@ -166,15 +167,18 @@ export function Scene({ children, className }: { children: ReactNode; className?
 }
 
 /** Jauge circulaire de la chance de place (remplie une fois à l'entrée à l'écran). */
-function Jauge({ valeur, niveau, verrouille }: { valeur: number | null; niveau: Outsider["niveau"]; verrouille: boolean }) {
+function Jauge({ valeur, niveau, verrouille, petite = false }: {
+  valeur: number | null; niveau: Outsider["niveau"]; verrouille: boolean; petite?: boolean;
+}) {
   const id = useId().replace(/:/g, "");
   const { ref, hidden } = useReveal<HTMLDivElement>(0.3);
+  // Même dessin dans les deux tailles : seul le rendu (h/w) change, le viewBox reste 76.
   const r = 30;
   const c = 2 * Math.PI * r;
   const v = verrouille || valeur == null ? 0 : Math.max(0, Math.min(1, valeur));
   const t = THEME[niveau];
   return (
-    <div ref={ref} className="relative h-[76px] w-[76px] shrink-0">
+    <div ref={ref} className={cn("relative shrink-0", petite ? "h-11 w-11" : "h-[76px] w-[76px]")}>
       <svg viewBox="0 0 76 76" className="h-full w-full -rotate-90" aria-hidden>
         <defs>
           <linearGradient id={`g${id}`} x1="0" y1="0" x2="1" y2="1">
@@ -198,14 +202,12 @@ function Jauge({ valeur, niveau, verrouille }: { valeur: number | null; niveau: 
       </svg>
       <div className="absolute inset-0 flex flex-col items-center justify-center leading-none">
         {verrouille ? (
-          <Lock className="h-5 w-5 text-stone-500" aria-label="Réservé aux abonnés" />
+          <Lock className={cn("text-stone-500", petite ? "h-3.5 w-3.5" : "h-5 w-5")} aria-label="Réservé aux abonnés" />
         ) : (
-          <>
-            <span className="font-display text-[19px] font-black tabular-nums text-gray-900">
-              {valeur == null ? "—" : Math.round(valeur * 100)}
-              <span className="text-[11px] font-bold text-stone-500">%</span>
-            </span>
-          </>
+          <span className={cn("font-display font-black tabular-nums text-gray-900", petite ? "text-[13px]" : "text-[19px]")}>
+            {valeur == null ? "—" : Math.round(valeur * 100)}
+            <span className={cn("font-bold text-stone-500", petite ? "text-[8px]" : "text-[11px]")}>%</span>
+          </span>
         )}
       </div>
     </div>
@@ -217,8 +219,8 @@ function Jauge({ valeur, niveau, verrouille }: { valeur: number | null; niveau: 
  * partant en pastille. Sans image (ou image en erreur) : numéro en grand sur
  * fond dégradé du niveau — jamais un cadre vide.
  */
-function Casaque({ numero, url, niveau, verrouille }: {
-  numero: number | null; url: string | null; niveau: Outsider["niveau"]; verrouille: boolean;
+function Casaque({ numero, url, niveau, verrouille, petite = false }: {
+  numero: number | null; url: string | null; niveau: Outsider["niveau"]; verrouille: boolean; petite?: boolean;
 }) {
   const [echec, setEchec] = useState<string | null>(null);
   const image = !verrouille && url && echec !== url ? url : null;
@@ -226,8 +228,10 @@ function Casaque({ numero, url, niveau, verrouille }: {
     <span className="relative shrink-0">
       <span
         className={cn(
-          "flex h-16 w-16 items-center justify-center overflow-hidden rounded-2xl ring-1",
-          "shadow-[inset_0_1px_0_#fff,0_1px_2px_rgba(28,25,23,.08),0_14px_24px_-12px_rgba(28,25,23,.45)]",
+          "flex items-center justify-center overflow-hidden ring-1",
+          petite
+            ? "h-11 w-11 rounded-xl shadow-[inset_0_1px_0_#fff,0_1px_2px_rgba(28,25,23,.08),0_8px_14px_-10px_rgba(28,25,23,.45)]"
+            : "h-16 w-16 rounded-2xl shadow-[inset_0_1px_0_#fff,0_1px_2px_rgba(28,25,23,.08),0_14px_24px_-12px_rgba(28,25,23,.45)]",
           verrouille
             ? "bg-stone-100 ring-stone-200"
             : image
@@ -236,7 +240,7 @@ function Casaque({ numero, url, niveau, verrouille }: {
         )}
       >
         {verrouille ? (
-          <Lock className="h-5 w-5 text-stone-400" aria-hidden />
+          <Lock className={cn("text-stone-400", petite ? "h-4 w-4" : "h-5 w-5")} aria-hidden />
         ) : image ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
@@ -246,15 +250,23 @@ function Casaque({ numero, url, niveau, verrouille }: {
             height={52}
             loading="lazy"
             onError={() => setEchec(image)}
-            className="h-[52px] w-[52px] object-contain drop-shadow-[0_3px_3px_rgba(28,25,23,.25)]"
+            className={cn(
+              "object-contain drop-shadow-[0_3px_3px_rgba(28,25,23,.25)]",
+              petite ? "h-9 w-9" : "h-[52px] w-[52px]",
+            )}
           />
         ) : (
-          <span className="font-display text-2xl font-black text-gray-950">{numero ?? "?"}</span>
+          <span className={cn("font-display font-black text-gray-950", petite ? "text-lg" : "text-2xl")}>{numero ?? "?"}</span>
         )}
       </span>
       {image && numero != null && (
         <span
-          className="absolute -bottom-1.5 -right-1.5 flex h-7 min-w-7 items-center justify-center rounded-lg bg-[#172033] px-1.5 font-display text-[13px] font-extrabold tabular-nums text-white shadow-[0_6px_12px_-4px_rgba(23,32,51,.6)] ring-2 ring-white"
+          className={cn(
+            "absolute flex items-center justify-center bg-[#172033] font-display font-extrabold tabular-nums text-white ring-2 ring-white",
+            petite
+              ? "-bottom-1 -right-1 h-5 min-w-5 rounded-md px-1 text-[10.5px] shadow-[0_4px_8px_-3px_rgba(23,32,51,.6)]"
+              : "-bottom-1.5 -right-1.5 h-7 min-w-7 rounded-lg px-1.5 text-[13px] shadow-[0_6px_12px_-4px_rgba(23,32,51,.6)]",
+          )}
           aria-label={`Numéro ${numero}`}
         >
           {numero}
@@ -366,15 +378,39 @@ function ResumeAnalyse({ a }: { a?: Analyse }) {
   );
 }
 
-function FicheAnalyse({ a, raisons = [] }: { a?: Analyse; raisons?: string[] }) {
+/** `compact` (fiche course) : le bilan favorables / défavorables tient dans la
+ *  ligne repliée, plus de pastilles séparées au-dessus. */
+function FicheAnalyse({ a, raisons = [], compact = false }: { a?: Analyse; raisons?: string[]; compact?: boolean }) {
   const criteres = a?.criteres ?? [];
   if (criteres.length === 0 && raisons.length === 0) return null;
   return (
-    <details className="group/fiche relative z-10 mt-3 rounded-2xl bg-stone-50/80 ring-1 ring-stone-200 open:bg-white">
-      <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-3 py-2.5 [&::-webkit-details-marker]:hidden">
-        <span className="text-[13px] font-bold text-gray-900">Pourquoi cet outsider ?</span>
+    <details
+      className={cn(
+        "group/fiche relative z-10 ring-1 open:bg-white",
+        compact ? "mt-2.5 rounded-xl bg-stone-50/70 ring-stone-200/80" : "mt-3 rounded-2xl bg-stone-50/80 ring-stone-200",
+      )}
+    >
+      <summary
+        className={cn(
+          "flex cursor-pointer list-none items-center justify-between gap-2 [&::-webkit-details-marker]:hidden",
+          compact ? "min-h-9 px-3 py-1.5" : "px-3 py-2.5",
+        )}
+      >
+        <span className={cn("font-bold text-gray-900", compact ? "text-[12.5px]" : "text-[13px]")}>Pourquoi cet outsider ?</span>
         <span className="flex items-center gap-1 text-[11px] font-semibold text-stone-500">
-          {criteres.length > 0 && <span>{criteres.length} critères</span>}
+          {compact && criteres.length > 0 ? (
+            <span className="flex items-center gap-2 tabular-nums" aria-label={`${a?.favorables ?? 0} critères favorables, ${a?.defavorables ?? 0} défavorables sur ${criteres.length}`}>
+              <span className="inline-flex items-center gap-1 text-emerald-700">
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" aria-hidden /> {a?.favorables ?? 0}
+              </span>
+              <span className="inline-flex items-center gap-1 text-rose-700">
+                <span className="h-1.5 w-1.5 rounded-full bg-rose-500" aria-hidden /> {a?.defavorables ?? 0}
+              </span>
+              <span className="hidden text-stone-400 sm:inline">sur {criteres.length}</span>
+            </span>
+          ) : (
+            criteres.length > 0 && <span>{criteres.length} critères</span>
+          )}
           <ChevronDown className="h-4 w-4 text-stone-400 transition-transform group-open/fiche:rotate-180" aria-hidden />
         </span>
       </summary>
@@ -657,6 +693,82 @@ export function OutsidersDuJour({ titreNiveau = "h2", max = 6 }: { titreNiveau?:
 
 /* ─── Encart de la fiche course ──────────────────────────────────────────── */
 
+/** Une ligne par outsider : casaque, nom, cote et chance de place sur une seule
+ *  rangée, la fiche d'analyse repliée dessous. Volontairement plus discret que
+ *  les cartes de la page /outsiders : sur la fiche course, c'est un signal parmi
+ *  d'autres, pas la vedette. */
+function OutsiderLigne({ o }: { o: Outsider }) {
+  const t = THEME[o.niveau];
+  const Icone = t.icone;
+  const niveau = (
+    <span
+      className={cn("inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-[0.06em] ring-1", t.badge)}
+      title={t.label}
+    >
+      <Icone className="h-2.5 w-2.5" aria-hidden />
+      <span className="hidden sm:inline">{t.label}</span>
+      <span className="sr-only sm:hidden">{t.label}</span>
+    </span>
+  );
+
+  if (o.verrouille)
+    return (
+      <Link
+        href="/tarifs"
+        aria-label="Outsider réservé aux abonnés — voir les formules"
+        className="group -mx-1 flex items-center gap-3 rounded-xl px-1 py-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500"
+      >
+        <Casaque numero={null} url={null} niveau={o.niveau} verrouille petite />
+        <div className="min-w-0 flex-1">
+          <p className="text-[13.5px] font-semibold text-gray-900">Outsider réservé aux abonnés</p>
+          <p className="mt-0.5 text-[11.5px] font-medium text-amber-700">Standard et Expert · voir les formules</p>
+        </div>
+        {niveau}
+        <ArrowUpRight className="h-3.5 w-3.5 shrink-0 text-stone-400 group-hover:text-amber-700" aria-hidden />
+      </Link>
+    );
+
+  const repere =
+    o.cote_actuelle != null && o.cote_signal != null && Math.abs(o.cote_actuelle - o.cote_signal) >= 1;
+  return (
+    <div className={cn(o.termine && !o.place && "opacity-80")}>
+      <div className="flex items-center gap-3">
+        <Casaque numero={o.numero} url={o.casaque_image_url ?? null} niveau={o.niveau} verrouille={false} petite />
+        <div className="min-w-0 flex-1">
+          <div className="flex min-w-0 items-center gap-1.5">
+            <p className="min-w-0 truncate font-display text-[15px] font-bold leading-tight text-gray-900" title={titre(o.nom_cheval)}>
+              {titre(o.nom_cheval)}
+            </p>
+            {niveau}
+          </div>
+          <p className="mt-1 flex min-w-0 items-baseline gap-1.5 text-[12px] leading-4 text-stone-500">
+            <span className="shrink-0">
+              Cote{" "}
+              <span className={cn("bg-gradient-to-b bg-clip-text font-display text-[13.5px] font-black tabular-nums text-transparent", t.chiffre)}>
+                {cote(o.cote_actuelle ?? o.cote_signal)}
+              </span>
+            </span>
+            {repere && <span className="shrink-0 text-stone-400">· repéré à {cote(o.cote_signal)}</span>}
+            {o.jockey && <span className="hidden min-w-0 truncate sm:inline">· {titre(o.jockey)}</span>}
+          </p>
+        </div>
+        <div className="flex shrink-0 flex-col items-center" title={`Chance estimée de finir dans les ${o.places_payees} premiers`}>
+          <Jauge valeur={o.chance_place} niveau={o.niveau} verrouille={false} petite />
+          <span className="mt-0.5 whitespace-nowrap text-[8.5px] font-semibold uppercase tracking-[0.08em] text-stone-400">
+            Top {o.places_payees}
+          </span>
+        </div>
+      </div>
+      {o.termine && (
+        <div className="mt-2">
+          <Resultat o={o} />
+        </div>
+      )}
+      <FicheAnalyse a={o.analyse} raisons={o.raisons} compact />
+    </div>
+  );
+}
+
 export function OutsidersCourse({ courseId }: { courseId: string }) {
   const { data } = useSWR<{ acces_complet: boolean; outsiders: Outsider[] }>(
     `outsiders-course-${courseId}`,
@@ -665,34 +777,36 @@ export function OutsidersCourse({ courseId }: { courseId: string }) {
   );
   const liste = (data?.outsiders ?? []).filter((o) => !o.non_partant);
   if (liste.length === 0) return null;
+  const plusieurs = liste.length > 1;
   return (
-    <Scene className="p-4 sm:p-6">
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-        <h2 className="flex items-center gap-2 font-display text-lg font-bold text-gray-900">
-          <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-rose-100 ring-1 ring-rose-200">
-            <Rocket className="h-4 w-4 text-rose-600" aria-hidden />
-          </span>
-          {liste[0].termine
-            ? liste.length > 1
-              ? "Outsiders détectés avant le départ"
-              : "Outsider détecté avant le départ"
-            : liste.length > 1
-              ? "Outsiders repérés dans cette course"
-              : "Outsider repéré dans cette course"}
-        </h2>
-        <Link href="/outsiders" className="text-xs font-semibold text-stone-500 underline-offset-4 hover:text-amber-700 hover:underline">
-          Tous les outsiders du jour
+    <section className={cn(CARTE_CLS, "px-4 py-3.5 sm:px-5 sm:py-4")}>
+      <header className="mb-3 flex items-center gap-2.5">
+        <IconeTuile icone={Rocket} />
+        <div className="min-w-0 flex-1">
+          <h2 className="text-[15px] font-bold leading-tight text-stone-900 sm:text-[16px]" style={SG}>
+            {liste[0].termine
+              ? plusieurs ? "Outsiders détectés avant le départ" : "Outsider détecté avant le départ"
+              : plusieurs ? "Outsiders repérés" : "Outsider repéré"}
+          </h2>
+          <p className="mt-0.5 text-[11.5px] leading-4 text-stone-500">
+            Grosse cote (15+) capable de finir dans les {liste[0].places_payees} premiers
+          </p>
+        </div>
+        <Link
+          href="/outsiders"
+          className="inline-flex shrink-0 items-center gap-0.5 self-start text-[11.5px] font-semibold text-stone-500 underline-offset-4 hover:text-amber-700 hover:underline"
+        >
+          <span className="hidden sm:inline">Tous les outsiders</span>
+          <span className="sm:hidden">Tous</span>
+          <ArrowUpRight className="h-3.5 w-3.5" aria-hidden />
         </Link>
-      </div>
-      <p className="-mt-2 mb-4 text-sm text-stone-500">
-        Cote 15 ou plus, que le cerveau des outsiders juge capable de finir dans les {liste[0].places_payees} premiers.
-      </p>
-      <Grille cols={2} depliable>
+      </header>
+      <div className="divide-y divide-stone-100 [&>*+*]:pt-3 [&>*:not(:last-child)]:pb-3">
         {liste.map((o, i) => (
-          <OutsiderCarte key={`${o.numero ?? "x"}-${i}`} o={o} />
+          <OutsiderLigne key={o.verrouille ? `v-${i}` : `${o.numero ?? "x"}-${i}`} o={o} />
         ))}
-      </Grille>
-    </Scene>
+      </div>
+    </section>
   );
 }
 
