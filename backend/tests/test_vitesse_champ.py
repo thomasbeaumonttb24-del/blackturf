@@ -85,3 +85,23 @@ def test_vitesse_relative_contradictoire_retiree():
 def test_fmt_reduction():
     assert _fmt_reduction(75.3) == "1'15\"3"
     assert _fmt_reduction(74.96) == "1'15\"0"
+
+
+def test_lecture_fiche_pmu_ordre_bornes_et_absents_du_classement():
+    from ml.narrative import reductions_depuis_performances
+
+    def sortie(date, rk):
+        return {"date": date, "participants": [{"itsHim": True, "reductionKilometrique": rk},
+                                               {"itsHim": False, "reductionKilometrique": 70000}]}
+    data = {"participants": [
+        # Sorties volontairement dans le désordre ; 39 200 = 0'39"2 publié par le PMU.
+        {"numPmu": 3, "coursesCourues": [sortie(1, 76000), sortie(5, 75100), sortie(3, 39200),
+                                         sortie(4, None), sortie(2, 77000), sortie(0, 74000)]},
+        {"numPmu": 4, "coursesCourues": []},
+    ]}
+    assert reductions_depuis_performances(data) == {3: [75.1, 77.0, 76.0]}
+    # Un numéro absent du classement (non-partant) n'est jamais classé.
+    enriched = _champ(4)
+    red = {1: _r("1'14\"0"), 2: _r("1'15\"0"), 3: _r("1'16\"0"), 4: _r("1'17\"0"), 9: _r("1'10\"0")}
+    _ajoute_vitesse_champ(enriched, red, "Attelé")
+    assert _labels(enriched[0]) == ["Le plus rapide du champ"]

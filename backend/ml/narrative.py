@@ -714,59 +714,77 @@ REDUCTION_PLAUSIBLE = (63.0, 110.0)
 NB_SORTIES_PMU = 5  # la fiche « performances » du PMU montre les 5 dernières sorties
 
 
-async def charger_reductions_trot(session, course_id: str) -> dict[int, list[float]]:
-    """{numéro: réductions km des 5 dernières sorties, de la plus récente à la plus
-    ancienne}, comme les « performances détaillées » du PMU.
+_PERF_CACHE: dict[str, tuple[float, dict[int, list[float]]]] = {}
+_PERF_TTL_S = 6 * 3600  # les performances passées ne bougent pas dans la journée
+_PERF_URL = ("https://online.turfinfo.api.pmu.fr/rest/client/61/programme/{d}/R{r}/C{c}"
+             "/performances-detaillees/pretty")
 
-    Lecture BRUTE de `historique_courses`, pas des features : `speed_figure_*` est
-    une vitesse ramenée à une référence de distance et `dyn_reduction_km_moy` une
-    moyenne sur 20 sorties polluée par des copies divisées par 10. Contrôlé le
-    09/10 contre l'API PMU sur 16 courses de trot : les figures désignaient le
-    vrai meilleur chrono environ une fois sur trois.
 
-    Seules les COPIES PMU (`course_id IS NULL`) sont lues : ce sont les
-    performances détaillées elles-mêmes. Passer par la ligne interne fusionnée
-    avec sa copie (chemin des features) perdait des chronos quand la fusion
-    échoue (sortie la plus récente d'un partant de Hyères absente, 52 badges
-    conformes sur 59 le 09/10). Une même sortie copiée deux fois (scrapée deux
-    jours, datée la veille) est dédoublonnée sur distance, hippodrome, place et
-    chrono. Dixièmes remis ×10, valeurs hors bornes écartées."""
-    from sqlalchemy import text as _text
-    from ml.features import REDUCTION_KM_DIXIEMES_MAX
-    # Savepoint : une erreur ici ne doit pas laisser la transaction de l'appelant
-    # (route d'analyse, pipeline) en état d'échec.
-    async with session.begin_nested():
-        rows = (await session.execute(_text("""
-            WITH partants AS (
-                SELECT p.numero, p.cheval_id, c.date_heure::date AS jour
-                FROM participations p JOIN courses c ON c.course_id = p.course_id
-                WHERE p.course_id = :cid AND p.non_partant = false
-            ), copies AS (
-                SELECT DISTINCT ON (pa.numero, h.distance, h.hippodrome,
-                                    h.position_arrivee, h.reduction_km)
-                       pa.numero, h.date_course, h.historique_id, h.reduction_km AS rk
-                FROM partants pa
-                JOIN historique_courses h ON h.cheval_id = pa.cheval_id
-                WHERE h.course_id IS NULL AND h.date_course < pa.jour
-                ORDER BY pa.numero, h.distance, h.hippodrome, h.position_arrivee,
-                         h.reduction_km, h.date_course DESC, h.historique_id
-            ), rangees AS (
-                SELECT numero, rk, ROW_NUMBER() OVER (PARTITION BY numero
-                       ORDER BY date_course DESC, historique_id) AS rn
-                FROM copies
-            )
-            SELECT numero, rk FROM rangees WHERE rn <= :n ORDER BY numero, rn
-        """), {"cid": course_id, "n": NB_SORTIES_PMU})).fetchall()
+def reductions_depuis_performances(data: dict) -> dict[int, list[float]]:
+    """{numéro: réductions km de ses 5 dernières sorties, la plus récente d'abord}
+    lues dans la réponse « performances-detaillees » du PMU. Une sortie sans chrono
+    (disqualifié, arrêté) compte dans les 5 mais n'apporte pas de réduction ; une
+    réduction hors bornes (0'39"2 publié pour un partant de Hyères le 09/10) est
+    écartée."""
     lo, hi = REDUCTION_PLAUSIBLE
     out: dict[int, list[float]] = {}
-    for num, rk in rows:
-        out.setdefault(int(num), [])
-        if rk is None or rk <= 0:
+    for part in (data or {}).get("participants") or []:
+        num = part.get("numPmu")
+        if not num:
             continue
-        rk = float(rk) * (10 if rk < REDUCTION_KM_DIXIEMES_MAX else 1)
-        if lo <= rk <= hi:
-            out[int(num)].append(rk)
-    return {k: v for k, v in out.items() if v}
+        sorties = sorted(part.get("coursesCourues") or [], key=lambda c: c.get("date") or 0,
+                         reverse=True)[:NB_SORTIES_PMU]
+        rks = []
+        for sortie in sorties:
+            for q in sortie.get("participants") or []:
+                if q.get("itsHim") and q.get("reductionKilometrique"):
+                    v = q["reductionKilometrique"] / 1000.0
+                    if lo <= v <= hi:
+                        rks.append(v)
+        if rks:
+            out[int(num)] = rks
+    return out
+
+
+async def charger_reductions_trot(course_id: str) -> dict[int, list[float]]:
+    """Réductions km des 5 dernières sorties de chaque partant, lues sur la fiche
+    « performances détaillées » du PMU — la référence que le turfiste consulte.
+
+    Ni les features ni `historique_courses` : contrôlés le 09/10 sur 16 courses
+    de trot contre cette même fiche, `speed_figure_*` (vitesse ramenée à une
+    référence de distance) désignait le vrai meilleur chrono environ une fois sur
+    trois, et nos copies en base ne reproduisaient la fenêtre des 5 sorties que
+    dans 45 badges sur 59 (sorties manquantes ou en trop). PMU injoignable →
+    dictionnaire vide, donc aucun badge plutôt qu'un badge approximatif."""
+    from services.pmu_cotes import parse_course_id, _HEADERS
+    import time
+    hit = _PERF_CACHE.get(course_id)
+    if hit and time.monotonic() - hit[0] < _PERF_TTL_S:
+        return hit[1]
+    parsed = parse_course_id(course_id)
+    if not parsed:
+        return {}
+    d, r, c = parsed
+    try:
+        async with httpx.AsyncClient(headers=_HEADERS, timeout=6.0, follow_redirects=True) as client:
+            resp = await client.get(_PERF_URL.format(d=d, r=r, c=c))
+            resp.raise_for_status()
+            out = reductions_depuis_performances(resp.json())
+            # La fiche liste aussi les non-partants : un absent ne peut pas être
+            # « le plus rapide du champ ».
+            part = await client.get(_PERF_URL.format(d=d, r=r, c=c).replace(
+                "/performances-detaillees/pretty", "/participants"))
+            part.raise_for_status()
+            absents = {int(x["numPmu"]) for x in (part.json().get("participants") or [])
+                       if x.get("numPmu") and x.get("statut") not in (None, "PARTANT")}
+            out = {k: v for k, v in out.items() if k not in absents}
+    except Exception as exc:  # noqa: BLE001
+        log.warning("narrative.performances_pmu_failed", course_id=course_id, err=str(exc)[:120])
+        return {}
+    if len(_PERF_CACHE) > 2000:
+        _PERF_CACHE.clear()
+    _PERF_CACHE[course_id] = (time.monotonic(), out)
+    return out
 
 
 def _ajoute_vitesse_champ(enriched: list[dict], reductions: dict[int, list[float]],
@@ -789,6 +807,8 @@ def _ajoute_vitesse_champ(enriched: list[dict], reductions: dict[int, list[float
       jamais sur un cheval qui a déjà un atout de vitesse."""
     if not any(m in (discipline or "").lower() for m in ("attel", "mont", "trot")):
         return
+    nums = {e.get("numero") for e in enriched}
+    reductions = {k: v for k, v in reductions.items() if k in nums}
     if len(reductions) < max(4, math.ceil(0.6 * len(enriched))):
         return
     r1 = lambda x: round(x, 1)  # noqa: E731 — comparaison au dixième, comme affiché
@@ -1071,8 +1091,8 @@ async def generate_full_course_analysis(
     # Vitesse placée contre les adversaires du jour (1er du champ = atout).
     try:
         _disc = (course_info or {}).get("discipline")
-        if session is not None and any(m in (_disc or "").lower() for m in ("attel", "mont", "trot")):
-            _ajoute_vitesse_champ(enriched, await charger_reductions_trot(session, course_id), _disc)
+        if any(m in (_disc or "").lower() for m in ("attel", "mont", "trot")):
+            _ajoute_vitesse_champ(enriched, await charger_reductions_trot(course_id), _disc)
     except Exception as exc:  # noqa: BLE001 — un badge ne doit jamais casser l'analyse
         log.warning("narrative.vitesse_champ_failed", err=str(exc)[:120])
 
