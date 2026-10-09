@@ -150,6 +150,7 @@ interface CourseData {
   statut: string;
   prono_fige?: boolean;        // pronostic figé (T-10 min) — ne change plus
   prono_fige_a?: string | null;
+  etranger?: boolean;          // hippodrome hors de France
   // Nouvelles données
   penetrometre_coef: number | null;
   penetrometre_desc: string | null;
@@ -2832,6 +2833,13 @@ export default function CoursePage({
                 </>
               ) : null}
             </div>
+
+            {course.etranger && (
+              <p className="mt-2 text-[12.5px] italic text-slate-500">
+                Course à l&apos;étranger : nos pronostics y sont moins fiables qu&apos;en France,
+                faute de données aussi complètes sur les chevaux et les hippodromes.
+              </p>
+            )}
           </div>
 
           {/* ── ACCÈS AU DIRECT (Equidia — la vidéo n'est pas chez nous) ── */}

@@ -185,6 +185,9 @@ class CourseDetailOut(BaseModel):
     # (cotes affichées continuent d'évoluer). prono_fige_a = instant du gel.
     prono_fige: bool = False
     prono_fige_a: Optional[datetime] = None
+    # Course courue hors de France (pays de l'hippodrome connu et étranger) : la
+    # fiche affiche une mention de fiabilité moindre. Pays inconnu → False.
+    etranger: bool = False
     meteo: Optional[MeteoOut]
     pronostics_presse: list[PronosticPresseOut] = []
     partants: list[PartantOut]
@@ -1473,6 +1476,11 @@ async def get_course(course_id: str, db: AsyncSession = Depends(get_db)):
         pronostics_presse=pronostics_presse,
         partants=partants,
     )
+    try:
+        from services.valuebets_visibilite import course_etrangere as _course_etrangere
+        response.etranger = await _course_etrangere(db, course.hippodrome_nom)
+    except Exception as e:
+        log.debug("courses.detail_zone_failed", error=str(e))
     # Gel du pronostic (seulement pertinent sur une course à venir)
     if course.statut == "a_venir":
         fige, fige_a = _prono_lock_state(course.date_heure)
