@@ -724,7 +724,16 @@ def _vitesse_valide(f: dict, nom: str) -> Optional[float]:
     except (TypeError, ValueError):
         return None
     if nom == "dyn_reduction_km_moy":
-        return v if 40.0 <= v <= 120.0 else None
+        # Des copies PMU stockent la réduction divisée par 10 (7,8 pour 78,3, cf.
+        # features.REDUCTION_KM_DIXIEMES_MAX) ; hors chemin dédoublonné, une seule
+        # suffit à tirer la moyenne à 0'50" (vu en prod le 09/10). La meilleure
+        # réduction est le min : sous 1'06" (record du trot ≈ 1'07"), la moyenne
+        # contient une valeur fausse et n'est pas lue.
+        try:
+            best = float(f.get("dyn_reduction_km_best") or 0)
+        except (TypeError, ValueError):
+            return None
+        return v if best >= 66.0 and 66.0 <= v <= 100.0 else None
     if not 0.7 < v < 1.3:
         return None
     nb = f.get("nb_speed_figures")

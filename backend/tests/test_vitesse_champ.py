@@ -40,7 +40,7 @@ def test_sans_chrono_ignore_et_champ_trop_petit():
 
 
 def test_reduction_km_plus_basse_gagne():
-    feats = [{"dyn_reduction_km_moy": 74.0 + i} for i in range(5)] + [{"dyn_reduction_km_moy": 0.0}]
+    feats = [{"dyn_reduction_km_moy": 74.0 + i, "dyn_reduction_km_best": 72.0 + i} for i in range(5)] +             [{"dyn_reduction_km_moy": 0.0, "dyn_reduction_km_best": 0.0}]
     enriched, fb = _champ(feats)
     _ajoute_vitesse_champ(enriched, fb, "Attelé")
     assert _labels(enriched[0]) == ["Meilleure réduction km du champ"]
@@ -79,8 +79,17 @@ def test_figure_collee_a_la_borne_ignoree():
 
 def test_jamais_atout_et_reserve_sur_le_meme_cheval():
     feats = [{"speed_figure_best": 1.2 - i * 0.02, "nb_speed_figures": 2,
-              "dyn_reduction_km_moy": 80.0 - i} for i in range(6)]
+              "dyn_reduction_km_moy": 80.0 - i, "dyn_reduction_km_best": 78.0 - i} for i in range(6)]
     enriched, fb = _champ(feats)
     _ajoute_vitesse_champ(enriched, fb, "Attelé")
     assert _labels(enriched[0]) == ["Meilleure vitesse du champ"]
     assert _labels(enriched[0], "facteurs_negatifs") == []
+
+
+def test_reduction_contaminee_par_un_chrono_divise_par_10_ignoree():
+    # 09/10 Hyères : moyenne 0'50"7 = (78 + 7,8 + 76…) / n.
+    feats = [{"dyn_reduction_km_moy": 50.7, "dyn_reduction_km_best": 7.8}] +             [{"dyn_reduction_km_moy": 75.0 + i, "dyn_reduction_km_best": 73.0 + i} for i in range(5)]
+    enriched, fb = _champ(feats)
+    _ajoute_vitesse_champ(enriched, fb, "Attelé")
+    assert not _labels(enriched[0])
+    assert _labels(enriched[1]) == ["Meilleure réduction km du champ"]
