@@ -1,95 +1,87 @@
-"""Atouts de vitesse lus contre les adversaires du jour (narrative._ajoute_vitesse_champ)."""
+"""Atouts de vitesse lus contre les adversaires du jour (narrative._ajoute_vitesse_champ).
+
+Les chiffres des cas « Hyères » viennent des performances détaillées PMU du
+09/10 (R3C1), contre lesquelles la première version s'est révélée fausse."""
 from ml.narrative import _ajoute_vitesse_champ, _fmt_reduction
 
 
-def _champ(feats):
-    enriched = [{"participation_id": f"p{i}", "numero": i + 1,
-                 "explanation": {"facteurs_positifs": [], "facteurs_negatifs": []}}
-                for i in range(len(feats))]
-    return enriched, {f"p{i}": f for i, f in enumerate(feats)}
+def _champ(n):
+    return [{"participation_id": f"p{i}", "numero": i + 1,
+             "explanation": {"facteurs_positifs": [], "facteurs_negatifs": []}}
+            for i in range(n)]
 
 
 def _labels(e, cle="facteurs_positifs"):
     return [f["label"] for f in e["explanation"][cle]]
 
 
-def test_plus_rapide_du_champ_sur_les_deux_figures():
-    feats = [{"speed_figure_best": 1.10 - i * 0.01, "speed_figure_recent": 1.05 - i * 0.01,
-              "nb_speed_figures": 3} for i in range(6)]
-    enriched, fb = _champ(feats)
-    _ajoute_vitesse_champ(enriched, fb)
+def _r(*mmss):
+    """1'15"1 → 75.1 ; les sorties de la plus récente à la plus ancienne."""
+    return [int(x.split("'")[0]) * 60 + float(x.split("'")[1].replace('"', ".")) for x in mmss]
+
+
+# Hyères R3C1, 09/10, réductions PMU réelles des 5 dernières sorties.
+HYERES_R3C1 = {
+    1: _r("1'15\"1", "1'13\"4", "1'19\"8"),
+    2: _r("1'19\"0", "1'16\"4", "1'16\"1", "1'15\"7"),
+    3: _r("1'18\"9", "1'16\"3", "1'18\"9", "1'14\"9"),
+    4: _r("1'20\"3", "1'15\"9", "1'13\"5", "1'16\"2", "1'16\"3"),
+    5: _r("1'15\"2", "1'17\"8", "1'15\"5", "1'16\"4", "1'15\"3"),
+    6: _r("1'16\"5", "1'17\"2", "1'15\"0", "1'16\"5"),
+    7: _r("1'16\"1", "1'15\"2", "1'20\"0", "1'16\"5", "1'20\"9"),
+    8: _r("1'16\"8", "1'16\"8", "1'14\"7"),
+    9: _r("1'18\"1", "1'18\"8", "1'20\"4", "1'20\"7", "1'15\"7"),
+}
+
+
+def test_hyeres_r3c1_conforme_au_pmu():
+    enriched = _champ(9)
+    _ajoute_vitesse_champ(enriched, HYERES_R3C1, "Attelé")
+    lab = {e["numero"]: _labels(e) for e in enriched}
+    # Moyenne : n°5 1'16"0 devant n°1 1'16"1. Meilleur chrono et dernière sortie : n°1.
+    assert lab[5] == ["Meilleure réduction km du champ"]
+    assert lab[1] == ["Meilleur chrono du champ", "Plus rapide du champ à sa dernière sortie"]
+    assert "2e : n°1 en 1'16\"1" in enriched[4]["explanation"]["facteurs_positifs"][0]["detail"]
+    assert _labels(enriched[8], "facteurs_negatifs") == ["Le moins rapide du champ"]
+    assert all(not lab[n] for n in (2, 3, 4, 6, 7, 8, 9))
+
+
+def test_moyenne_et_meilleur_chrono_fusionnes():
+    red = {1: _r("1'12\"0", "1'13\"0")} | {i: _r(f"1'1{i}\"5", f"1'1{i}\"9") for i in range(2, 7)}
+    enriched = _champ(6)
+    _ajoute_vitesse_champ(enriched, red, "Monté")
     assert _labels(enriched[0]) == ["Le plus rapide du champ"]
-    assert _labels(enriched[5], "facteurs_negatifs") == ["Le moins rapide du champ"]
-    assert all(not _labels(e) for e in enriched[1:])
 
 
-def test_egalite_en_tete_pas_d_atout():
-    feats = [{"speed_figure_best": 1.10, "nb_speed_figures": 2}] * 2 + \
-            [{"speed_figure_best": 1.0 - i * 0.01, "nb_speed_figures": 2} for i in range(3)]
-    enriched, fb = _champ(feats)
-    _ajoute_vitesse_champ(enriched, fb)
-    assert not _labels(enriched[0]) and not _labels(enriched[1])
+def test_plat_aucun_badge():
+    enriched = _champ(9)
+    _ajoute_vitesse_champ(enriched, HYERES_R3C1, "Plat")
+    assert all(not _labels(e) and not _labels(e, "facteurs_negatifs") for e in enriched)
 
 
-def test_sans_chrono_ignore_et_champ_trop_petit():
-    feats = [{"speed_figure_best": 1.0, "nb_speed_figures": 0}] * 5 + \
-            [{"speed_figure_best": 1.2, "nb_speed_figures": 2}] * 3
-    enriched, fb = _champ(feats)
-    _ajoute_vitesse_champ(enriched, fb)  # 3 chronos seulement : pas de classement
+def test_couverture_insuffisante_pas_de_du_champ():
+    # 4 chronométrés sur 9 partants : « 1er du champ » serait faux.
+    red = {k: HYERES_R3C1[k] for k in (1, 2, 3, 4)}
+    enriched = _champ(9)
+    _ajoute_vitesse_champ(enriched, red, "Attelé")
     assert all(not _labels(e) for e in enriched)
 
 
-def test_reduction_km_plus_basse_gagne():
-    feats = [{"dyn_reduction_km_moy": 74.0 + i, "dyn_reduction_km_best": 72.0 + i} for i in range(5)] +             [{"dyn_reduction_km_moy": 0.0, "dyn_reduction_km_best": 0.0}]
-    enriched, fb = _champ(feats)
-    _ajoute_vitesse_champ(enriched, fb, "Attelé")
-    assert _labels(enriched[0]) == ["Meilleure réduction km du champ"]
-    assert "1'14\"0" in enriched[0]["explanation"]["facteurs_positifs"][0]["detail"]
-    assert not _labels(enriched[5])
+def test_egalite_au_dixieme_pas_d_atout():
+    red = {1: _r("1'14\"0"), 2: _r("1'14\"0"), 3: _r("1'15\"0"), 4: _r("1'16\"0")}
+    enriched = _champ(4)
+    _ajoute_vitesse_champ(enriched, red, "Attelé")
+    assert not _labels(enriched[0]) and not _labels(enriched[1])
 
 
 def test_vitesse_relative_contradictoire_retiree():
-    feats = [{"speed_figure_best": 1.2 - i * 0.02, "nb_speed_figures": 2} for i in range(5)]
-    enriched, fb = _champ(feats)
-    enriched[0]["explanation"]["facteurs_negatifs"].append(
+    enriched = _champ(9)
+    enriched[4]["explanation"]["facteurs_negatifs"].append(
         {"feature": "vitesse_relative", "label": "Vitesse en retrait", "score": 0.3})
-    _ajoute_vitesse_champ(enriched, fb)
-    assert _labels(enriched[0], "facteurs_negatifs") == []
+    _ajoute_vitesse_champ(enriched, HYERES_R3C1, "Attelé")
+    assert _labels(enriched[4], "facteurs_negatifs") == []
 
 
 def test_fmt_reduction():
     assert _fmt_reduction(75.3) == "1'15\"3"
     assert _fmt_reduction(74.96) == "1'15\"0"
-
-
-def test_reduction_km_ignoree_hors_trot():
-    feats = [{"dyn_reduction_km_moy": 63.0 + i} for i in range(6)]
-    enriched, fb = _champ(feats)
-    _ajoute_vitesse_champ(enriched, fb, "Plat")
-    assert all(not _labels(e) and not _labels(e, "facteurs_negatifs") for e in enriched)
-
-
-def test_figure_collee_a_la_borne_ignoree():
-    # Waregem 09/10 : un 1,06 devant huit 0,70 pile (reconstitution ratée).
-    feats = [{"speed_figure_best": 1.06, "nb_speed_figures": 3}] +             [{"speed_figure_best": 0.70, "nb_speed_figures": 3}] * 8
-    enriched, fb = _champ(feats)
-    _ajoute_vitesse_champ(enriched, fb, "Plat")
-    assert all(not _labels(e) for e in enriched)
-
-
-def test_jamais_atout_et_reserve_sur_le_meme_cheval():
-    feats = [{"speed_figure_best": 1.2 - i * 0.02, "nb_speed_figures": 2,
-              "dyn_reduction_km_moy": 80.0 - i, "dyn_reduction_km_best": 78.0 - i} for i in range(6)]
-    enriched, fb = _champ(feats)
-    _ajoute_vitesse_champ(enriched, fb, "Attelé")
-    assert _labels(enriched[0]) == ["Meilleure vitesse du champ"]
-    assert _labels(enriched[0], "facteurs_negatifs") == []
-
-
-def test_reduction_contaminee_par_un_chrono_divise_par_10_ignoree():
-    # 09/10 Hyères : moyenne 0'50"7 = (78 + 7,8 + 76…) / n.
-    feats = [{"dyn_reduction_km_moy": 50.7, "dyn_reduction_km_best": 7.8}] +             [{"dyn_reduction_km_moy": 75.0 + i, "dyn_reduction_km_best": 73.0 + i} for i in range(5)]
-    enriched, fb = _champ(feats)
-    _ajoute_vitesse_champ(enriched, fb, "Attelé")
-    assert not _labels(enriched[0])
-    assert _labels(enriched[1]) == ["Meilleure réduction km du champ"]

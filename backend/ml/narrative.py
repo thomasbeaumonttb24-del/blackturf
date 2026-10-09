@@ -707,129 +707,149 @@ def _fmt_reduction(sec_km: float) -> str:
     return f"{m}'{reste // 10:02d}\"{reste % 10}"
 
 
-def _vitesse_valide(f: dict, nom: str) -> Optional[float]:
-    """Valeur exploitable d'un critère de vitesse, None si absent.
-
-    speed_figure_* vaut 1,0 (neutre) quand aucun chrono n'a pu être lu
-    (features.py, bloc HH) : sans `nb_speed_figures` on ne peut pas distinguer un
-    vrai 1,0 d'un absent, on l'écarte. Une figure collée à une borne du
-    plafonnement (0,70 / 1,30) est une reconstitution ratée, pas une mesure : vu
-    en prod le 09/10, huit partants de Waregem à 0,70 pile. dyn_reduction_km_moy
-    vaut 0 sans chrono ; elle n'est lue qu'au trot (cf. `_ajoute_vitesse_champ`)."""
-    v = f.get(nom)
-    if v is None:
-        return None
-    try:
-        v = float(v)
-    except (TypeError, ValueError):
-        return None
-    if nom == "dyn_reduction_km_moy":
-        # Des copies PMU stockent la réduction divisée par 10 (7,8 pour 78,3, cf.
-        # features.REDUCTION_KM_DIXIEMES_MAX) ; hors chemin dédoublonné, une seule
-        # suffit à tirer la moyenne à 0'50" (vu en prod le 09/10). La meilleure
-        # réduction est le min : sous 1'06" (record du trot ≈ 1'07"), la moyenne
-        # contient une valeur fausse et n'est pas lue.
-        try:
-            best = float(f.get("dyn_reduction_km_best") or 0)
-        except (TypeError, ValueError):
-            return None
-        return v if best >= 66.0 and 66.0 <= v <= 100.0 else None
-    if not 0.7 < v < 1.3:
-        return None
-    nb = f.get("nb_speed_figures")
-    if nb is not None:
-        return v if float(nb) >= 1 else None
-    return None if v == 1.0 else v
+# Réduction km plausible au trot (s/km). Record ≈ 1'07" ; au-delà de 1'50" c'est
+# un chrono de cheval arrêté ou une saisie fausse. Le PMU lui-même publie des
+# aberrations (0'39"2 sur un partant de Hyères le 09/10).
+REDUCTION_PLAUSIBLE = (63.0, 110.0)
+NB_SORTIES_PMU = 5  # la fiche « performances » du PMU montre les 5 dernières sorties
 
 
-def _ajoute_vitesse_champ(enriched: list[dict], features_by_pid: dict,
+async def charger_reductions_trot(session, course_id: str) -> dict[int, list[float]]:
+    """{numéro: réductions km des 5 dernières sorties, de la plus récente à la plus
+    ancienne}, comme les « performances détaillées » du PMU.
+
+    Lecture BRUTE de `historique_courses`, pas des features : `speed_figure_*` est
+    une vitesse ramenée à une référence de distance et `dyn_reduction_km_moy` une
+    moyenne sur 20 sorties polluée par des copies divisées par 10. Contrôlé le
+    09/10 contre l'API PMU sur 16 courses de trot : les figures désignaient le
+    vrai meilleur chrono environ une fois sur trois. Ici : une ligne par sortie
+    (copie PMU fusionnée dans la ligne interne), dixièmes remis ×10, valeurs
+    hors bornes écartées."""
+    from sqlalchemy import text as _text
+    from ml.features import (HIST_JUMEAU_LATERAL, HIST_SANS_COPIE_SQL,
+                             REDUCTION_KM_DIXIEMES_MAX)
+    # Savepoint : une erreur ici ne doit pas laisser la transaction de l'appelant
+    # (route d'analyse, pipeline) en état d'échec.
+    async with session.begin_nested():
+        rows = await _lire_sorties(session, _text, HIST_JUMEAU_LATERAL, HIST_SANS_COPIE_SQL, course_id)
+    lo, hi = REDUCTION_PLAUSIBLE
+    out: dict[int, list[float]] = {}
+    for num, rk in rows:
+        out.setdefault(int(num), [])
+        if rk is None or rk <= 0:
+            continue
+        rk = float(rk) * (10 if rk < REDUCTION_KM_DIXIEMES_MAX else 1)
+        if lo <= rk <= hi:
+            out[int(num)].append(rk)
+    return {k: v for k, v in out.items() if v}
+
+
+async def _lire_sorties(session, _text, jumeau_sql, sans_copie_sql, course_id):
+    return (await session.execute(_text(f"""
+        WITH partants AS (
+            SELECT p.numero, p.cheval_id, c.date_heure::date AS jour
+            FROM participations p JOIN courses c ON c.course_id = p.course_id
+            WHERE p.course_id = :cid AND p.non_partant = false
+        ), sorties AS (
+            SELECT pa.numero, h.date_course,
+                   COALESCE(h.reduction_km, tw.reduction_km) AS rk,
+                   ROW_NUMBER() OVER (PARTITION BY pa.numero
+                                      ORDER BY h.date_course DESC, h.historique_id) AS rn
+            FROM partants pa
+            JOIN historique_courses h ON h.cheval_id = pa.cheval_id
+            {jumeau_sql}
+            WHERE h.date_course < pa.jour
+            {sans_copie_sql}
+        )
+        SELECT numero, rk FROM sorties WHERE rn <= :n ORDER BY numero, rn
+    """), {"cid": course_id, "n": NB_SORTIES_PMU})).fetchall()
+
+
+def _ajoute_vitesse_champ(enriched: list[dict], reductions: dict[int, list[float]],
                           discipline: Optional[str] = None) -> None:
-    """Atouts / réserves de VITESSE lus contre les adversaires du jour.
+    """Atouts / réserves de VITESSE lus contre les adversaires du jour (trot).
 
-    Les seuils absolus d'`explain_prediction` ne disent pas si le cheval est le
-    plus rapide de SA course : « 1er sur 11 en meilleure vitesse » est l'atout
-    qu'un turfiste cherche. On classe chaque critère sur les seuls partants qui ont
-    un chrono (au moins 4), et on ne signale que le 1er net (strictement devant le
-    2e) et, en réserve, le dernier sur un champ d'au moins 6 chronos — jamais sur
-    un cheval qui a déjà un atout de vitesse (vu en prod : « Meilleure vitesse »
-    et « Le moins rapide » sur le même partant).
+    « 1er sur 11 » est l'atout qu'un turfiste cherche ; les seuils absolus
+    d'`explain_prediction` ne le disent pas. Trois classements, sur les chronos
+    des 5 dernières sorties (`charger_reductions_trot`) : réduction moyenne,
+    meilleure réduction, réduction de la dernière sortie chronométrée.
 
-    La réduction kilométrique est une mesure de TROT : en plat la pipeline en
-    calcule une depuis le temps officiel (1'03" à Waregem), qu'on ne lit pas."""
-    trot = any(m in (discipline or "").lower() for m in ("attel", "mont", "trot"))
-    criteres = (
-        # nom, plus haut = mieux
-        ("speed_figure_best", True),
-        ("speed_figure_recent", True),
-    ) + ((("dyn_reduction_km_moy", False),) if trot else ())
-    vals: dict[str, dict] = {}
-    for nom, haut in criteres:
-        par_num = {}
-        for e in enriched:
-            v = _vitesse_valide(features_by_pid.get(e.get("participation_id"), {}) or {}, nom)
-            if v is not None:
-                par_num[e.get("numero")] = v
-        if len(par_num) >= 4:
-            vals[nom] = dict(sorted(par_num.items(), key=lambda kv: kv[1], reverse=haut))
+    Règles, pour ne rien affirmer de faux :
+    - trot seulement : en plat/obstacle il n'y a pas de chrono individuel publié
+      (les figures reconstituées ne se vérifient pas — Waregem 09/10 : huit
+      partants collés à la borne 0,70) ;
+    - au moins 4 chronométrés ET au moins 60 % des partants, sinon « du champ »
+      serait faux ;
+    - 1er strictement devant le 2e (égalité au dixième = pas d'atout) ;
+    - réserve « moins rapide » : dernier en moyenne, au moins 6 chronométrés, et
+      jamais sur un cheval qui a déjà un atout de vitesse."""
+    if not any(m in (discipline or "").lower() for m in ("attel", "mont", "trot")):
+        return
+    if len(reductions) < max(4, math.ceil(0.6 * len(enriched))):
+        return
+    r1 = lambda x: round(x, 1)  # noqa: E731 — comparaison au dixième, comme affiché
+    stats = {num: {"moy": r1(sum(v) / len(v)), "best": r1(min(v)), "recent": r1(v[0]), "n": len(v)}
+             for num, v in reductions.items()}
+    n = len(stats)
+
+    def classe(k):
+        return sorted(stats.items(), key=lambda kv: kv[1][k])
+
+    tetes = {}
+    for k in ("moy", "best", "recent"):
+        o = classe(k)
+        if o[0][1][k] < o[1][1][k]:
+            tetes[k] = (o[0][0], o[0][1][k], o[1][0], o[1][1][k])
+    o = classe("moy")
+    lanterne = o[-1][0] if n >= 6 and o[-1][1]["moy"] > o[-2][1]["moy"] else None
 
     for e in enriched:
         num = e.get("numero")
         exp = e.setdefault("explanation", {})
         pos = exp.setdefault("facteurs_positifs", [])
         neg = exp.setdefault("facteurs_negatifs", [])
-        premier, dernier = [], []
-        for nom, _haut in criteres:
-            classe = vals.get(nom)
-            if not classe or num not in classe:
-                continue
-            ordre = list(classe.items())
-            if ordre[0][0] == num and ordre[0][1] != ordre[1][1]:
-                premier.append((nom, ordre[0][1], ordre[1][1], len(ordre)))
-            elif len(ordre) >= 6 and ordre[-1][0] == num and ordre[-1][1] != ordre[-2][1]:
-                dernier.append((nom, len(ordre)))
-        if premier:
-            dernier = []
-        noms = {p[0] for p in premier}
-        if {"speed_figure_best", "speed_figure_recent"} <= noms:
-            n = next(p[3] for p in premier if p[0] == "speed_figure_best")
-            pos.append({"feature": "speed_figure_best", "label": "Le plus rapide du champ",
-                        "detail": f"Meilleure vitesse ET meilleure vitesse récente des {n} partants chronométrés.",
-                        "score": 0.85, "categorie": "vitesse"})
-        else:
-            for nom, v, v2, n in premier:
-                if nom == "speed_figure_best":
-                    pos.append({"feature": nom, "label": "Meilleure vitesse du champ",
-                                "detail": f"1er sur {n} partants chronométrés en vitesse de pointe "
-                                          f"(figure {v:.2f} contre {v2:.2f} pour le 2e).",
-                                "score": 0.75, "categorie": "vitesse"})
-                elif nom == "speed_figure_recent":
-                    pos.append({"feature": nom, "label": "Plus rapide du champ récemment",
-                                "detail": f"1er sur {n} partants chronométrés sur sa dernière sortie "
-                                          f"(figure {v:.2f} contre {v2:.2f} pour le 2e).",
-                                "score": 0.7, "categorie": "vitesse"})
-        for nom, v, v2, n in premier:
-            if nom == "dyn_reduction_km_moy":
-                pos.append({"feature": nom, "label": "Meilleure réduction km du champ",
-                            "detail": f"{_fmt_reduction(v)} de moyenne, la plus rapide des {n} trotteurs "
-                                      f"chronométrés (2e : {_fmt_reduction(v2)}).",
+        a = {k: t for k, t in tetes.items() if t[0] == num}
+        if a:
+            st = stats[num]
+            if "moy" in a and "best" in a:
+                pos.append({"feature": "reduction_km", "label": "Le plus rapide du champ",
+                            "detail": f"Meilleure réduction moyenne ({_fmt_reduction(st['moy'])}) et meilleur "
+                                      f"chrono ({_fmt_reduction(st['best'])}) des {n} trotteurs chronométrés "
+                                      f"sur leurs 5 dernières sorties.",
+                            "score": 0.85, "categorie": "vitesse"})
+            elif "moy" in a:
+                _, v, n2, v2 = a["moy"]
+                pos.append({"feature": "reduction_km", "label": "Meilleure réduction km du champ",
+                            "detail": f"{_fmt_reduction(v)} de moyenne sur ses {st['n']} dernières sorties "
+                                      f"chronométrées, 1er des {n} trotteurs (2e : n°{n2} en {_fmt_reduction(v2)}).",
+                            "score": 0.78, "categorie": "vitesse"})
+            elif "best" in a:
+                _, v, n2, v2 = a["best"]
+                pos.append({"feature": "reduction_km", "label": "Meilleur chrono du champ",
+                            "detail": f"{_fmt_reduction(v)} sur ses 5 dernières sorties, meilleure réduction "
+                                      f"des {n} trotteurs (2e : n°{n2} en {_fmt_reduction(v2)}).",
                             "score": 0.72, "categorie": "vitesse"})
-        dnoms = {d[0] for d in dernier}
-        if "speed_figure_best" in dnoms or "dyn_reduction_km_moy" in dnoms:
-            n = max(d[1] for d in dernier)
-            neg.append({"feature": "speed_figure_best", "label": "Le moins rapide du champ",
-                        "detail": f"Dernier sur {n} partants chronométrés en vitesse.",
-                        "score": 0.5, "categorie": "vitesse"})
-        # L'ancien badge `vitesse_relative` lit le niveau des courses fréquentées, pas
-        # le chrono du cheval : il cède quand il contredit le classement du jour.
-        if premier:
+            if "recent" in a and not ("moy" in a and "best" in a):
+                _, v, n2, v2 = a["recent"]
+                pos.append({"feature": "reduction_km_recent", "label": "Plus rapide du champ à sa dernière sortie",
+                            "detail": f"{_fmt_reduction(v)} lors de sa dernière course chronométrée, 1er des "
+                                      f"{n} trotteurs (2e : n°{n2} en {_fmt_reduction(v2)}).",
+                            "score": 0.68, "categorie": "vitesse"})
             neg[:] = [f for f in neg if f.get("feature") != "vitesse_relative"]
-        if dernier:
+        elif num == lanterne:
+            neg.append({"feature": "reduction_km", "label": "Le moins rapide du champ",
+                        "detail": f"Réduction moyenne de {_fmt_reduction(stats[num]['moy'])} sur ses dernières "
+                                  f"sorties, la plus lente des {n} trotteurs chronométrés.",
+                        "score": 0.5, "categorie": "vitesse"})
             pos[:] = [f for f in pos if f.get("feature") != "vitesse_relative"]
+        else:
+            continue
         pos.sort(key=lambda x: x.get("score", 0), reverse=True)
         neg.sort(key=lambda x: x.get("score", 0), reverse=True)
-        if premier or dernier:
-            exp["nb_signaux_positifs"] = exp.get("nb_signaux_positifs", 0) + (1 if premier else 0)
-            exp["nb_signaux_negatifs"] = exp.get("nb_signaux_negatifs", 0) + (1 if dernier else 0)
+        if a:
+            exp["nb_signaux_positifs"] = exp.get("nb_signaux_positifs", 0) + 1
+        else:
+            exp["nb_signaux_negatifs"] = exp.get("nb_signaux_negatifs", 0) + 1
 
 
 def _build_signaux(p: dict, exp: dict, field_size: int) -> list[dict]:
@@ -1046,7 +1066,9 @@ async def generate_full_course_analysis(
 
     # Vitesse placée contre les adversaires du jour (1er du champ = atout).
     try:
-        _ajoute_vitesse_champ(enriched, features_by_pid, (course_info or {}).get("discipline"))
+        _disc = (course_info or {}).get("discipline")
+        if session is not None and any(m in (_disc or "").lower() for m in ("attel", "mont", "trot")):
+            _ajoute_vitesse_champ(enriched, await charger_reductions_trot(session, course_id), _disc)
     except Exception as exc:  # noqa: BLE001 — un badge ne doit jamais casser l'analyse
         log.warning("narrative.vitesse_champ_failed", err=str(exc)[:120])
 
