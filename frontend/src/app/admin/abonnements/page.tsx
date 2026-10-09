@@ -19,8 +19,8 @@ import { AlertTriangle, CreditCard, Gift, Hourglass, Wallet } from "lucide-react
 import { cn, formatDateTime } from "@/lib/utils";
 import {
   BadgeFormule, BarreRepartition, CelluleCompte, EnTetePage, Encart, Etat, GrilleKpi, Kpi, MiniRepartition,
-  Panneau, PointLive, Puce, Segments, Squelette, TH, Tableau, VoirPlus, Vide, depuis, eur, num,
-  type Colonne,
+  PASS, Panneau, PointLive, Puce, Segments, Squelette, TH, Tableau, VoirPlus, Vide, depuis, eur, num,
+  restant, type Colonne,
 } from "@/components/admin/ui";
 import { incidentsPaiement, useAbonnements, useEnLigne } from "@/components/admin/data";
 import SuiviDeparts from "@/components/admin/vues/SuiviDeparts";
@@ -134,10 +134,32 @@ const COLONNES_ESSAIS: Colonne<AbonneLigne>[] = [
 
 const COLONNES_PASSES: Colonne<ComptePass>[] = [
   { titre: "Compte", rendu: (o) => <CelluleCompte email={o.email} />, className: "max-w-[300px]" },
-  { titre: "Accès", rendu: () => <BadgeFormule plan="pass" /> },
   {
-    titre: "Jusqu'au",
-    rendu: (o) => <span className="whitespace-nowrap" title={formatDateTime(o.jusqu_au)}>{dateCourte(o.jusqu_au)}</span>,
+    titre: "Pass",
+    rendu: (o) => (
+      <span className="inline-flex flex-col items-start gap-0.5">
+        <BadgeFormule plan="pass" duree={o.duree} />
+        <span className="text-[11px] text-muted-foreground">
+          {PASS[o.duree ?? ""]?.acces ?? "durée inconnue"} d&apos;accès Expert
+          {o.nb_a_venir ? ` · +${o.nb_a_venir} pass enchaîné${o.nb_a_venir > 1 ? "s" : ""}` : ""}
+        </span>
+      </span>
+    ),
+  },
+  {
+    titre: "Début",
+    rendu: (o) => o.debut
+      ? <span className="whitespace-nowrap text-muted-foreground">{formatDateTime(o.debut)}</span>
+      : <span className="text-muted-foreground">—</span>,
+  },
+  {
+    titre: "Fin d'accès",
+    rendu: (o) => (
+      <span className="inline-flex flex-col">
+        <span className="whitespace-nowrap font-medium">{formatDateTime(o.jusqu_au)}</span>
+        <span className="text-[11px] text-emerald-700">{o.statut === "a_venir" ? "pas encore commencé" : restant(o.jusqu_au)}</span>
+      </span>
+    ),
   },
   { titre: "Inscrit le", rendu: (o) => <span className="whitespace-nowrap">{dateCourte(o.created_at)}</span> },
   {

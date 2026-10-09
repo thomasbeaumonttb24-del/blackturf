@@ -158,14 +158,22 @@ async def list_users(
     # rien. `abonnement_statut=None` avec `stripe_client=True` = checkout démarré et
     # jamais terminé (carte non renseignée, session Stripe abandonnée).
     sub_status: dict[str, str] = {}
+    sub_detail: dict[str, Subscription] = {}
     if uids:
         sub_rows = (await db.execute(
-            select(Subscription.user_id, Subscription.statut)
+            select(Subscription)
             .where(Subscription.user_id.in_(uids))
             .order_by(Subscription.user_id, desc(Subscription.created_at))
-        )).all()
-        for uid, statut in sub_rows:
-            sub_status.setdefault(uid, statut)
+        )).scalars().all()
+        for s in sub_rows:
+            sub_status.setdefault(s.user_id, s.statut)
+            sub_detail.setdefault(s.user_id, s)
+
+    # ── Pass sans renouvellement : le Stripe customer créé au paiement d'un pass
+    # faisait lire « Checkout abandonné » sur un compte qui a bel et bien payé.
+    # Chaque compte reçoit son pass le plus parlant : celui en cours (avec la fin
+    # du dernier pass enchaîné), sinon le dernier acheté.
+    pass_par_user = await _resume_passes(db, uids)
 
     result = []
     for u in users:
@@ -184,6 +192,8 @@ async def list_users(
             "auth_method": "google" if u.google_id else "email",
             "stripe_client": bool(u.stripe_customer_id),
             "abonnement_statut": sub_status.get(u.user_id),
+            "abonnement": _resume_abonnement(sub_detail.get(u.user_id)),
+            "pass": pass_par_user.get(u.user_id),
             "created_at": u.created_at,
             "last_login": u.last_login_at,
             # Défi du mois en cours
@@ -199,6 +209,56 @@ async def list_users(
             "roi": d["roi"] if d else None,
         })
     return result
+
+
+def _resume_abonnement(s: Optional[Subscription]) -> Optional[dict]:
+    """Formule, rythme et échéance de la dernière Subscription du compte."""
+    if s is None:
+        return None
+    return {"plan": s.plan, "periodicite": s.periodicite, "statut": s.statut,
+            "periode_fin": s.periode_fin, "essai_fin": s.essai_fin}
+
+
+async def _resume_passes(db: AsyncSession, uids: list[str]) -> dict[str, dict]:
+    """Pass de chaque compte, en une requête.
+
+    `statut` : `en_cours` (accès ouvert maintenant), `a_venir` (payé, commence à
+    la fin d'un autre accès), `expire` ou `rembourse`. `fin` est la fin de
+    l'accès cumulé : deux pass Jour achetés d'affilée donnent 48 h, pas 24.
+    """
+    from db.models import PassAcces
+    if not uids:
+        return {}
+    rows = (await db.execute(
+        select(PassAcces).where(PassAcces.user_id.in_(uids)).order_by(PassAcces.created_at.desc())
+    )).scalars().all()
+    now = datetime.now(timezone.utc)
+
+    def _tz(d: datetime) -> datetime:
+        return d if d.tzinfo else d.replace(tzinfo=timezone.utc)
+
+    par_user: dict[str, list] = {}
+    for p in rows:
+        par_user.setdefault(p.user_id, []).append(p)
+    resume: dict[str, dict] = {}
+    for uid, passes in par_user.items():
+        vivants = sorted((p for p in passes if p.statut == "actif" and _tz(p.fin) > now),
+                         key=lambda p: _tz(p.debut))
+        if vivants:
+            courant = vivants[0]
+            statut = "en_cours" if _tz(courant.debut) <= now else "a_venir"
+            fin = max(_tz(p.fin) for p in vivants)
+        else:
+            courant = passes[0]
+            statut = "rembourse" if courant.statut == "rembourse" else "expire"
+            fin = _tz(courant.fin)
+        resume[uid] = {
+            "duree": courant.duree, "debut": _tz(courant.debut), "fin": fin,
+            "statut": statut, "montant_cents": courant.montant_cents,
+            "achete_le": courant.created_at,
+            "nb_a_venir": max(len(vivants) - 1, 0), "nb_total": len(passes),
+        }
+    return resume
 
 
 async def _passes_du_compte(db: AsyncSession, user_id: str) -> list[dict]:
@@ -1996,6 +2056,14 @@ async def abonnements(
             par_formule[formule][case_] += 1
     repartition["par_formule"] = par_formule
 
+    # Durée du pass et début de l'accès : « Pass » seul ne dit pas s'il reste
+    # une heure ou vingt-neuf jours.
+    detail_passes = await _resume_passes(db, [p["user_id"] for p in passes])
+    for p in passes:
+        d = detail_passes.get(p["user_id"]) or {}
+        p.update({"duree": d.get("duree"), "debut": d.get("debut"), "statut": d.get("statut"),
+                  "nb_a_venir": d.get("nb_a_venir", 0)})
+
     return {
         "repartition": repartition,
         "offerts": offerts,
@@ -2080,8 +2148,10 @@ async def _montants_connus(db: AsyncSession) -> dict[str, int]:
 
 
 def _ligne_paiement(date, email, plan, montant, nature, *, frais=None, net=None, rembourse=0,
-                    charge_id=None, recu_url=None, facture_id=None, motif=None, source="stripe"):
+                    charge_id=None, recu_url=None, facture_id=None, motif=None, source="stripe",
+                    pass_duree=None):
     return {
+        "pass_duree": pass_duree, "pass_debut": None, "pass_fin": None,
         "date": date, "email": email, "plan": plan, "montant_cents": int(montant),
         "rembourse_cents": int(rembourse or 0),
         "frais_cents": None if frais is None else int(frais),
@@ -2209,7 +2279,7 @@ async def revenus(
                 e.cree_le, email, plan, e.montant_cents, nature,
                 frais=e.frais_cents, net=e.net_cents, rembourse=e.rembourse_cents,
                 charge_id=e.charge_id, recu_url=e.recu_url, facture_id=e.facture_id,
-                motif=e.description,
+                motif=e.description, pass_duree=getattr(e, "pass_duree", None),
             ))
         remboursements = [
             {"date": r.cree_le, "montant_cents": r.montant_cents, "net_cents": r.net_cents,
@@ -2278,9 +2348,37 @@ async def revenus(
             select(SubscriptionEvent).where(SubscriptionEvent.type == "pass_achete")
         )).scalars().all():
             d = ev.created_at if ev.created_at.tzinfo else ev.created_at.replace(tzinfo=timezone.utc)
+            detail = ev.detail if isinstance(ev.detail, dict) else {}
             lignes_paiement.append(_ligne_paiement(
                 d, ev.email, "pass", int(ev.montant_cents or 0), "pass", source="journal",
+                pass_duree=detail.get("duree"),
             ))
+
+    # Période d'accès réellement ouverte par chaque pass encaissé : un pass
+    # acheté pendant qu'un autre court commence à la fin du précédent, la date
+    # du paiement ne la donne donc pas. Rapprochée de `passes_acces` (même
+    # e-mail, même montant, à 3 jours près).
+    from db.models import PassAcces
+    lignes_pass = [lp for lp in lignes_paiement if lp["nature"] == "pass"]
+    if lignes_pass:
+        candidats = [
+            {"email": (email or "").lower(), "montant": p.montant_cents, "duree": p.duree,
+             "achete": p.created_at if p.created_at.tzinfo else p.created_at.replace(tzinfo=timezone.utc),
+             "debut": p.debut, "fin": p.fin, "statut": p.statut}
+            for p, email in (await db.execute(
+                select(PassAcces, User.email).join(User, User.user_id == PassAcces.user_id)
+            )).all()
+        ]
+        for lp in lignes_pass:
+            proches = [c for c in candidats
+                       if c["email"] == (lp["email"] or "").lower() and c["montant"] == lp["montant_cents"]
+                       and abs((c["achete"] - lp["date"]).total_seconds()) <= 3 * 86400]
+            if not proches:
+                continue
+            c = min(proches, key=lambda c: abs((c["achete"] - lp["date"]).total_seconds()))
+            candidats.remove(c)
+            lp["pass_duree"] = lp["pass_duree"] or c["duree"]
+            lp["pass_debut"], lp["pass_fin"] = c["debut"], c["fin"]
 
     # ── Agrégation mensuelle (mois de Paris) ──
     buckets = {
