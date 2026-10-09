@@ -722,16 +722,41 @@ async def charger_reductions_trot(session, course_id: str) -> dict[int, list[flo
     une vitesse ramenée à une référence de distance et `dyn_reduction_km_moy` une
     moyenne sur 20 sorties polluée par des copies divisées par 10. Contrôlé le
     09/10 contre l'API PMU sur 16 courses de trot : les figures désignaient le
-    vrai meilleur chrono environ une fois sur trois. Ici : une ligne par sortie
-    (copie PMU fusionnée dans la ligne interne), dixièmes remis ×10, valeurs
-    hors bornes écartées."""
+    vrai meilleur chrono environ une fois sur trois.
+
+    Seules les COPIES PMU (`course_id IS NULL`) sont lues : ce sont les
+    performances détaillées elles-mêmes. Passer par la ligne interne fusionnée
+    avec sa copie (chemin des features) perdait des chronos quand la fusion
+    échoue (sortie la plus récente d'un partant de Hyères absente, 52 badges
+    conformes sur 59 le 09/10). Une même sortie copiée deux fois (scrapée deux
+    jours, datée la veille) est dédoublonnée sur distance, hippodrome, place et
+    chrono. Dixièmes remis ×10, valeurs hors bornes écartées."""
     from sqlalchemy import text as _text
-    from ml.features import (HIST_JUMEAU_LATERAL, HIST_SANS_COPIE_SQL,
-                             REDUCTION_KM_DIXIEMES_MAX)
+    from ml.features import REDUCTION_KM_DIXIEMES_MAX
     # Savepoint : une erreur ici ne doit pas laisser la transaction de l'appelant
     # (route d'analyse, pipeline) en état d'échec.
     async with session.begin_nested():
-        rows = await _lire_sorties(session, _text, HIST_JUMEAU_LATERAL, HIST_SANS_COPIE_SQL, course_id)
+        rows = (await session.execute(_text("""
+            WITH partants AS (
+                SELECT p.numero, p.cheval_id, c.date_heure::date AS jour
+                FROM participations p JOIN courses c ON c.course_id = p.course_id
+                WHERE p.course_id = :cid AND p.non_partant = false
+            ), copies AS (
+                SELECT DISTINCT ON (pa.numero, h.distance, h.hippodrome,
+                                    h.position_arrivee, h.reduction_km)
+                       pa.numero, h.date_course, h.historique_id, h.reduction_km AS rk
+                FROM partants pa
+                JOIN historique_courses h ON h.cheval_id = pa.cheval_id
+                WHERE h.course_id IS NULL AND h.date_course < pa.jour
+                ORDER BY pa.numero, h.distance, h.hippodrome, h.position_arrivee,
+                         h.reduction_km, h.date_course DESC, h.historique_id
+            ), rangees AS (
+                SELECT numero, rk, ROW_NUMBER() OVER (PARTITION BY numero
+                       ORDER BY date_course DESC, historique_id) AS rn
+                FROM copies
+            )
+            SELECT numero, rk FROM rangees WHERE rn <= :n ORDER BY numero, rn
+        """), {"cid": course_id, "n": NB_SORTIES_PMU})).fetchall()
     lo, hi = REDUCTION_PLAUSIBLE
     out: dict[int, list[float]] = {}
     for num, rk in rows:
@@ -742,27 +767,6 @@ async def charger_reductions_trot(session, course_id: str) -> dict[int, list[flo
         if lo <= rk <= hi:
             out[int(num)].append(rk)
     return {k: v for k, v in out.items() if v}
-
-
-async def _lire_sorties(session, _text, jumeau_sql, sans_copie_sql, course_id):
-    return (await session.execute(_text(f"""
-        WITH partants AS (
-            SELECT p.numero, p.cheval_id, c.date_heure::date AS jour
-            FROM participations p JOIN courses c ON c.course_id = p.course_id
-            WHERE p.course_id = :cid AND p.non_partant = false
-        ), sorties AS (
-            SELECT pa.numero, h.date_course,
-                   COALESCE(h.reduction_km, tw.reduction_km) AS rk,
-                   ROW_NUMBER() OVER (PARTITION BY pa.numero
-                                      ORDER BY h.date_course DESC, h.historique_id) AS rn
-            FROM partants pa
-            JOIN historique_courses h ON h.cheval_id = pa.cheval_id
-            {jumeau_sql}
-            WHERE h.date_course < pa.jour
-            {sans_copie_sql}
-        )
-        SELECT numero, rk FROM sorties WHERE rn <= :n ORDER BY numero, rn
-    """), {"cid": course_id, "n": NB_SORTIES_PMU})).fetchall()
 
 
 def _ajoute_vitesse_champ(enriched: list[dict], reductions: dict[int, list[float]],
