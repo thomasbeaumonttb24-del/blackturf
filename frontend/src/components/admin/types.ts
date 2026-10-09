@@ -169,10 +169,29 @@ export interface CompteOffert {
 }
 
 /** Pass sans renouvellement en cours. */
+export type DureePass = "jour" | "semaine" | "mois";
+
+export interface PassResume {
+  duree: DureePass | string;
+  debut: string;
+  /** Fin de l'accès cumulé (pass enchaînés compris). */
+  fin: string;
+  statut: "en_cours" | "a_venir" | "expire" | "rembourse";
+  montant_cents: number;
+  achete_le: string;
+  /** Pass déjà payés qui prendront le relais de celui-ci. */
+  nb_a_venir: number;
+  nb_total: number;
+}
+
 export interface ComptePass {
   user_id: string;
   email: string;
   jusqu_au: string;
+  duree?: string | null;
+  debut?: string | null;
+  statut?: PassResume["statut"] | null;
+  nb_a_venir?: number;
   created_at: string;
   last_login: string | null;
 }
@@ -286,6 +305,10 @@ export interface PaiementRecu {
   net_cents: number | null;
   /** Premier encaissement du client, ou échéance suivante. */
   nature: "nouveau" | "renouvellement" | "changement" | "pass";
+  /** Pass : durée achetée et période d'accès réellement ouverte. */
+  pass_duree?: string | null;
+  pass_debut?: string | null;
+  pass_fin?: string | null;
   motif: string | null;
   charge_id: string | null;
   /** Reçu Stripe officiel du paiement. */
@@ -394,6 +417,13 @@ export interface CompteLigne {
   auth_method: string;
   stripe_client: boolean;
   abonnement_statut: string | null;
+  /** Dernière Subscription Stripe : formule facturée, rythme, échéance. */
+  abonnement?: {
+    plan: string; periodicite: string; statut: string;
+    periode_fin: string | null; essai_fin: string | null;
+  } | null;
+  /** Pass sans renouvellement le plus parlant : en cours, sinon le dernier. */
+  pass?: PassResume | null;
   last_login: string | null;
   created_at: string;
   /** Défi du mois en cours (points, pas d'euros). */

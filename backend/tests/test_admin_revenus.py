@@ -402,3 +402,24 @@ async def test_abonnements_compte_les_pass_a_part(client: AsyncClient, admin_hea
     assert [p["email"] for p in data["passes"]] == ["pass@x.fr"]
     fiche = (await client.get(f"/admin/api/users/{u.user_id}", headers=admin_headers)).json()
     assert fiche["passes"][0]["duree"] == "jour" and fiche["passes"][0]["statut"] == "actif"
+
+async def test_liste_des_comptes_precise_le_pass(client: AsyncClient, admin_headers, db):
+    """Un compte au pass ne se lit plus « Checkout abandonné » : la liste dit
+    quel pass, depuis quand et jusqu'à quand — deux pass enchaînés cumulés."""
+    from db.models import PassAcces
+    now = datetime.now(timezone.utc)
+    u = User(user_id=str(uuid.uuid4()), email="pass2@x.fr", plan="expert", stripe_customer_id="cus_p")
+    db.add(u)
+    for i, (debut, fin) in enumerate([(now - timedelta(hours=2), now + timedelta(hours=22)),
+                                      (now + timedelta(hours=22), now + timedelta(hours=46))]):
+        db.add(PassAcces(user_id=u.user_id, duree="jour", plan="expert", montant_cents=500,
+                         stripe_session_id=f"cs_p{i}", debut=debut, fin=fin, statut="actif",
+                         renonciation_at=now, renonciation_version="v1"))
+    await db.commit()
+    lignes = (await client.get("/admin/api/users", params={"search": "pass2@"}, headers=admin_headers)).json()
+    p = lignes[0]["pass"]
+    assert p["duree"] == "jour" and p["statut"] == "en_cours" and p["nb_a_venir"] == 1
+    assert abs(datetime.fromisoformat(p["fin"]).replace(tzinfo=timezone.utc) - (now + timedelta(hours=46))) < timedelta(seconds=5)
+    assert lignes[0]["abonnement"] is None
+    data = (await client.get("/admin/api/abonnements", headers=admin_headers)).json()
+    assert data["passes"][0]["duree"] == "jour"

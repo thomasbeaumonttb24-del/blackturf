@@ -23,8 +23,8 @@ import {
 import { AlertTriangle, CalendarClock, CheckCircle2, ChevronLeft, ChevronRight, Euro, FileText, Landmark, Loader2, RefreshCw, Repeat } from "lucide-react";
 import { cn, formatDateTime } from "@/lib/utils";
 import {
-  BadgeFormule, CelluleCompte, EnTetePage, Etat, GrilleKpi, Kpi, Panneau, Puce,
-  Segments, Squelette, Tableau, Vide, eur, num, pct, signedPct, type Colonne,
+  BadgeFormule, CelluleCompte, EnTetePage, Etat, GrilleKpi, Kpi, PASS, Panneau, Puce,
+  Segments, Squelette, Tableau, Vide, eur, num, pct, restant, signedPct, type Colonne,
 } from "@/components/admin/ui";
 import { useAbonnements, useRevenus } from "@/components/admin/data";
 import {
@@ -306,11 +306,26 @@ function CourbeComposition({
 
 const COLONNES_PAIEMENTS: Colonne<PaiementRecu>[] = [
   { titre: "Client", rendu: (p) => <CelluleCompte email={p.email ?? "compte supprimé"} />, className: "max-w-[280px]" },
-  { titre: "Formule", rendu: (p) => <BadgeFormule plan={p.plan} /> },
+  { titre: "Formule", rendu: (p) => <BadgeFormule plan={p.plan} duree={p.pass_duree} /> },
   {
     titre: "Nature",
+    // Un pass dit sa durée et la période d'accès qu'il a ouverte : « Pass » seul
+    // ne distinguait pas 24 h de 30 jours.
     rendu: (p) => p.nature === "pass"
-      ? <Etat ton="neutre" titre="Pass sans renouvellement, paiement unique">Pass</Etat>
+      ? (
+        <span className="inline-flex flex-col">
+          <Etat ton="neutre" titre="Pass sans renouvellement, paiement unique">
+            Paiement unique · {PASS[p.pass_duree ?? ""]?.acces ?? "durée inconnue"}
+          </Etat>
+          {p.pass_fin && (
+            <span className="pl-3 text-[11px] text-muted-foreground" title={`Du ${formatDateTime(p.pass_debut ?? p.date)} au ${formatDateTime(p.pass_fin)}`}>
+              {new Date(p.pass_fin).getTime() > Date.now()
+                ? `accès jusqu'au ${formatDateTime(p.pass_fin)} · ${restant(p.pass_fin)}`
+                : `accès terminé le ${formatDateTime(p.pass_fin)}`}
+            </span>
+          )}
+        </span>
+      )
       : p.nature === "nouveau"
       ? <Etat ton="or">Premier paiement</Etat>
       : p.nature === "changement"
@@ -417,6 +432,22 @@ function DetailMois({ m, precedent }: { m: MoisRevenu; precedent?: MoisRevenu })
                 <span className="ml-1.5 text-xs text-muted-foreground">{total > 0 ? pct(((m.passes_cents ?? 0) / total) * 100, 0) : "—"}</span>
               </dd>
             </div>
+            {/* Détail par durée : 44 € de pass, c'est 8 Pass Jour ou un Pass Mois et 4 Pass Jour. */}
+            {(() => {
+              const parDuree = new Map<string, number>();
+              for (const p of m.paiements ?? []) {
+                if (p.nature !== "pass") continue;
+                const cle = p.pass_duree ?? "inconnu";
+                parDuree.set(cle, (parDuree.get(cle) ?? 0) + 1);
+              }
+              if (parDuree.size === 0) return null;
+              return (
+                <dd className="pl-4 text-xs text-muted-foreground">
+                  {["jour", "semaine", "mois", "inconnu"].filter((d) => parDuree.has(d)).map((d) =>
+                    `${parDuree.get(d)} × ${d === "inconnu" ? "Pass (durée inconnue)" : PASS[d].nom}`).join(" · ")}
+                </dd>
+              );
+            })()}
           </dl>
         </div>
         <dl className="grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-border bg-border sm:grid-cols-3">

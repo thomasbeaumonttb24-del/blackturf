@@ -27,8 +27,8 @@ import { Badge } from "@/components/ui/badge";
 import { adminApi } from "@/lib/api";
 import { cn, formatDateTime } from "@/lib/utils";
 import {
-  Carte, CartesOuTableau, Champ, DefilementX, EnTetePage, Panneau, Puce,
-  Kpi, Segments, Squelette, TD, TH, Vide, num, signedPct, tone,
+  BadgeFormule, Carte, CartesOuTableau, Champ, DefilementX, EnTetePage, PASS, Panneau, Puce,
+  Kpi, Segments, Squelette, TD, TH, Vide, num, restant, signedPct, tone,
 } from "@/components/admin/ui";
 import { useComptes } from "@/components/admin/data";
 import FicheCompte from "@/components/admin/vues/FicheCompte";
@@ -47,6 +47,7 @@ function pts(v: number, signe = false): string {
 const FILTRES = [
   { key: "tous", label: "Tous" },
   { key: "abonnes", label: "Abonnés" },
+  { key: "pass", label: "Pass" },
   { key: "actifs", label: "Joueurs du défi" },
   { key: "suspendus", label: "Suspendus" },
 ] as const;
@@ -79,9 +80,96 @@ function badgeAbonnement(statut: string | null, stripeClient: boolean) {
   return <span className="text-xs text-muted-foreground">—</span>;
 }
 
-function badgePlan(plan: string) {
+const STATUTS_VIVANTS = ["active", "trialing", "cancel_at_period_end", "essai_sans_carte"];
+const passVivant = (u: CompteLigne) => u.pass?.statut === "en_cours" || u.pass?.statut === "a_venir";
+const aboVivant = (u: CompteLigne) => STATUTS_VIVANTS.includes(u.abonnement_statut ?? "");
+
+/** D'où vient le plan payant du compte : un Expert au pass et un Expert abonné
+ *  se lisaient pareil, alors que l'un s'arrête dans 24 h sans prévenir. */
+function originePlan(u: CompteLigne): string | null {
+  if (u.plan === "free" || u.is_admin) return null;
+  if (aboVivant(u)) return "abonnement";
+  if (passVivant(u)) return "via pass";
+  return "offert / manuel";
+}
+
+function badgePlan(u: CompteLigne) {
+  const plan = u.plan;
   const variant = plan === "expert" ? "expert" : ["starter", "standard"].includes(plan) ? "gold" : "secondary";
-  return <Badge variant={variant} className="text-[11px] capitalize">{plan}</Badge>;
+  const origine = originePlan(u);
+  return (
+    <span className="inline-flex flex-col items-center gap-0.5">
+      <Badge variant={variant} className="text-[11px] capitalize">{plan}</Badge>
+      {origine && <span className="whitespace-nowrap text-[10px] text-muted-foreground">{origine}</span>}
+    </span>
+  );
+}
+
+/** Échéance de l'abonnement, dite selon son état. */
+function echeanceAbonnement(u: CompteLigne): string | null {
+  const a = u.abonnement;
+  if (!a) return null;
+  if (a.statut === "trialing" && a.essai_fin) return `fin d'essai le ${formatDateTime(a.essai_fin)}`;
+  if (!a.periode_fin) return null;
+  if (a.statut === "active") return `renouvellement le ${formatDateTime(a.periode_fin)}`;
+  if (a.statut === "cancel_at_period_end") return `accès jusqu'au ${formatDateTime(a.periode_fin)} · ${restant(a.periode_fin)}`;
+  if (a.statut === "canceled") return `terminé le ${formatDateTime(a.periode_fin)}`;
+  return null;
+}
+
+/**
+ * Ce que le compte a payé et jusqu'à quand. Un pass s'achète via Stripe : son
+ * client Stripe faisait afficher « Checkout abandonné » à quelqu'un qui avait
+ * payé son Pass Jour — le pass passe donc avant ce constat, avec sa durée et
+ * le temps qu'il lui reste.
+ */
+function celluleAcces(u: CompteLigne, aligne: "centre" | "gauche" = "centre") {
+  const blocs: React.ReactNode[] = [];
+  const a = u.abonnement;
+  const ligne = (contenu: React.ReactNode, cle: string) => (
+    <div key={cle} className={cn("flex flex-col gap-0.5", aligne === "centre" ? "items-center" : "items-start")}>{contenu}</div>
+  );
+
+  if (a && (aboVivant(u) || !u.pass)) {
+    const echeance = echeanceAbonnement(u);
+    blocs.push(ligne(<>
+      <span className="flex flex-wrap items-center justify-center gap-1">
+        <BadgeFormule plan={a.plan} periodicite={a.periodicite} />
+        {badgeAbonnement(u.abonnement_statut, u.stripe_client)}
+      </span>
+      {echeance && <span className="whitespace-nowrap text-[11px] text-muted-foreground">{echeance}</span>}
+    </>, "abo"));
+  }
+
+  const p = u.pass;
+  if (p) {
+    const acces = PASS[p.duree]?.acces;
+    const vivant = passVivant(u);
+    blocs.push(ligne(<>
+      <span className="flex flex-wrap items-center justify-center gap-1">
+        <span className={cn(!vivant && "opacity-60")}><BadgeFormule plan="pass" duree={p.duree} /></span>
+        {p.statut === "en_cours" && <Badge variant="success" className="whitespace-nowrap text-[11px]">En cours</Badge>}
+        {p.statut === "a_venir" && <Badge variant="warning" className="whitespace-nowrap text-[11px]">À venir</Badge>}
+        {p.statut === "expire" && <Badge variant="secondary" className="whitespace-nowrap text-[11px] text-muted-foreground">Expiré</Badge>}
+        {p.statut === "rembourse" && <Badge variant="secondary" className="whitespace-nowrap text-[11px] text-destructive">Remboursé</Badge>}
+      </span>
+      <span
+        className={cn("whitespace-nowrap text-[11px]", vivant ? "font-medium text-emerald-700" : "text-muted-foreground")}
+        title={`${acces ?? "Durée inconnue"} d'accès Expert · acheté le ${formatDateTime(p.achete_le)} · du ${formatDateTime(p.debut)} au ${formatDateTime(p.fin)}`}
+      >
+        {p.statut === "en_cours" && <>jusqu&apos;au {formatDateTime(p.fin)} · {restant(p.fin)}</>}
+        {p.statut === "a_venir" && <>commence le {formatDateTime(p.debut)}</>}
+        {p.statut === "expire" && <>terminé le {formatDateTime(p.fin)}</>}
+        {p.statut === "rembourse" && <>accès retiré</>}
+      </span>
+      {vivant && p.nb_a_venir > 0 && (
+        <span className="whitespace-nowrap text-[10px] text-muted-foreground">+{p.nb_a_venir} pass enchaîné{p.nb_a_venir > 1 ? "s" : ""} inclus</span>
+      )}
+    </>, "pass"));
+  }
+
+  if (blocs.length === 0) return badgeAbonnement(u.abonnement_statut, u.stripe_client);
+  return <div className="flex flex-col gap-1.5">{blocs}</div>;
 }
 
 /**
@@ -121,6 +209,14 @@ export default function ComptesPage() {
   const liste = useMemo(() => {
     const tous = comptes ?? [];
     if (filtre === "abonnes") return tous.filter((u) => ["active", "trialing", "cancel_at_period_end"].includes(u.abonnement_statut ?? ""));
+    if (filtre === "pass") {
+      // Les pass en cours d'abord, la fin la plus proche en tête ; puis les anciens.
+      const rang = (u: CompteLigne) => (passVivant(u) ? 0 : 1);
+      return tous.filter((u) => u.pass).sort((a, b) =>
+        rang(a) - rang(b) || (rang(a) === 0
+          ? new Date(a.pass!.fin).getTime() - new Date(b.pass!.fin).getTime()
+          : new Date(b.pass!.fin).getTime() - new Date(a.pass!.fin).getTime()));
+    }
     if (filtre === "actifs") {
       // Les joueurs du défi, dans l'ordre du classement : classés par rang, puis
       // les autres par solde.
@@ -139,6 +235,7 @@ export default function ComptesPage() {
       // Payants + essais, comme le Pilotage : un abonné qui a résilié reste
       // abonné (et a payé) jusqu'à la fin de sa période.
       abonnes: tous.filter((u) => ["active", "trialing", "cancel_at_period_end"].includes(u.abonnement_statut ?? "")).length,
+      passEnCours: tous.filter(passVivant).length,
       parieurs: tous.filter((u) => u.nb_paris > 0).length,
       suspendus: tous.filter((u) => !u.is_active).length,
       classes: tous.filter((u) => u.defi_rang != null).length,
@@ -240,7 +337,8 @@ Supprimer quand même ?`)) {
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-5 lg:gap-4">
         <Kpi label="Comptes" nombre={resume.total} format={(v) => num(Math.round(v))} icone={<Users className="h-4 w-4" />} accent="violet" />
-        <Kpi label="Abonnés" nombre={resume.abonnes} format={(v) => num(Math.round(v))} icone={<CreditCard className="h-4 w-4" />} accent="ok" />
+        <Kpi label="Abonnés" nombre={resume.abonnes} format={(v) => num(Math.round(v))} icone={<CreditCard className="h-4 w-4" />} accent="ok"
+          sub={`+ ${num(resume.passEnCours)} pass en cours`} />
         <Kpi label="Joueurs du défi" nombre={resume.parieurs} format={(v) => num(Math.round(v))} icone={<Medal className="h-4 w-4" />} accent="or"
           sub={`${num(resume.classes)} classé${resume.classes > 1 ? "s" : ""} · mois en cours`} />
         <Kpi label="Points misés" nombre={resume.pointsMises} format={(v) => `${num(Math.round(v))} pts`} icone={<Activity className="h-4 w-4" />} accent="bleu"
@@ -296,11 +394,12 @@ Supprimer quand même ?`)) {
                       </span>
                       <span className="mt-0.5 block truncate text-xs text-muted-foreground">{u.email}</span>
                     </span>
-                    {badgePlan(u.plan)}
+                    {badgePlan(u)}
                   </button>
 
+                  <div className="mt-2">{celluleAcces(u, "gauche")}</div>
+
                   <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                    {badgeAbonnement(u.abonnement_statut, u.stripe_client)}
                     {mentionsCompte(u).map((m) => (
                       <span
                         key={m.texte}
@@ -365,12 +464,12 @@ Supprimer quand même ?`)) {
             })}
             tableau={
               <DefilementX label="Liste des comptes">
-                <table className="w-full min-w-[940px] border-collapse">
+                <table className="w-full min-w-[1040px] border-collapse">
                   <thead>
                     <tr className="border-b border-border">
                       <th className={TH}>Utilisateur</th>
                       <th className={cn(TH, "text-center")}>Plan</th>
-                      <th className={cn(TH, "text-center")}>Abonnement</th>
+                      <th className={cn(TH, "text-center")} title="Abonnement ou pass payé, et jusqu'à quand">Accès payé</th>
                       <th className={cn(TH, "text-right")}>Défi du mois</th>
                       <th className={cn(TH, "text-right")}>Résultat</th>
                       <th className={cn(TH, "text-right")}>Misé</th>
@@ -412,8 +511,8 @@ Supprimer quand même ?`)) {
                               ))}
                             </div>
                           </td>
-                          <td className={cn(TD, "text-center")}>{badgePlan(u.plan)}</td>
-                          <td className={cn(TD, "text-center")}>{badgeAbonnement(u.abonnement_statut, u.stripe_client)}</td>
+                          <td className={cn(TD, "text-center")}>{badgePlan(u)}</td>
+                          <td className={cn(TD, "text-center")}>{celluleAcces(u)}</td>
                           <td className={cn(TD, "text-right")}>
                             <div className="tabular-nums">{pts(u.defi_solde)}</div>
                             <div className="text-[11px] tabular-nums text-muted-foreground">

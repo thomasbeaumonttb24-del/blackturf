@@ -137,6 +137,27 @@ export function depuis(iso: string | null | undefined): string {
   return `il y a ${Math.floor(h / 24)} j`;
 }
 
+/** « reste 3 h 20 », « reste 5 j » — temps restant avant une échéance. */
+export function restant(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  const ms = new Date(iso).getTime() - Date.now();
+  if (!isFinite(ms)) return "—";
+  if (ms <= 0) return "terminé";
+  const min = Math.floor(ms / 60000);
+  if (min < 60) return `reste ${min} min`;
+  const h = Math.floor(min / 60);
+  if (h < 48) return `reste ${h} h${min % 60 ? ` ${String(min % 60).padStart(2, "0")}` : ""}`;
+  return `reste ${Math.floor(h / 24)} j`;
+}
+
+/** Pass sans renouvellement : nom commercial et durée d'accès, par `duree`. */
+export const PASS: Record<string, { nom: string; acces: string }> = {
+  jour: { nom: "Pass Jour", acces: "24 h" },
+  semaine: { nom: "Pass Semaine", acces: "7 jours" },
+  mois: { nom: "Pass Mois", acces: "30 jours" },
+};
+export const nomPass = (duree: string | null | undefined) => PASS[duree ?? ""]?.nom ?? "Pass";
+
 /* ──────────────────────────── mise en page ─────────────────────────────── */
 
 /**
@@ -863,12 +884,13 @@ const FORMULES: Record<string, { texte: string; classe: string }> = {
   admin: { texte: "Admin", classe: "bg-[#1b2230] text-white ring-[#1b2230]" },
 };
 
-export function BadgeFormule({ plan, periodicite }: { plan: string | null | undefined; periodicite?: string | null }) {
+/** `duree` (pass seulement) : « Pass Jour » au lieu de « Pass ». */
+export function BadgeFormule({ plan, periodicite, duree }: { plan: string | null | undefined; periodicite?: string | null; duree?: string | null }) {
   const f = FORMULES[plan ?? ""] ?? { texte: plan ?? "—", classe: "bg-muted text-muted-foreground ring-border" };
   return (
     <span className={cn("inline-flex items-center gap-1 whitespace-nowrap rounded-md px-2 py-0.5 text-[11px] font-semibold ring-1 ring-inset", f.classe)}>
-      {f.texte}
-      {periodicite && <span className="font-medium opacity-70">· {periodicite === "annual" ? "an" : "mois"}</span>}
+      {plan === "pass" && duree ? nomPass(duree) : f.texte}
+      {periodicite && <span className="font-medium opacity-70">· {periodicite === "annual" ? "annuel" : "mensuel"}</span>}
     </span>
   );
 }
