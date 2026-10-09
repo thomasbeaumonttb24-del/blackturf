@@ -42,7 +42,7 @@ def test_sans_chrono_ignore_et_champ_trop_petit():
 def test_reduction_km_plus_basse_gagne():
     feats = [{"dyn_reduction_km_moy": 74.0 + i} for i in range(5)] + [{"dyn_reduction_km_moy": 0.0}]
     enriched, fb = _champ(feats)
-    _ajoute_vitesse_champ(enriched, fb)
+    _ajoute_vitesse_champ(enriched, fb, "Attelé")
     assert _labels(enriched[0]) == ["Meilleure réduction km du champ"]
     assert "1'14\"0" in enriched[0]["explanation"]["facteurs_positifs"][0]["detail"]
     assert not _labels(enriched[5])
@@ -60,3 +60,27 @@ def test_vitesse_relative_contradictoire_retiree():
 def test_fmt_reduction():
     assert _fmt_reduction(75.3) == "1'15\"3"
     assert _fmt_reduction(74.96) == "1'15\"0"
+
+
+def test_reduction_km_ignoree_hors_trot():
+    feats = [{"dyn_reduction_km_moy": 63.0 + i} for i in range(6)]
+    enriched, fb = _champ(feats)
+    _ajoute_vitesse_champ(enriched, fb, "Plat")
+    assert all(not _labels(e) and not _labels(e, "facteurs_negatifs") for e in enriched)
+
+
+def test_figure_collee_a_la_borne_ignoree():
+    # Waregem 09/10 : un 1,06 devant huit 0,70 pile (reconstitution ratée).
+    feats = [{"speed_figure_best": 1.06, "nb_speed_figures": 3}] +             [{"speed_figure_best": 0.70, "nb_speed_figures": 3}] * 8
+    enriched, fb = _champ(feats)
+    _ajoute_vitesse_champ(enriched, fb, "Plat")
+    assert all(not _labels(e) for e in enriched)
+
+
+def test_jamais_atout_et_reserve_sur_le_meme_cheval():
+    feats = [{"speed_figure_best": 1.2 - i * 0.02, "nb_speed_figures": 2,
+              "dyn_reduction_km_moy": 80.0 - i} for i in range(6)]
+    enriched, fb = _champ(feats)
+    _ajoute_vitesse_champ(enriched, fb, "Attelé")
+    assert _labels(enriched[0]) == ["Meilleure vitesse du champ"]
+    assert _labels(enriched[0], "facteurs_negatifs") == []

@@ -712,8 +712,10 @@ def _vitesse_valide(f: dict, nom: str) -> Optional[float]:
 
     speed_figure_* vaut 1,0 (neutre) quand aucun chrono n'a pu être lu
     (features.py, bloc HH) : sans `nb_speed_figures` on ne peut pas distinguer un
-    vrai 1,0 d'un absent, on l'écarte. dyn_reduction_km_moy vaut 0 sans chrono
-    (plat/obstacle, ou trotteur sans réduction publiée)."""
+    vrai 1,0 d'un absent, on l'écarte. Une figure collée à une borne du
+    plafonnement (0,70 / 1,30) est une reconstitution ratée, pas une mesure : vu
+    en prod le 09/10, huit partants de Waregem à 0,70 pile. dyn_reduction_km_moy
+    vaut 0 sans chrono ; elle n'est lue qu'au trot (cf. `_ajoute_vitesse_champ`)."""
     v = f.get(nom)
     if v is None:
         return None
@@ -723,26 +725,34 @@ def _vitesse_valide(f: dict, nom: str) -> Optional[float]:
         return None
     if nom == "dyn_reduction_km_moy":
         return v if 40.0 <= v <= 120.0 else None
+    if not 0.7 < v < 1.3:
+        return None
     nb = f.get("nb_speed_figures")
     if nb is not None:
         return v if float(nb) >= 1 else None
     return None if v == 1.0 else v
 
 
-def _ajoute_vitesse_champ(enriched: list[dict], features_by_pid: dict) -> None:
+def _ajoute_vitesse_champ(enriched: list[dict], features_by_pid: dict,
+                          discipline: Optional[str] = None) -> None:
     """Atouts / réserves de VITESSE lus contre les adversaires du jour.
 
     Les seuils absolus d'`explain_prediction` ne disent pas si le cheval est le
     plus rapide de SA course : « 1er sur 11 en meilleure vitesse » est l'atout
     qu'un turfiste cherche. On classe chaque critère sur les seuls partants qui ont
     un chrono (au moins 4), et on ne signale que le 1er net (strictement devant le
-    2e) et, en réserve, le dernier sur un champ d'au moins 6 chronos."""
+    2e) et, en réserve, le dernier sur un champ d'au moins 6 chronos — jamais sur
+    un cheval qui a déjà un atout de vitesse (vu en prod : « Meilleure vitesse »
+    et « Le moins rapide » sur le même partant).
+
+    La réduction kilométrique est une mesure de TROT : en plat la pipeline en
+    calcule une depuis le temps officiel (1'03" à Waregem), qu'on ne lit pas."""
+    trot = any(m in (discipline or "").lower() for m in ("attel", "mont", "trot"))
     criteres = (
         # nom, plus haut = mieux
         ("speed_figure_best", True),
         ("speed_figure_recent", True),
-        ("dyn_reduction_km_moy", False),
-    )
+    ) + ((("dyn_reduction_km_moy", False),) if trot else ())
     vals: dict[str, dict] = {}
     for nom, haut in criteres:
         par_num = {}
@@ -768,6 +778,8 @@ def _ajoute_vitesse_champ(enriched: list[dict], features_by_pid: dict) -> None:
                 premier.append((nom, ordre[0][1], ordre[1][1], len(ordre)))
             elif len(ordre) >= 6 and ordre[-1][0] == num and ordre[-1][1] != ordre[-2][1]:
                 dernier.append((nom, len(ordre)))
+        if premier:
+            dernier = []
         noms = {p[0] for p in premier}
         if {"speed_figure_best", "speed_figure_recent"} <= noms:
             n = next(p[3] for p in premier if p[0] == "speed_figure_best")
@@ -1025,7 +1037,7 @@ async def generate_full_course_analysis(
 
     # Vitesse placée contre les adversaires du jour (1er du champ = atout).
     try:
-        _ajoute_vitesse_champ(enriched, features_by_pid)
+        _ajoute_vitesse_champ(enriched, features_by_pid, (course_info or {}).get("discipline"))
     except Exception as exc:  # noqa: BLE001 — un badge ne doit jamais casser l'analyse
         log.warning("narrative.vitesse_champ_failed", err=str(exc)[:120])
 
