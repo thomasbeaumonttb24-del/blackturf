@@ -216,3 +216,24 @@ async def test_changer_pour_un_pseudo_pris_est_refuse(client: AsyncClient, inscr
     headers = await inscrire(email="a2@blackturf.fr", pseudo="Autre")
     resp = await client.patch("/api/v1/auth/me", json={"pseudo": "PEGASE"}, headers=headers)
     assert resp.status_code == 409
+
+@pytest.mark.asyncio
+async def test_verification_refusee_par_les_fournisseurs_renvoie_false(monkeypatch):
+    # `send_email` ne lève pas : un refus des trois fournisseurs était journalisé
+    # « envoyée » et `_envoyer_verification` répondait True.
+    from api.routes import auth as auth_routes
+    from services.alerts import ResultatEnvoi
+
+    async def _refus(**kw):
+        return ResultatEnvoi(False, "HTTP 429 quota")
+
+    class _Redis:
+        async def setex(self, *a):
+            return True
+
+        async def aclose(self):
+            return None
+
+    monkeypatch.setattr("services.alerts.send_email", _refus)
+    monkeypatch.setattr("redis.asyncio.from_url", lambda *a, **k: _Redis())
+    assert await auth_routes._envoyer_verification("u1", "a@exemple.fr") is False

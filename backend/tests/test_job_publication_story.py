@@ -328,3 +328,20 @@ def test_la_surveillance_est_planifiee_apres_la_fenetre_de_publication():
     assert "CronTrigger(hour=10, minute=5" in source, (
         "la surveillance doit passer APRÈS le dernier essai de publication (09:30)"
     )
+
+
+@pytest.mark.parametrize("publie, attendu", [(True, 1), (False, 0)])
+async def test_alerte_stock_photos_seulement_apres_une_story_partie(db, monkeypatch, publie, attendu):
+    # Un échec est retenté toutes les 30 min : l'alerte de stock repartait à chaque
+    # passage de la nuit, sur le même jour.
+    envois: list[str] = []
+    _preparer(monkeypatch, db, bilan=_bilan(complete=True), envois=envois, publie=publie)
+    alertes: list[str] = []
+
+    async def _alerte(jour):
+        alertes.append(jour)
+
+    monkeypatch.setattr(jobs, "_alerter_stock_photos", _alerte)
+    await jobs.job_publication_story()
+    assert len(envois) == 1
+    assert len(alertes) == attendu

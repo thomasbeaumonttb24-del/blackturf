@@ -297,6 +297,13 @@ def weekly(data, unsubscribe=None, archive=None):
     rangees_site += _bilan_profils(data.get("profils") or [])
     for p in data.get("profils") or []:
         text.append(f"{p['label']} : {int(p['n'])} plan(s), misé {euro(float(p['mise']))}, retour {euro(float(p['retour']))}, net {_signe(float(p['net']))}")
+    abandonnes = int(data.get("plans_abandonnes") or 0)
+    if abandonnes:
+        note = (f"{abandonnes} plan(s) exclu(s) du bilan : le rapport officiel du pari joué "
+                "n’a jamais été publié, le règlement est impossible.")
+        rangees_site += D.rangee_site(
+            f'<div style="font-size:12.5px;line-height:19px;color:{C["stone6"]}">{e(note)}</div>', "6px 20px 0")
+        text.append(note)
 
     apercu = f"+{euro(winners[0]['net'])} net sur le meilleur plan — {intro}" if winners else intro
     rangees = (

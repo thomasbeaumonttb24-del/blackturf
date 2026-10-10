@@ -146,3 +146,18 @@ async def test_reinscription_apres_desinscription_repasse_par_la_confirmation(
 async def test_adresse_invalide_rejetee(client: AsyncClient):
     resp = await client.post("/api/v1/newsletter/inscription", json={"email": "pas-une-adresse"})
     assert resp.status_code == 422
+
+
+async def test_lien_de_confirmation_part_en_transactionnel(client: AsyncClient, monkeypatch):
+    # La personne attend ce lien : il passe par le quota réservé aux mails vitaux.
+    appels = []
+
+    async def _envoi(**kw):
+        appels.append(kw)
+        return True
+
+    monkeypatch.setattr("api.routes.newsletter.send_email", _envoi)
+    resp = await client.post("/api/v1/newsletter/inscription",
+                             json={"email": "transac@exemple.fr", "source": "accueil"})
+    assert resp.status_code == 200
+    assert [a.get("transactionnel") for a in appels] == [True]

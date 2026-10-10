@@ -421,11 +421,17 @@ async def _envoyer_verification(user_id: str, email: str, nonce: Optional[str] =
         lien = f"{settings.frontend_url}/verifier-email?token={token}"
         from services.email_compte import verification_adresse
         html, texte = verification_adresse(None, lien)
-        await send_email(
+        envoi = await send_email(
             to=email,
             subject="BlackTurf — Confirmez votre adresse e-mail",
             html=html, text=texte, transactionnel=True,
         )
+        if not envoi:
+            # `send_email` ne lève pas : sans ce test, un envoi refusé par les trois
+            # fournisseurs était journalisé « envoyée » et le renvoi répondait OK.
+            log.warning("auth.verification.envoi_echoue", user_id=user_id,
+                        error=getattr(envoi, "erreur", None))
+            return False
         log.info("auth.verification.envoyee", user_id=user_id)
         return True
     except Exception as e:

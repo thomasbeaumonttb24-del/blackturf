@@ -1464,7 +1464,10 @@ async def job_publication_story() -> None:
             )
             # Le stock de photos se verifie APRES la publication : c'est le seul
             # passage quotidien ou l'on sait qu'une story vient de consommer une image.
-            await _alerter_stock_photos(jour)
+            # Seulement si elle est PARTIE : un echec est retente toutes les 30 min et
+            # renvoyait le meme mail d'alerte a chaque passage de la nuit.
+            if resultat.publie:
+                await _alerter_stock_photos(jour)
 
             # Une seule story par passage : deux d'un coup noieraient la plus récente.
             return

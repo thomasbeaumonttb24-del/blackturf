@@ -54,9 +54,17 @@ async def send_control_copy(session, campaign, subject, html, plain, now):
     result = await send_email(**row.requete)
     row.statut = "sent" if result else "pending"
     row.envoye_at = now if result else None
-    row.provider_id = getattr(result, "provider_id", None)
+    row.provider_id = _id_fournisseur(result)
     row.erreur = None if result else getattr(result, "erreur", "Échec fournisseur")
     await session.commit()
+
+
+def _id_fournisseur(result):
+    # `email_livraisons.provider_id` est en String(80). L'identifiant SMTP
+    # (« smtp:<hôte>:<Message-ID> ») mesure déjà 76 car. en prod : un PID ou un
+    # aléa plus long ferait échouer le commit APRÈS l'envoi, la ligne resterait
+    # `pending` et le mail repartirait au passage suivant.
+    return (getattr(result, "provider_id", None) or "")[:80] or None
 
 
 def utc(dt):
@@ -172,12 +180,24 @@ async def build_week(session, now):
         return None
     totals = {p: {"label": label, "n": 0, "mise": Decimal(0), "retour": Decimal(0), "net": Decimal(0)} for p, label in PROFILS.items()}
     plans = []
+    abandonnes = 0
     for r in rows:
         # Do not publish a partial week, silently remove a losing plan, or fall
         # back to an earlier winning snapshot when the latest is still pending.
         if r["montant_mise"] is None:
-            log.warning("newsletter.semaine_incomplete", periode=start.date().isoformat(), course_id=r["course_id"])
-            return None
+            # Un plan dont le rapport PMU ne sera jamais publié reste non réglé pour
+            # toujours : 2 à 33 plans sur ~1 100 ont bloqué TOUTES les lettres
+            # hebdomadaires depuis le 28/09/2026. Même règle que le bilan du jour
+            # (stats.py) : passé 05 h le lendemain, on cesse d'attendre ce plan. Il
+            # sort des totaux (qui n'agrègent que du réglé) et le mail le dit. Le
+            # lundi attend encore tout le monde : l'abandon ne joue qu'à partir du
+            # mardi, comme prévu par le passage du mardi (jobs.py).
+            from api.routes.stats import _attente_reglement_terminee
+            if now < end + timedelta(days=1) or not _attente_reglement_terminee(r["course_id"][:8], now):
+                log.warning("newsletter.semaine_incomplete", periode=start.date().isoformat(), course_id=r["course_id"])
+                return None
+            abandonnes += 1
+            continue
         emitted = r["emitted_at"]
         departure = r["date_heure"]
         if isinstance(emitted, str):
@@ -207,11 +227,15 @@ async def build_week(session, now):
                           "hippodrome": r["hippodrome_nom"],
                           "code": f"R{r['numero_reunion']}C{r['numero']}" if r["numero_reunion"] else f"Course {r['numero']}",
                           "mise": float(stake), "retour": float(returned), "net": float(net)})
+    if abandonnes:
+        log.warning("newsletter.semaine_plans_abandonnes", periode=start.date().isoformat(), nb=abandonnes)
+    if not any(t["n"] for t in totals.values()):
+        return None
     plans.sort(key=lambda x: (-x["net"], x["course_id"], x["profil"]))
     algo = await weekly_algorithm_numbers(session, start, end)
     return {"debut": start.strftime("%d/%m/%Y"), "fin": (end - timedelta(days=1)).strftime("%d/%m/%Y"),
             "periode": start.date().isoformat(), "top": plans[:3],
-            "algo": algo,
+            "algo": algo, "plans_abandonnes": abandonnes,
             "profils": [{k: float(v) if isinstance(v, Decimal) else v for k, v in p.items()}
                         for p in totals.values() if p["n"]]}
 
@@ -249,7 +273,7 @@ async def deliver(session, campaign, email, subject, html, plain, unsubscribe, n
     if result:
         row.statut = "sent"
         row.envoye_at = now
-        row.provider_id = getattr(result, "provider_id", None)
+        row.provider_id = _id_fournisseur(result)
         row.erreur = None
     else:
         row.erreur = getattr(result, "erreur", "Échec fournisseur")

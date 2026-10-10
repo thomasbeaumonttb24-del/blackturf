@@ -176,6 +176,8 @@ async def inscription(
         subject="Confirmez votre inscription à la lettre BlackTurf",
         html=_mail_confirmation_html(lien),
         text=_mail_confirmation_texte(lien),
+        # La personne attend ce lien pour finir son inscription (cf. alerts.send_email).
+        transactionnel=True,
     )
     if not envoi:
         # L'inscription reste enregistrée en attente : la personne pourra redemander un

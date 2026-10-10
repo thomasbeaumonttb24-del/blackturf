@@ -350,3 +350,32 @@ async def test_sender_headers_without_network(monkeypatch):
     assert headers["idempotency-key"] == "test-id"
     assert payload["headers"]["List-Unsubscribe-Post"] == "List-Unsubscribe=One-Click"
     assert payload["text"] == "plain"
+
+
+@pytest.mark.asyncio
+async def test_plan_jamais_regle_exclu_le_mardi_et_signale(db):
+    # Prod 28/09 et 05/10/2026 : 2 à 33 plans sur ~1 100 sans rapport PMU publié
+    # bloquaient la lettre hebdomadaire pour toujours.
+    await seed_plan(db, 1, stake=10, returned=50)
+    await seed_plan(db, 2, pending=True)
+    # Lundi : on attend encore les règlements tardifs.
+    assert await campaign.build_week(db, NOW) is None
+    # Mardi : le plan sans rapport sort des totaux, et le mail le dit.
+    data = await campaign.build_week(db, NOW + timedelta(days=1))
+    assert data["plans_abandonnes"] == 1
+    assert [(p["n"], p["net"]) for p in data["profils"]] == [(1, 40.0)]
+    html, plain = weekly(data)
+    assert "1 plan(s) exclu(s) du bilan" in plain
+    assert "exclu(s) du bilan" in html
+
+
+@pytest.mark.asyncio
+async def test_semaine_sans_aucun_plan_regle_non_publiee(db):
+    await seed_plan(db, 1, pending=True)
+    assert await campaign.build_week(db, NOW + timedelta(days=1)) is None
+
+
+def test_identifiant_fournisseur_tronque_a_la_colonne():
+    long_id = "smtp:smtp-relay.brevo.com:<" + "9" * 70 + "@blackturf.fr>"
+    assert len(campaign._id_fournisseur(ResultatEnvoi(True, None, long_id))) == 80
+    assert campaign._id_fournisseur(ResultatEnvoi(True, None, None)) is None
