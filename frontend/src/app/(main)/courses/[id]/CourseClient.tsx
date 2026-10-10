@@ -415,7 +415,10 @@ function ComparaisonCotes({ partants }: { partants: Partant[] }) {
         <div style={{ ...HEAD_CELL, padding: "9px 12px" }}>Mvt</div>
         {/* Rangées */}
         {actifs.map((p) => {
-          const coteMin = p.cote_min;
+          // Meilleure cote = la plus HAUTE (ce que touche le parieur). `cote_max`
+          // exclut Geny côté API (source peu fiable) : une cote Geny plus haute
+          // n'est jamais mise en vert.
+          const coteMax = p.cote_max;
           const mv = p.mouvement_cote_pct;
           return (
             <Fragment key={p.participation_id}>
@@ -425,7 +428,7 @@ function ComparaisonCotes({ partants }: { partants: Partant[] }) {
               </div>
               {activeSources.map((s) => {
                 const val = (p as unknown as Record<string, unknown>)[s.key] as number | null;
-                const isBest = val != null && coteMin != null && val === coteMin;
+                const isBest = val != null && coteMax != null && val === coteMax;
                 return (
                   <div key={s.key} style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", padding: "9px 8px", fontFamily: CX.sg, fontSize: 12.5, fontWeight: isBest ? 700 : 500, textAlign: "right", color: isBest ? CX.em : val == null ? CX.muted : CX.ink2, borderTop: `1px solid ${CX.bd4}` }}>
                     {val ? formatCoteFr(val) : "—"}

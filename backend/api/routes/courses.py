@@ -85,8 +85,8 @@ class PartantOut(BaseModel):
     cote_bet365: Optional[float]              # via oddschecker (marché fixe UK)
     cote_ladbrokes: Optional[float]           # via oddschecker (LD, repli Coral)
     cote_betfair_exchange: Optional[float]    # plus efficient du marché
-    cote_min: Optional[float]                 # meilleure cote disponible
-    cote_max: Optional[float]                 # cote la plus haute
+    cote_min: Optional[float]                 # cote la plus basse (hors Geny)
+    cote_max: Optional[float]                 # meilleure cote pour le parieur (la plus haute, hors Geny)
     nb_sources: int = 0                       # nb de sources ayant coté ce partant
     # Mouvement de cote
     mouvement_cote_pct: Optional[float]       # % de variation cote ouverture → actuelle (betclic)
