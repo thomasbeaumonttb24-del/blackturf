@@ -251,8 +251,8 @@ def _surveillance(monkeypatch, db, alertes: list):
 
     import services.alerts as al
 
-    async def _envoyer(destinataire, sujet, html):
-        alertes.append((destinataire, sujet, html))
+    async def _envoyer(to, subject, html, **_kw):
+        alertes.append((to, subject, html))
         return True
 
     monkeypatch.setattr(al, "send_email", _envoyer)

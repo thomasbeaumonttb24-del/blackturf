@@ -1133,20 +1133,29 @@ async def cancel_subscription(
 
 
 async def _mails_resiliation(user: User, cancelled_via_stripe: bool) -> None:
-    from services.alerts import send_email
-    await send_email(
-        to="contact@blackturf.fr",
-        subject=f"[BlackTurf] Demande de résiliation — {user.email}",
-        html=f"<p>Demande de résiliation.</p><p>User: {user.email} ({user.user_id})</p>"
-             f"<p>Plan: {user.plan} — via Stripe: {cancelled_via_stripe}</p>",
-    )
+    from html import escape
+
+    from services.alerts import alerter_admin, send_email
+    # Résiliation faite chez Stripe : `journaliser("resiliation_demandee")` prévient
+    # déjà l'exploitant — un second mail ici faisait doublon. Seule la demande à
+    # TRAITER À LA MAIN (formule hors Stripe, ou Stripe en échec) lui est envoyée.
+    if not cancelled_via_stripe:
+        await alerter_admin(
+            f"[BlackTurf] Résiliation à traiter à la main — {user.email}",
+            "<p>Demande de résiliation à traiter sous 72 h (rien n'a été résilié chez Stripe).</p>"
+            f"<p>Compte : {escape(user.email)} ({user.user_id})<br>"
+            f"Formule : {escape(str(user.plan))}</p>",
+            to="contact@blackturf.fr", contexte="resiliation_manuelle",
+        )
     from services.email_compte import resiliation
     html, texte = resiliation(cancelled_via_stripe)
-    await send_email(
+    envoi = await send_email(
         to=user.email,
         subject="BlackTurf — Votre demande de résiliation",
         html=html, text=texte, transactionnel=True,
     )
+    if not envoi:
+        log.warning("stripe.cancel.email_client_echoue", user_id=user.user_id, raison=getattr(envoi, "erreur", None))
 
 
 @router.post("/stripe/webhook")
@@ -1421,14 +1430,13 @@ async def _handle_subscription_created(sub: dict, db: AsyncSession):
         log.error("stripe.second_abonnement_cree", user_id=user.user_id, sub=sub.get("id"),
                   existants=[d.stripe_subscription_id for d in deja])
         try:
-            from services.alerts import send_email
-            await send_email(
-                to="contact@blackturf.fr",
-                subject=f"[BlackTurf] Second abonnement créé — {user.email}",
-                html=f"<p>Nouvel abonnement {sub.get('id')} alors que "
-                     f"{', '.join(d.stripe_subscription_id or '?' for d in deja)} court déjà. "
-                     f"À vérifier (double prélèvement possible).</p>",
-                transactionnel=True,
+            from services.alerts import alerter_admin
+            await alerter_admin(
+                f"[BlackTurf] Second abonnement créé — {user.email}",
+                f"<p>Nouvel abonnement {sub.get('id')} alors que "
+                f"{', '.join(d.stripe_subscription_id or '?' for d in deja)} court déjà. "
+                f"À vérifier (double prélèvement possible).</p>",
+                to="contact@blackturf.fr", transactionnel=True, contexte="second_abonnement",
             )
         except Exception as e:  # noqa: BLE001
             log.warning("stripe.alerte_doublon_echouee", error=str(e)[:120])
@@ -1784,25 +1792,27 @@ async def _handle_payment_succeeded(invoice: dict, db: AsyncSession):
         # hébergée payée, événement dans le désordre) ne le rouvre PAS — aucun
         # abonnement Stripe vivant ne viendrait jamais retirer cet accès. Il est
         # journalisé et signalé pour remboursement.
+        # notifier=False : l'alerte « à rembourser » ci-dessous prévient déjà
+        # l'exploitant ; la notification générique « paiement reçu » faisait doublon.
         await journaliser(db, "paiement_recu", user, sub,
                           montant_cents=montant,
                           detail={"facture": invoice.get("id"),
                                   "motif": invoice.get("billing_reason"),
                                   "plan_facture": plan_facture,
                                   "abonnement_clos": True,
-                                  "a_rembourser": True})
+                                  "a_rembourser": True},
+                          notifier=False)
         await db.commit()
         log.error("stripe.paiement_sur_abonnement_clos", sub=sub_id, montant_cents=montant,
                   email=user.email)
         try:
-            from services.alerts import send_email
-            await send_email(
-                to="contact@blackturf.fr",
-                subject=f"[BlackTurf] Paiement reçu sur un abonnement clos — {user.email}",
-                html=f"<p>{montant / 100:.2f} € encaissés (facture {invoice.get('id')}) sur "
-                     f"l'abonnement clos {sub_id}. Accès NON rouvert : à rembourser ou "
-                     f"réabonner à la main.</p>",
-                transactionnel=True,
+            from services.alerts import alerter_admin
+            await alerter_admin(
+                f"[BlackTurf] Paiement reçu sur un abonnement clos — {user.email}",
+                f"<p>{montant / 100:.2f} € encaissés (facture {invoice.get('id')}) sur "
+                f"l'abonnement clos {sub_id}. Accès NON rouvert : à rembourser ou "
+                f"réabonner à la main.</p>",
+                to="contact@blackturf.fr", transactionnel=True, contexte="paiement_sur_clos",
             )
         except Exception as e:  # noqa: BLE001
             log.warning("stripe.alerte_paiement_clos_echouee", error=str(e)[:120])

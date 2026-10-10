@@ -35,7 +35,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api.middleware.rate_limit import rate_limit_public
 from db.database import get_db
 from db.models import NewsletterAbonne
-from services.alerts import send_email
+from services.alerts import _relais_smtp, send_email
+from services.journal import masquer_email
 
 log = structlog.get_logger()
 router = APIRouter()
@@ -305,6 +306,108 @@ async def resend_webhook(request: Request, db: AsyncSession = Depends(get_db)):
             row.statut = kind
             await db.commit()
     return {"ok": True}
+
+
+# ── Rebonds et plaintes des relais SMTP (Brevo, Mailjet) ─────────────────────
+# Depuis le 07/10/2026 l'éditorial part par Brevo/Mailjet, dont les rebonds
+# n'arrivaient nulle part : le webhook Resend ne reconnaît que ses propres
+# identifiants. Une adresse morte ou qui nous signale en spam continuait donc de
+# recevoir la lettre — mauvais pour la réputation d'expédition. Ces deux
+# webhooks alimentent la MÊME liste de suppression que Resend (`deliver()` ne
+# réécrit plus à une adresse `bounced` ou `complained`).
+#
+# Ni Brevo ni Mailjet ne signent leurs appels : le webhook est protégé par un
+# jeton dans l'URL, DÉRIVÉ de `secret_key` (aucun secret de plus à gérer), et il
+# ne sait faire qu'une chose : marquer une adresse comme à ne plus écrire.
+RELAIS_WEBHOOK = ("brevo", "mailjet")
+# Brevo : https://developers.brevo.com/docs/transactional-webhooks
+_BREVO = {"hard_bounce": "bounced", "invalid_email": "bounced", "blocked": "bounced",
+          "spam": "complained"}
+# Mailjet : https://dev.mailjet.com/email/guides/webhooks/ — un rebond « mou »
+# (boîte pleine, serveur indisponible) n'est pas une adresse morte.
+_MAILJET = {"blocked": "bounced", "spam": "complained"}
+
+
+def jeton_webhook_relais(fournisseur: str) -> str:
+    import hashlib
+    import hmac
+
+    from api.config import get_settings
+    cle = get_settings().secret_key.encode()
+    return hmac.new(cle, f"relais-webhook:{fournisseur}".encode(), hashlib.sha256).hexdigest()[:40]
+
+
+def evenements_relais(fournisseur: str, charge) -> list[tuple[str, str, Optional[str]]]:
+    """(adresse, statut, Message-ID) à supprimer, depuis la charge d'un webhook.
+
+    Fonction pure : Brevo envoie un objet, Mailjet un objet ou une liste.
+    """
+    sortie = []
+    for ev in charge if isinstance(charge, list) else [charge]:
+        if not isinstance(ev, dict):
+            continue
+        email = str(ev.get("email") or "").strip().lower()
+        nature = str(ev.get("event") or "")
+        if fournisseur == "brevo":
+            statut = _BREVO.get(nature)
+            msgid = ev.get("message-id") or ev.get("message_id")
+        else:
+            statut = _MAILJET.get(nature)
+            if nature == "bounce" and ev.get("hard_bounce") is True:
+                statut = "bounced"
+            msgid = None
+        if email and "@" in email and statut:
+            sortie.append((email, statut, str(msgid) if msgid else None))
+    return sortie
+
+
+@router.post("/newsletter/relais-webhook/{fournisseur}")
+async def relais_webhook(fournisseur: str, request: Request, jeton: str = Query(""),
+                         db: AsyncSession = Depends(get_db)):
+    import hashlib
+    import hmac
+    import json
+
+    from db.models import EmailLivraison
+    if fournisseur not in RELAIS_WEBHOOK:
+        raise HTTPException(404, "Inconnu")
+    if not hmac.compare_digest(jeton, jeton_webhook_relais(fournisseur)):
+        raise HTTPException(403, "Jeton invalide")
+    body = await request.body()
+    if len(body) > 262144:
+        raise HTTPException(413, "Événement trop volumineux")
+    try:
+        charge = json.loads(body or b"{}")
+    except ValueError:
+        raise HTTPException(400, "JSON invalide") from None
+    priorite = {"sent": 0, "delivered": 1, "opened": 2, "clicked": 3, "bounced": 4, "complained": 5}
+    traites = 0
+    for email, statut, msgid in evenements_relais(fournisseur, charge)[:100]:
+        row = None
+        if msgid:
+            # `provider_id` d'un envoi SMTP = « <relais>:<Message-ID> » (alerts._envoi_smtp).
+            ids = [f"{r['nom']}:{msgid}" for r in _relais_smtp()]
+            row = (await db.execute(select(EmailLivraison)
+                                    .where(EmailLivraison.provider_id.in_(ids))
+                                    .with_for_update())).scalars().first()
+        if row is None:
+            row = (await db.execute(select(EmailLivraison).where(EmailLivraison.email == email)
+                                    .order_by(EmailLivraison.created_at.desc()).limit(1)
+                                    .with_for_update())).scalar_one_or_none()
+        if row is None:
+            # Adresse jamais servie par l'éditorial (mail de compte, pronostic…) :
+            # une ligne de suppression suffit pour que `deliver()` l'écarte.
+            cle = hashlib.sha256(f"suppression:{fournisseur}:{email}".encode()).hexdigest()
+            if await db.get(EmailLivraison, cle) is None:
+                db.add(EmailLivraison(cle=cle, campagne=f"suppression-{fournisseur}", email=email,
+                                      requete={}, statut=statut))
+        elif priorite[statut] > priorite.get(row.statut, -1):
+            row.statut = statut
+        traites += 1
+        log.info("newsletter.relais_webhook.suppression", fournisseur=fournisseur, statut=statut,
+                 email=masquer_email(email))
+    await db.commit()
+    return {"ok": True, "traites": traites}
 
 
 from api.routes.auth import require_admin

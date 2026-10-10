@@ -217,7 +217,9 @@ async def journaliser(
 async def _notifier_admin(event: SubscriptionEvent) -> None:
     """E-mail de supervision à l'exploitant. Jamais bloquant."""
     try:
-        from services.alerts import send_email
+        from html import escape
+
+        from services.alerts import alerter_admin
 
         libelle = LIBELLES.get(event.type, event.type)
         explication, lignes_propres = "", []
@@ -249,18 +251,17 @@ async def _notifier_admin(event: SubscriptionEvent) -> None:
 
         corps = "".join(
             f"<tr><td style='padding:4px 12px 4px 0;color:#666;'>{k}</td>"
-            f"<td style='padding:4px 0;'><strong>{v}</strong></td></tr>"
+            f"<td style='padding:4px 0;'><strong>{escape(str(v))}</strong></td></tr>"
             for k, v in lignes
         )
-        await send_email(
-            to=settings.admin_email,
-            subject=f"[BlackTurf] {libelle} — {event.email or 'compte inconnu'}",
-            html=f"<p>{libelle}</p>"
-                 + (f"<p style='color:#444;'>{explication}</p>" if explication else "")
-                 + f"<table>{corps}</table>"
-                 f"<p style='color:#666;font-size:11px;'>"
-                 f"Suivi complet : {settings.frontend_url}/admin</p>",
-            transactionnel=True,
+        await alerter_admin(
+            f"[BlackTurf] {libelle} — {event.email or 'compte inconnu'}",
+            f"<p>{escape(libelle)}</p>"
+            + (f"<p style='color:#444;'>{escape(explication)}</p>" if explication else "")
+            + f"<table>{corps}</table>"
+            f"<p style='color:#666;font-size:11px;'>"
+            f"Suivi complet : {settings.frontend_url}/admin</p>",
+            transactionnel=True, contexte=f"mouvement.{event.type}",
         )
     except Exception as e:  # noqa: BLE001
         log.warning("abonnements.notif_admin_echouee", type=event.type,

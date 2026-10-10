@@ -161,6 +161,9 @@ async def send_email(
     #
     # On ne passe au fournisseur suivant QUE sur un refus explicite : un délai
     # dépassé est ambigu — le mail est peut-être parti — et le doubler serait pire.
+    # Toujours une partie texte : les mails d'alerte n'avaient que du HTML chez
+    # Resend (le relais SMTP, lui, la fabriquait déjà).
+    text = text or texte_depuis_html(html)
     relais = _relais_smtp()
     ordre: list[str] = []
     if transactionnel or not relais:
@@ -194,6 +197,37 @@ async def send_email(
         log.error("alerts.email.tous_echoues", to=masquer_email(to),
                   transactionnel=transactionnel, erreurs=" | ".join(erreurs)[:400])
     return ResultatEnvoi(False, (" | ".join(erreurs) or "aucun fournisseur disponible")[:400])
+
+
+def texte_depuis_html(html: str) -> str:
+    """Version texte lisible d'un corps HTML (partie `text/plain`)."""
+    import re
+    from html import unescape
+
+    text = re.sub(r"<(style|script)[^>]*>.*?</\1>", "", html, flags=re.S | re.I)
+    text = re.sub(r"<br\s*/?>|</p>|</tr>|</h\d>|</li>", "\n", text, flags=re.I)
+    text = re.sub(r"<[^>]+>", "", text)
+    return re.sub(r"\n\s*\n+", "\n\n", unescape(text)).strip()
+
+
+async def alerter_admin(subject: str, html: str, *, to: Optional[str] = None,
+                        transactionnel: bool = False, contexte: str = "") -> "ResultatEnvoi":
+    """Mail de supervision à l'exploitant, dont l'ÉCHEC se voit.
+
+    `send_email` ne lève jamais : les appelants qui faisaient `await send_email(...)`
+    dans un `try/except` croyaient attraper les pannes et n'en voyaient aucune.
+    Ici l'échec est journalisé avec sa raison et le sujet, et le résultat renvoyé.
+    `html` doit déjà être échappé pour toute valeur venant d'un tiers.
+    """
+    dest = to or settings.admin_email
+    try:
+        res = await send_email(to=dest, subject=subject, html=html, transactionnel=transactionnel)
+    except Exception as e:  # noqa: BLE001 — une alerte ne casse jamais son appelant
+        res = ResultatEnvoi(False, f"{type(e).__name__}: {e}"[:400])
+    if not res:
+        log.error("alerts.admin.echec", contexte=contexte or None, sujet=subject[:120],
+                  to=masquer_email(dest), raison=getattr(res, "erreur", None))
+    return res
 
 
 # Pause d'un fournisseur après un refus de quota : inutile de brûler un
@@ -277,7 +311,6 @@ async def _envoi_resend(to, subject, html, text, *, idempotency_key, unsubscribe
 async def _envoi_smtp(to, subject, html, text, *, unsubscribe_url, relais: dict) -> ResultatEnvoi:
     """Relais SMTP gratuit (Brevo 300/j, Mailjet 200/j…), sans abonnement."""
     import asyncio
-    import re
     import smtplib
     import ssl
     from email.message import EmailMessage
@@ -292,12 +325,7 @@ async def _envoi_smtp(to, subject, html, text, *, unsubscribe_url, relais: dict)
     if unsubscribe_url:
         msg["List-Unsubscribe"] = f"<{unsubscribe_url}>"
         msg["List-Unsubscribe-Post"] = "List-Unsubscribe=One-Click"
-    if not text:
-        text = re.sub(r"<(style|script)[^>]*>.*?</\1>", "", html, flags=re.S | re.I)
-        text = re.sub(r"<br\s*/?>|</p>|</tr>|</h\d>", "\n", text, flags=re.I)
-        text = re.sub(r"<[^>]+>", "", text)
-        text = re.sub(r"\n\s*\n+", "\n\n", text).strip()
-    msg.set_content(text)
+    msg.set_content(text or texte_depuis_html(html))
     msg.add_alternative(html, subtype="html")
 
     # Contexte TLS qui VÉRIFIE le certificat du serveur : celui de smtplib par

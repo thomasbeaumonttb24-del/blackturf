@@ -9,8 +9,12 @@ from __future__ import annotations
 
 from typing import Optional
 
+import structlog
+
 from services import email_design as D
 from services.email_design import C, INSTAGRAM, POLICE, SITE, e
+
+log = structlog.get_logger()
 
 
 def _avantages(lignes: list[tuple[str, str, str]]) -> str:
@@ -352,8 +356,10 @@ async def envoyer_confirmation_pass(user, p) -> None:
     libelle = PASSES[p.duree][2].split(" — ")[0]
     html, texte = confirmation_pass(user.prenom, libelle, p.montant_cents, p.debut, p.fin,
                                     RENONCIATION_TEXTE, p.renonciation_at)
-    await send_email(to=user.email, subject=f"BlackTurf — {libelle} confirmé",
-                     html=html, text=texte, transactionnel=True)
+    envoi = await send_email(to=user.email, subject=f"BlackTurf — {libelle} confirmé",
+                             html=html, text=texte, transactionnel=True)
+    if not envoi:
+        log.warning("passes.email_confirmation_echoue", user_id=user.user_id, raison=getattr(envoi, "erreur", None))
 
 def fin_pass(prenom: Optional[str]) -> tuple[str, str]:
     """Fin d'un pass sans renouvellement : on propose la suite, l'abonnement Expert."""
@@ -391,4 +397,7 @@ async def envoyer_fin_pass(user) -> None:
     from services.alerts import send_email
 
     html, texte = fin_pass(user.prenom)
-    await send_email(to=user.email, subject="BlackTurf — Votre pass est terminé", html=html, text=texte, transactionnel=True)
+    envoi = await send_email(to=user.email, subject="BlackTurf — Votre pass est terminé",
+                             html=html, text=texte, transactionnel=True)
+    if not envoi:
+        log.warning("passes.email_fin_echoue", user_id=user.user_id, raison=getattr(envoi, "erreur", None))

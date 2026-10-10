@@ -654,8 +654,10 @@ async def _prevenir_parrain(parrain: User, filleul: User, db: AsyncSession, repo
         situation = "reporte" if reporte else (await situation_credit(parrain, None, db))["situation"]
         html, texte = parrainage_credite(parrain.prenom, filleul.prenom,
                                          f"{settings.frontend_url}/profil#parrainage", situation)
-        await send_email(to=parrain.email, subject="BlackTurf — 5 € offerts grâce à votre parrainage",
-                         html=html, text=texte)
+        envoi = await send_email(to=parrain.email, subject="BlackTurf — 5 € offerts grâce à votre parrainage",
+                                 html=html, text=texte)
+        if not envoi:
+            log.warning("parrainage.email_echoue", parrain=parrain.user_id, error=getattr(envoi, "erreur", None))
     except Exception as e:  # noqa: BLE001
         log.warning("parrainage.email_echoue", parrain=parrain.user_id, error=str(e)[:120])
 
@@ -755,8 +757,10 @@ async def filleul_confirme(filleul: User, db: AsyncSession) -> None:
         from services.alerts import send_email
         from services.email_compte import parrainage_inscrit
         html, texte = parrainage_inscrit(parrain.prenom, filleul.prenom, f"{settings.frontend_url}/profil#parrainage")
-        await send_email(to=parrain.email, subject="BlackTurf — Un ami a rejoint BlackTurf grâce à vous",
-                         html=html, text=texte)
+        envoi = await send_email(to=parrain.email, subject="BlackTurf — Un ami a rejoint BlackTurf grâce à vous",
+                                 html=html, text=texte)
+        if not envoi:
+            log.warning("parrainage.email_inscription_echoue", filleul=filleul.user_id, error=getattr(envoi, "erreur", None))
     except Exception as e:  # noqa: BLE001
         log.warning("parrainage.email_inscription_echoue", filleul=filleul.user_id, error=str(e)[:120])
 

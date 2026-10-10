@@ -1341,10 +1341,10 @@ async def _alerter_stock_photos(jour: str) -> None:
             "<p>Chaque photo doit etre en <strong>paysage</strong> et en "
             "<strong>couleur</strong>.</p>"
         )
-        destinataire = get_settings().admin_email
-        resultat = await send_email(destinataire, sujet, html)
+        from services.alerts import alerter_admin
+        resultat = await alerter_admin(sujet, html, contexte="story.stock_photos")
         log.info("jobs.story.alerte_stock", jour=jour, restantes=restantes,
-                 destinataire=destinataire, envoye=bool(resultat))
+                 envoye=bool(resultat))
     except Exception as e:  # noqa: BLE001
         # Une alerte ratee ne doit pas empecher la story de partir.
         log.warning("jobs.story.alerte_stock_echec", jour=jour, err=str(e)[:200])
@@ -1537,22 +1537,22 @@ async def job_surveillance_story() -> None:
                   raison=(ligne or {}).get("derniere_raison"))
 
         try:
+            from html import escape as _esc
+            from services.alerts import alerter_admin
             html = (
                 f"<p>La story de bilan du <strong>{veille}</strong> n'a pas été publiée "
                 "sur Instagram. La fenêtre de publication automatique (22 h → 09 h 30) "
                 "est passée.</p>"
-                f"<p>Ce que l'API attendait encore : <code>{reste}</code><br>"
+                f"<p>Ce que l'API attendait encore : <code>{_esc(str(reste))}</code><br>"
                 f"Plans du jour : <code>{nb_plans}</code> — "
                 f"plans abandonnés (rapport PMU jamais publié) : <code>{abandonnes}</code><br>"
                 f"Tentatives d'envoi : <code>{(ligne or {}).get('nb_tentatives')}</code> — "
-                f"dernière raison : <code>{(ligne or {}).get('derniere_raison')}</code></p>"
+                f"dernière raison : <code>{_esc(str((ligne or {}).get('derniere_raison')))}</code></p>"
                 "<p>Aucune republication automatique : une story de la veille perd son "
                 "sens en journée, la décision revient à l'exploitant.</p>"
             )
-            envoye = await send_email(
-                get_settings().admin_email,
-                f"BlackTurf — story du {veille} NON publiée", html,
-            )
+            envoye = await alerter_admin(f"BlackTurf — story du {veille} NON publiée", html,
+                                         contexte="story.non_publiee")
             log.info("jobs.story.surveillance_alerte", jour=veille, envoye=bool(envoye))
         except Exception as e:  # noqa: BLE001
             log.warning("jobs.story.surveillance_alerte_echec", jour=veille, err=str(e)[:200])
@@ -1715,10 +1715,9 @@ async def _alerter_echecs_mosaique(jour: str, *, avant, raison: str | None) -> N
             "pendant le rendu ; logs du scheduler, <code>instagram.conteneur.refuse</code>, "
             "pour le corps de la réponse Meta.</p>"
         )
-        envoye = await send_email(
-            get_settings().admin_email,
-            f"BlackTurf — mosaïque du {jour} refusée 2 fois", html,
-        )
+        from services.alerts import alerter_admin
+        envoye = await alerter_admin(f"BlackTurf — mosaïque du {jour} refusée 2 fois", html,
+                                     contexte="mosaique.deux_refus")
         log.warning("jobs.mosaique.alerte_echecs", jour=jour, raison=raison[:160],
                     envoye=bool(envoye))
     except Exception as e:  # noqa: BLE001
@@ -1805,10 +1804,9 @@ async def job_surveillance_mosaique() -> None:
             + "<p>Aucune republication automatique : une tuile publiée ne se déplace "
             "plus sur la grille, la décision revient à l'exploitant.</p>"
         )
-        envoye = await send_email(
-            get_settings().admin_email,
-            f"BlackTurf — mosaïque du {jour} NON publiée", html,
-        )
+        from services.alerts import alerter_admin
+        envoye = await alerter_admin(f"BlackTurf — mosaïque du {jour} NON publiée", html,
+                                     contexte="mosaique.non_publiee")
         log.info("jobs.mosaique.surveillance_alerte", jour=jour, envoye=bool(envoye))
     except Exception as e:  # noqa: BLE001
         log.warning("jobs.mosaique.surveillance_alerte_echec", jour=jour, err=str(e)[:200])

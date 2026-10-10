@@ -83,16 +83,17 @@ async def test_double_clic_un_seul_jeu_de_mails(db, mails):
     await _abo(db, user, plan="expert", statut="active", stripe_id="sub_cancel_1")
     assert (await sr.cancel_subscription(db, user))["via_stripe"] is True
     assert (await sr.cancel_subscription(db, user))["via_stripe"] is True
-    # (admin@ reçoit en plus la notification du journal des mouvements, hors sujet)
-    assert sorted(m for m in mails if m != "admin@blackturf.fr") == sorted(
-        ["contact@blackturf.fr", user.email])
+    # L'exploitant est prévenu UNE fois, par le journal des mouvements (admin@) :
+    # le second mail à contact@ faisait doublon (audit mails 10/10/2026).
+    assert sorted(mails) == sorted(["admin@blackturf.fr", user.email])
 
 
 async def test_formule_hors_stripe_garde_la_demande_manuelle(db, mails):
     user = await _user(db, plan="expert", stripe_customer_id=None)
     res = await sr.cancel_subscription(db, user)
     assert res["via_stripe"] is False
-    assert "contact@blackturf.fr" in mails
+    # Rien n'a été résilié chez Stripe : la demande à traiter à la main part bien.
+    assert sorted(mails) == sorted(["contact@blackturf.fr", user.email])
 
 
 # ── 3. Contestation / remboursement d'un abonnement ─────────────────────────

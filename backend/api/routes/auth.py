@@ -487,8 +487,10 @@ async def _envoyer_lien_reinitialisation(user: User) -> None:
         await r.aclose()
     reset_url = f"{settings.frontend_url}/reinitialiser-mot-de-passe?token={token}"
     html, texte = reinitialisation_mot_de_passe(user.prenom, reset_url)
-    await send_email(to=user.email, subject="BlackTurf — Réinitialisation de mot de passe", html=html, text=texte,
-                     transactionnel=True)
+    envoi = await send_email(to=user.email, subject="BlackTurf — Réinitialisation de mot de passe",
+                             html=html, text=texte, transactionnel=True)
+    if not envoi:
+        log.warning("auth.forgot_password.envoi_echoue", user_id=user.user_id, raison=getattr(envoi, "erreur", None))
 
 
 @router.post("/register", response_model=RegisterResponse)
@@ -638,11 +640,13 @@ async def _prevenir_titulaire(user_id: str, email: str, prenom: Optional[str]) -
         from services.alerts import send_email
         from services.email_compte import inscription_adresse_existante
         html, texte = inscription_adresse_existante(prenom)
-        await send_email(
+        envoi = await send_email(
             to=email,
             subject="BlackTurf — Vous avez déjà un compte",
             html=html, text=texte, transactionnel=True,
         )
+        if not envoi:
+            log.warning("auth.register.avis_titulaire_echoue", user_id=user_id, error=getattr(envoi, "erreur", None))
     except Exception as e:  # noqa: BLE001
         log.warning("auth.register.avis_titulaire_echoue", user_id=user_id, error=str(e))
 

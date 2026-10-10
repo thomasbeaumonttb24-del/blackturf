@@ -13,21 +13,32 @@ set -o pipefail
 
 ENV_FILE=/opt/blackturf/.env
 DEPOT=/opt/blackturf
-ETAT=/var/lib/bt-sentinelle
-LOG=/var/log/bt-sentinelle.log
+# Surchargeables pour l'essai a blanc (dossier d'etat jetable, faux expediteur).
+ETAT=${BT_SENTINELLE_ETAT:-/var/lib/bt-sentinelle}
+LOG=${BT_SENTINELLE_LOG:-/var/log/bt-sentinelle.log}
+MAILER=${BT_MAIL_ADMIN:-/usr/local/bin/bt_mail_admin.py}
 REPETITION_S=3600
 mkdir -p "$ETAT"; chmod 700 "$ETAT"
 MAINTENANT=$(date +%s)
 ALERTES=()
+ALERTES_CLES=()
 
 journal() { echo "$(date -u '+%F %T') $*" >> "$LOG"; }
+# Echappe une valeur venue de l'exterieur (nom de processus, d'image, de fichier,
+# adresse d'un compte...) avant de l'inserer dans le HTML du mail.
+h() { printf '%s' "$*" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g'; }
+vu_fichier() { echo "$ETAT/vu_$(echo "$1" | md5sum | cut -c1-16)"; }
 alerte() { # $1 = cle (anti-repetition), $2 = message
-  local f="$ETAT/vu_$(echo "$1" | md5sum | cut -c1-16)" dernier=0
+  local f dernier=0 k
+  f=$(vu_fichier "$1")
   [ -f "$f" ] && dernier=$(cat "$f" 2>/dev/null || echo 0)
   case "$dernier" in (*[!0-9]*|"") dernier=0 ;; esac
   journal "ALERTE [$1] $2"
+  for k in "${ALERTES_CLES[@]}"; do [ "$k" = "$1" ] && return 0; done
+  # Le sujet n'est marque « vu » qu'APRES un envoi reussi (cf. Envoi) : avant le
+  # 10/10/2026 il l'etait ici, et un envoi rate taisait l'alerte pendant une heure.
   if [ $((MAINTENANT - dernier)) -ge $REPETITION_S ]; then
-    ALERTES+=("$2"); echo "$MAINTENANT" > "$f"
+    ALERTES_CLES+=("$1"); ALERTES+=("$2")
   fi
 }
 # Condition qui doit tenir 2 passages de suite (4 min) avant d'alerter : pour les
@@ -73,7 +84,7 @@ journalctl -u ssh --since "-30 min" -o short-unix --no-pager 2>/dev/null \
     echo "$cle" >> "$VUES"
     echo "$t" > "$INCONNU"
     methode=$(echo "$reste" | grep -oE "Accepted [a-z-]+" | cut -d' ' -f2)
-    echo "SSH|Connexion SSH reussie SANS cle autorisee connue (methode : <b>$methode</b>) depuis <b>$ip</b> a $(date -u -d @"$t" '+%H:%M') UTC. Ni toi, ni GitHub, ni Claude n'entrent ainsi : INTRUSION probable, couper l'acces SSH." >> "$ETAT/a_signaler"
+    echo "SSH|Connexion SSH reussie SANS cle autorisee connue (methode : <b>$(h "$methode")</b>) depuis <b>$(h "$ip")</b> a $(date -u -d @"$t" '+%H:%M') UTC. Ni toi, ni GitHub, ni Claude n'entrent ainsi : INTRUSION probable, couper l'acces SSH." >> "$ETAT/a_signaler"
   done
 tail -n 500 "$VUES" > "$VUES.tmp" && mv "$VUES.tmp" "$VUES"
 
@@ -108,10 +119,10 @@ if [ -f "$EMPREINTES" ]; then
     # cle ajoutee ou un sshd modifie est ce qu'un intrus fait pour rester.
     case "$f" in
       */authorized_keys|/etc/ssh/*)
-        echo "FICHIER_$f|Acces SSH MODIFIE : <b>$f</b>. Si ni toi ni Claude n'avez ajoute de cle ou change la config SSH a l'instant, c'est une INTRUSION." >> "$ETAT/a_signaler" ;;
+        echo "FICHIER_$f|Acces SSH MODIFIE : <b>$(h "$f")</b>. Si ni toi ni Claude n'avez ajoute de cle ou change la config SSH a l'instant, c'est une INTRUSION." >> "$ETAT/a_signaler" ;;
       *)
         if [ "$NOUS_ACTIF" = 1 ]; then silence "fichier modifie $f"; continue; fi
-        echo "FICHIER_$f|Fichier systeme sensible MODIFIE : <b>$f</b>, sans intervention connue de notre part (ou pendant une connexion suspecte)." >> "$ETAT/a_signaler" ;;
+        echo "FICHIER_$f|Fichier systeme sensible MODIFIE : <b>$(h "$f")</b>, sans intervention connue de notre part (ou pendant une connexion suspecte)." >> "$ETAT/a_signaler" ;;
     esac
   done
 fi
@@ -121,7 +132,7 @@ mv "$EMPREINTES.new" "$EMPREINTES"
 modifs=$(cd "$DEPOT" && git status --porcelain --untracked-files=no 2>/dev/null | head -5 | tr '\n' ' ')
 if [ -n "$modifs" ]; then
   if [ "$NOUS_ACTIF" = 1 ]; then silence "code modifie $modifs"
-  else alerte "code_modifie" "Code de production modifie sur le serveur hors deploiement, sans intervention connue de notre part : <b>$modifs</b>"; fi
+  else alerte "code_modifie" "Code de production modifie sur le serveur hors deploiement, sans intervention connue de notre part : <b>$(h "$modifs")</b>"; fi
 fi
 
 # ── 3. Ports en ecoute et conteneurs inattendus ─────────────────────────────
@@ -130,7 +141,7 @@ if [ -f "$ETAT/ports" ]; then
   nouveaux=$(comm -13 "$ETAT/ports" <(echo "$PORTS") | tr '\n' ' ')
   if [ -n "${nouveaux// /}" ]; then
     if [ "$NOUS_ACTIF" = 1 ]; then silence "nouveau port $nouveaux"
-    else alerte "ports_$nouveaux" "Nouveau port en ecoute sur le serveur : <b>$nouveaux</b>"; fi
+    else alerte "ports_$nouveaux" "Nouveau port en ecoute sur le serveur : <b>$(h "$nouveaux")</b>"; fi
   fi
 fi
 # Union de tout ce qui a deja ete vu : un deploiement recree db/redis, leurs ports
@@ -143,7 +154,7 @@ inconnus=$(docker ps --format '{{.Names}} {{.Image}}' \
   | grep -vE '^(gate|test|verif|tmp)' | awk '$2 !~ /^blackturf-/ {print $1}' | sort | tr '\n' ' ')
 if [ -n "${inconnus// /}" ]; then
   if [ "$NOUS_ACTIF" = 1 ]; then silence "conteneur $inconnus"
-  else alerte "conteneur_$inconnus" "Conteneur inconnu en marche (image hors BlackTurf) : <b>$inconnus</b>"; fi
+  else alerte "conteneur_$inconnus" "Conteneur inconnu en marche (image hors BlackTurf) : <b>$(h "$inconnus")</b>"; fi
 fi
 for c in api frontend worker scheduler scraper db redis nginx; do
   etat=$(docker inspect -f '{{.State.Status}}' "blackturf_$c" 2>/dev/null || echo absent)
@@ -160,7 +171,7 @@ case "$admins" in
 esac
 admins_noms=$(db "select string_agg(email, ',') from users where is_admin")
 [ -n "$admins_noms" ] && [ "$admins_noms" != "admin@blackturf.fr" ] && \
-  alerte "admin_noms_$admins_noms" "Compte admin inattendu : <b>$admins_noms</b>"
+  alerte "admin_noms_$admins_noms" "Compte admin inattendu : <b>$(h "$admins_noms")</b>"
 inscrits=$(db "select count(*) from users where created_at > now() - interval '10 minutes'")
 [ "${inscrits:-0}" -gt 25 ] 2>/dev/null && alerte "inscriptions" "Vague d'inscriptions : <b>$inscrits</b> comptes en 10 min (robots ?)."
 
@@ -227,7 +238,7 @@ if [ "$en_build" = 0 ] && [ "$charge" -gt $((coeurs * 3)) ]; then n=$((n + 1)); 
 echo "$n" > "$ETAT/charge_n"
 if [ "$n" -ge 5 ]; then
   proc=$(ps -eo pcpu,comm --sort=-pcpu | sed -n 2,4p | tr -s ' ' | tr '\n' ';')
-  alerte "charge" "Serveur sature depuis 10 min (hors deploiement) : charge <b>$charge</b> pour $coeurs coeurs. Processus en tete : $proc"
+  alerte "charge" "Serveur sature depuis 10 min (hors deploiement) : charge <b>$charge</b> pour $coeurs coeurs. Processus en tete : $(h "$proc")"
 fi
 
 # ── Envoi ───────────────────────────────────────────────────────────────────
@@ -237,20 +248,21 @@ if [ -f "$ETAT/a_signaler" ]; then
 fi
 [ ${#ALERTES[@]} -eq 0 ] && exit 0
 
-cle=$(grep -m1 '^RESEND_API_KEY=' "$ENV_FILE" | cut -d= -f2- | tr -d "\"'\r")
-dest=$(grep -m1 '^ADMIN_EMAIL=' "$ENV_FILE" | cut -d= -f2- | tr -d "\"'\r")
-exped=$(grep -m1 '^EMAIL_FROM=' "$ENV_FILE" | cut -d= -f2- | tr -d "\"'\r")
 corps=""; for a in "${ALERTES[@]}"; do corps="$corps<li>$a</li>"; done
-charge_json=$(EXPED="$exped" DEST="$dest" CORPS="$corps" N="${#ALERTES[@]}" python3 -c '
-import json, os
-print(json.dumps({
-  "from": os.environ["EXPED"] or "alerte@blackturf.fr",
-  "to": [os.environ["DEST"]],
-  "subject": "[BlackTurf] ALERTE SECURITE (" + os.environ["N"] + ")",
-  "html": "<h3>Sentinelle de securite BlackTurf</h3><ul>" + os.environ["CORPS"] + "</ul>"
-          "<p style=\"color:#666\">Verifiee toutes les 2 min, chaque sujet au plus une fois par heure. "
-          "Journal : /var/log/bt-sentinelle.log sur le serveur.</p>",
-}))')
-code=$(curl -s -o /tmp/bt_sentinelle_resend.out -w '%{http_code}' -X POST https://api.resend.com/emails \
-  -H "Authorization: Bearer ${cle}" -H "Content-Type: application/json" -d "$charge_json")
-journal "e-mail -> $dest : HTTP $code (${#ALERTES[@]} alerte(s))"
+html="<h3>Sentinelle de securite BlackTurf</h3><ul>$corps</ul>"
+html="$html<p style=\"color:#666\">Verifiee toutes les 2 min, chaque sujet au plus une fois par heure. "
+html="${html}Journal : /var/log/bt-sentinelle.log sur le serveur.</p>"
+# Resend, puis les relais SMTP gratuits (bt_mail_admin.py) : avec Resend seul, un
+# quota sature (07/10/2026) aurait perdu une alerte d'intrusion sans un mot.
+if res=$(printf '%s' "$html" | "$MAILER" "[BlackTurf] ALERTE SECURITE (${#ALERTES[@]})" 2>&1); then
+  for k in "${ALERTES_CLES[@]}"; do echo "$MAINTENANT" > "$(vu_fichier "$k")"; done
+  journal "e-mail -> admin : $res (${#ALERTES[@]} alerte(s))"
+else
+  # Rien n'est marque vu : les alertes repartent en file et seront retentees au
+  # passage suivant (2 min), y compris celles d'un evenement ponctuel (SSH...).
+  for i in "${!ALERTES_CLES[@]}"; do
+    printf '%s|%s\n' "${ALERTES_CLES[$i]}" "${ALERTES[$i]}" >> "$ETAT/a_signaler"
+  done
+  journal "e-mail NON parti, nouvel essai dans 2 min : $res"
+  exit 1
+fi
