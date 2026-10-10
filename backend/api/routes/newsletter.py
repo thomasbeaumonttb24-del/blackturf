@@ -319,7 +319,20 @@ async def resend_webhook(request: Request, db: AsyncSession = Depends(get_db)):
 # Ni Brevo ni Mailjet ne signent leurs appels : le webhook est protégé par un
 # jeton dans l'URL, DÉRIVÉ de `secret_key` (aucun secret de plus à gérer), et il
 # ne sait faire qu'une chose : marquer une adresse comme à ne plus écrire.
+# Brevo est AUSSI reconnu à son adresse d'origine (plages publiées par Brevo :
+# https://help.brevo.com/hc/en-us/articles/15127404548498) : son webhook se
+# déclare dans le tableau de bord, où l'URL ne doit pas porter de secret.
 RELAIS_WEBHOOK = ("brevo", "mailjet")
+RESEAUX_BREVO = ("1.179.112.0/20", "172.246.240.0/20")
+
+
+def ip_brevo(ip: str) -> bool:
+    import ipaddress
+    try:
+        adresse = ipaddress.ip_address(ip)
+    except ValueError:
+        return False
+    return any(adresse in ipaddress.ip_network(r) for r in RESEAUX_BREVO)
 # Brevo : https://developers.brevo.com/docs/transactional-webhooks
 _BREVO = {"hard_bounce": "bounced", "invalid_email": "bounced", "blocked": "bounced",
           "spam": "complained"}
@@ -371,7 +384,13 @@ async def relais_webhook(fournisseur: str, request: Request, jeton: str = Query(
     from db.models import EmailLivraison
     if fournisseur not in RELAIS_WEBHOOK:
         raise HTTPException(404, "Inconnu")
-    if not hmac.compare_digest(jeton, jeton_webhook_relais(fournisseur)):
+    from api.middleware.throttle import _client_ip
+    autorise = hmac.compare_digest(jeton, jeton_webhook_relais(fournisseur))
+    if not autorise and fournisseur == "brevo":
+        autorise = ip_brevo(_client_ip(request))
+    if not autorise:
+        log.warning("newsletter.relais_webhook.refuse", fournisseur=fournisseur,
+                    ip=_client_ip(request), jeton_present=bool(jeton))
         raise HTTPException(403, "Jeton invalide")
     body = await request.body()
     if len(body) > 262144:

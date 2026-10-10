@@ -108,6 +108,21 @@ async def test_webhook_relais_exige_le_jeton(client):
 
 
 @pytest.mark.asyncio
+async def test_brevo_reconnu_a_ses_ip_sans_jeton_mailjet_non(client, db):
+    ev = {"event": "hard_bounce", "email": "ip@x.fr"}
+    brevo = "/api/v1/newsletter/relais-webhook/brevo"
+    assert (await client.post(brevo, json=ev, headers={"X-Real-IP": "1.179.115.7"})).status_code == 200
+    assert (await client.post(brevo, json=ev, headers={"X-Real-IP": "172.246.255.255"})).status_code == 200
+    assert (await client.post(brevo, json=ev, headers={"X-Real-IP": "1.179.128.0"})).status_code == 403
+    assert (await client.post(brevo, json=ev, headers={"X-Real-IP": "pas-une-ip"})).status_code == 403
+    # L'exemption d'IP ne vaut que pour Brevo.
+    mj = "/api/v1/newsletter/relais-webhook/mailjet"
+    assert (await client.post(mj, json=[ev], headers={"X-Real-IP": "1.179.115.7"})).status_code == 403
+    rows = (await db.execute(select(EmailLivraison).where(EmailLivraison.email == "ip@x.fr"))).scalars().all()
+    assert [r.statut for r in rows] == ["bounced"]
+
+
+@pytest.mark.asyncio
 async def test_rebond_brevo_supprime_l_adresse_pour_l_editorial(client, db, monkeypatch):
     from api.routes.newsletter import jeton_webhook_relais
     monkeypatch.setattr(alerts.settings, "smtp_host", "smtp-relay.brevo.com")
