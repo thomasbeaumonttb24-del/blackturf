@@ -199,7 +199,9 @@ async def envoyer_alertes_strategies(session, now: Optional[datetime] = None) ->
         sujet = f"BlackTurf — {n} signal{'aux' if n > 1 else ''} pour vos stratégies"
         # Campagne propre à CET ensemble de signaux : une reprise ne double rien,
         # et un nouvel ensemble plus tard fait un nouvel e-mail.
-        empreinte = hashlib.sha256("|".join(sorted(cles)).encode()).hexdigest()[:20]
+        # 16 car. : « strategie- » (10) + UUID (36) + « - » + 16 = 63 ≤ String(64) de
+        # email_livraisons.campagne (à 20, 67 car. : INSERT refusé, aucun e-mail parti).
+        empreinte = hashlib.sha256("|".join(sorted(cles)).encode()).hexdigest()[:16]
         oneclick = f"{SITE}/api/v1/newsletter/desabonnement-compte?jeton={make_unsubscribe_token(user_id)}"
         if await deliver(session, f"strategie-{user_id}-{empreinte}", user.email, sujet, html, texte,
                          oneclick, now, journal={"signal_keys": cles, "nb": n}):

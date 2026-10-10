@@ -571,6 +571,12 @@ TRACK_RECORD_FRESH_TTL = 3600   # 1 h de fraîcheur
 # `:fresh` en finissant et masquerait la nouvelle course ; `:dirty`, lui, n'est
 # effacé qu'au DÉBUT d'un calcul, donc une course arrivée pendant reste en attente.
 TRACK_RECORD_DIRTY_KEY = f"{TRACK_RECORD_CACHE_KEY}:dirty"
+# Pause après chaque recalcul : un samedi chargé, une course arrive toutes les 3 min
+# et le calcul dure 2,5 à 4 min sous charge (10/10/2026 : 22 recalculs à l'heure,
+# base à 100 % CPU en continu, serveur saturé). Les courses arrivées pendant la
+# pause restent en `:dirty` et sont prises au recalcul suivant.
+TRACK_RECORD_PAUSE_KEY = f"{TRACK_RECORD_CACHE_KEY}:pause"
+TRACK_RECORD_PAUSE_S = 900
 
 # Références fortes sur les tâches de fond : sans ça, asyncio peut collecter une
 # tâche non référencée avant sa fin (le recalcul serait tué en cours de route).
@@ -638,6 +644,10 @@ async def refresh_track_record_cache() -> bool:
             result = await _compute_track_record(session)
         await _cache_set_swr(redis, TRACK_RECORD_CACHE_KEY, result,
                              fresh_ttl=TRACK_RECORD_FRESH_TTL)
+        try:
+            await redis.set(TRACK_RECORD_PAUSE_KEY, "1", ex=TRACK_RECORD_PAUSE_S)
+        except Exception:
+            pass
         log.info("stats.track_record.refreshed")
         return True
     except Exception as e:
@@ -654,26 +664,29 @@ async def marquer_track_record_perime() -> None:
     """Signale qu'une course vient d'être journalisée (race_learning_log).
 
     Appelé depuis le worker RQ, qui meurt avec son job : on n'y lance donc pas le
-    calcul (~29 s), on pose seulement les drapeaux. La version en cache reste servie
-    (SWR) jusqu'au recalcul par `job_track_record_a_jour`, dans la minute."""
+    calcul (~29 s), on pose seulement `:dirty`. La version en cache reste servie
+    comme fraîche jusqu'au recalcul par `job_track_record_a_jour`, au plus tard à la
+    fin de la pause (`TRACK_RECORD_PAUSE_S`). `:fresh` n'est plus effacé : chaque
+    visiteur aurait sinon relancé le calcul en arrière-plan, pause ou pas."""
     from db.redis_client import get_redis as _get_redis
     try:
         redis = await _get_redis()
         await redis.set(TRACK_RECORD_DIRTY_KEY, "1", ex=_SWR_STALE_TTL)
-        await redis.delete(f"{TRACK_RECORD_CACHE_KEY}:fresh")
     except Exception as e:
         log.warning("stats.track_record.mark_stale_failed", error=str(e)[:200])
 
 
 async def track_record_a_recalculer() -> bool:
-    """Vrai si une course a été intégrée depuis le dernier calcul, ou si le cache
-    n'est plus frais."""
+    """Vrai si le cache n'est plus frais, ou si une course a été intégrée depuis le
+    dernier calcul et que la pause qui le suit est écoulée."""
     from db.redis_client import get_redis as _get_redis
     try:
         redis = await _get_redis()
-        if await redis.exists(TRACK_RECORD_DIRTY_KEY):
+        if not await redis.exists(f"{TRACK_RECORD_CACHE_KEY}:fresh"):
             return True
-        return not await redis.exists(f"{TRACK_RECORD_CACHE_KEY}:fresh")
+        if await redis.exists(TRACK_RECORD_PAUSE_KEY):
+            return False
+        return bool(await redis.exists(TRACK_RECORD_DIRTY_KEY))
     except Exception:
         return False
 

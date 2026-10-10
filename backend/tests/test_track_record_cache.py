@@ -181,7 +181,8 @@ async def test_course_integree_rend_le_palmares_a_recalculer(monkeypatch):
 
     await stats_mod.marquer_track_record_perime()
     assert await stats_mod.track_record_a_recalculer() is True
-    assert await _cache_get_swr(r, TRACK_RECORD_CACHE_KEY) == ({"v": 1}, False)
+    # Servie comme fraîche : un visiteur ne relance pas le calcul lui-même.
+    assert await _cache_get_swr(r, TRACK_RECORD_CACHE_KEY) == ({"v": 1}, True)
 
 
 async def test_recalcul_efface_le_drapeau_puis_reste_a_jour(monkeypatch):
@@ -236,6 +237,29 @@ async def test_course_arrivee_pendant_le_calcul_n_est_pas_perdue(monkeypatch):
 
     monkeypatch.setattr(stats_mod, "_compute_track_record", _calcul)
     assert await refresh_track_record_cache() is True
+    # Pas tout de suite (pause), mais dès la fin de la pause.
+    assert await stats_mod.track_record_a_recalculer() is False
+    r.store.pop(stats_mod.TRACK_RECORD_PAUSE_KEY)
+    assert await stats_mod.track_record_a_recalculer() is True
+
+
+async def test_pause_apres_recalcul_sauf_si_cache_plus_frais(monkeypatch):
+    """Samedi 10/10/2026 : une course toutes les 3 min, un calcul de 2,5 à 4 min
+    sous charge → recalcul en continu, base à 100 %, serveur saturé. Après un
+    recalcul, les courses qui arrivent attendent la fin de la pause ; un cache
+    qui n'est plus frais (> 1 h) est recalculé quand même."""
+    r = FauxRedis()
+    await _cache_set_swr(r, TRACK_RECORD_CACHE_KEY, {"v": 1}, fresh_ttl=3600)
+    r.store[stats_mod.TRACK_RECORD_PAUSE_KEY] = "1"
+
+    async def _get_redis():
+        return r
+
+    monkeypatch.setattr("db.redis_client.get_redis", _get_redis)
+    await stats_mod.marquer_track_record_perime()
+    assert await stats_mod.track_record_a_recalculer() is False
+
+    r.expirer_fraicheur()
     assert await stats_mod.track_record_a_recalculer() is True
 
 
