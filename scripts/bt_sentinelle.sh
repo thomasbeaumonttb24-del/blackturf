@@ -174,7 +174,23 @@ top_n=$(echo "$top" | awk '{print $1+0}'); top_ip=$(echo "$top" | awk '{print $2
 [ "$total" -gt 4000 ] && alerte "inondation" "Trafic anormal : <b>$total requetes en 5 min</b> (normal : ~250). Attaque par saturation possible."
 [ "${top_n:-0}" -gt 800 ] && alerte "ip_$top_ip" "Une seule IP martele le site : <b>$top_ip</b>, $top_n requetes en 5 min."
 [ "$login_ko" -gt 40 ] && alerte "force_brute" "Force brute sur la connexion : <b>$login_ko echecs</b> en 5 min."
-if deux_fois "5xx" "$([ "$e5xx" -gt 25 ] && echo 1 || echo 0)"; then
+# Un deploiement recree le frontend : quelques secondes de 502 nginx, qui restent
+# 5 min dans la fenetre ci-dessus (10/10/2026 : deux deploiements rapproches =
+# « 61 erreurs 5xx, deux passages »). Tant qu'un deploiement tient le verrou ou
+# qu'un conteneur web a ete CREE il y a moins de 6 min, les 5xx ne comptent pas ;
+# s'ils persistent au-dela, deux passages suffisent a alerter. `Created` et non
+# `StartedAt` : un conteneur qui redemarre en boucle ne prolonge pas la fenetre.
+deploi_recent=0
+flock -n /tmp/blackturf-deploy.lock true 2>/dev/null || deploi_recent=1
+for c in frontend api nginx; do
+  cree=$(docker inspect -f '{{.Created}}' "blackturf_$c" 2>/dev/null) || continue
+  cree=$(date -d "$cree" +%s 2>/dev/null) || continue
+  [ $((MAINTENANT - cree)) -lt 360 ] && deploi_recent=1
+done
+if [ "$deploi_recent" = 1 ]; then
+  [ "$e5xx" -gt 25 ] && journal "5xx ignores (deploiement < 6 min) : $e5xx en 5 min"
+  deux_fois "5xx" 0
+elif deux_fois "5xx" "$([ "$e5xx" -gt 25 ] && echo 1 || echo 0)"; then
   alerte "5xx" "Le site renvoie des erreurs serveur : <b>$e5xx erreurs 5xx</b> en 5 min, deux passages de suite."
 fi
 
