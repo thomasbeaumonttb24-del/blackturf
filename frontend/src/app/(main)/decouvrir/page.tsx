@@ -1,36 +1,26 @@
 import type { Metadata } from "next";
+import Image from "next/image";
 import Link from "next/link";
-import {
-  ArrowRight,
-  BarChart3,
-  Check,
-  Crown,
-  ListOrdered,
-  Search,
-  ShieldCheck,
-  Trophy,
-  Wallet,
-} from "lucide-react";
+import { ArrowRight, Check, Crown } from "lucide-react";
 import { fetchTrackRecord } from "@/lib/seo";
-import { SeoHero, Container, Section, Chip } from "@/components/seo/kit";
 
 /**
  * Page d'arrivée des réseaux sociaux (lien de la bio TikTok, Instagram, Facebook).
  *
- * Le visiteur arrive d'une vidéo qui parlait de courses, pas du site : il ne sait pas ce
- * qu'est BlackTurf. L'accueil lui parle comme à un habitué ; ici, on explique en trois
- * écrans ce que fait le site, on montre les chiffres mesurés, puis on déroule l'échelle
- * gratuit → Pass Jour → Expert. Les vidéos elles-mêmes ne peuvent pas vendre (TikTok
- * interdit la promotion des services de paris) : c'est cette page qui convertit.
+ * Le visiteur arrive d'une vidéo qui parlait de courses, pas du site. Les vidéos ne
+ * peuvent pas vendre (TikTok interdit la promotion des services de paris) : c'est cette
+ * page qui convertit. Elle se lit comme une vidéo, en images et en chiffres, presque
+ * sans texte : vrais écrans du site, chiffres mesurés, puis gratuit → Pass Jour → Expert.
  *
  * Hors index : page de campagne, son contenu double l'accueil et /tarifs.
- * Chiffres lus dans l'API, jamais écrits en dur.
+ * Chiffres lus dans l'API, jamais écrits en dur ; un bloc disparaît plutôt que
+ * d'afficher un zéro.
  */
 export const revalidate = 900;
 
-const TITLE = "Découvrir BlackTurf : l'analyse de chaque course PMU";
+const TITLE = "Découvrir BlackTurf : chaque course PMU en chiffres";
 const DESCRIPTION =
-  "Ce que fait BlackTurf, en 2 minutes : probabilité par cheval, classement de l'algorithme, plan de mise adapté à ton budget et résultats publiés.";
+  "BlackTurf en 30 secondes : les chances de chaque cheval, le classement de l'algorithme et un plan de mise à ton budget.";
 
 export const metadata: Metadata = {
   title: TITLE,
@@ -39,259 +29,170 @@ export const metadata: Metadata = {
   robots: { index: false, follow: true },
 };
 
-const nb = (v: number | null | undefined) => (v == null ? "—" : v.toLocaleString("fr-FR"));
-const pct = (v: number | null | undefined) =>
-  v == null ? "—" : `${v.toLocaleString("fr-FR", { maximumFractionDigits: 1 })} %`;
+const nb = (v: number) => v.toLocaleString("fr-FR");
+const pct = (v: number) => `${v.toLocaleString("fr-FR", { maximumFractionDigits: 0 })} %`;
 
 const INSCRIPTION = `/inscription?suite=${encodeURIComponent("/programme")}`;
 
-const OUTILS = [
-  {
-    icon: BarChart3,
-    t: "Une probabilité par cheval",
-    d: "Chaque partant reçoit ses chances de victoire en %, et la cote juste qui en découle, à comparer avec la cote du PMU.",
-  },
-  {
-    icon: ListOrdered,
-    t: "Le classement de l'algorithme",
-    d: "La course rangée du plus probable au moins probable, avec la forme, le terrain, le jockey et l'entraîneur qui pèsent.",
-  },
-  {
-    icon: Wallet,
-    t: "Un plan de mise à ton budget",
-    d: "Tu donnes ton montant, le site le répartit selon ton profil : Prudent, Modéré ou Risqué. Le plan est figé avant le départ.",
-  },
-  {
-    icon: Search,
-    t: "Toutes les fiches",
-    d: "Chevaux, jockeys, entraîneurs, hippodromes : l'historique et les statistiques derrière chaque course.",
-  },
-];
-
-const ETAPES = [
-  { n: "1", t: "Ouvre le programme du jour", d: "Toutes les réunions PMU, trot et galop, mises à jour en continu." },
-  { n: "2", t: "Lis le classement et les chances", d: "En un coup d'œil : qui l'algorithme voit devant, et à quel point." },
-  { n: "3", t: "Applique le plan, ou pas", d: "Tu restes maître de ta décision. Le site te donne les chiffres pour la prendre." },
+const ECRANS = [
+  { src: "/img/decouvrir/synthese.webp", t: "La course en un coup d'œil", alt: "Synthèse d'une course : favori de l'algorithme à 50 %, accord des modèles 76/100" },
+  { src: "/img/decouvrir/classement.webp", t: "Les chances de chaque cheval", alt: "Fiche partant : 50 % de chances de victoire, 78 % dans les 3 premiers, cote et cote juste" },
+  { src: "/img/decouvrir/plan.webp", t: "Un plan à ton budget", alt: "Plan de mise de 10 € figé avant le départ, profils Prudent, Modéré, Risqué" },
 ];
 
 const FORMULES = [
-  {
-    nom: "Gratuit",
-    prix: "0 €",
-    sous: "pour toujours",
-    pour: "Pour découvrir",
-    points: [
-      "Programme et cotes en direct",
-      "Classement complet : 1 course par jour",
-      "Plan de mise sur cette course",
-      "Défi du mois : 30 jours Expert à gagner",
-    ],
-    cta: "Créer mon compte gratuit",
-    href: INSCRIPTION,
-    fort: false,
-  },
-  {
-    nom: "Pass Jour",
-    prix: "5 €",
-    sous: "24 h, sans abonnement",
-    pour: "Pour tout tester une journée",
-    points: [
-      "Accès Expert complet pendant 24 h",
-      "Payé une fois, rien ne se renouvelle",
-      "Idéal un jour de Quinté+",
-    ],
-    cta: "Prendre le Pass Jour",
-    href: "/tarifs#passes",
-    fort: false,
-  },
-  {
-    nom: "Expert",
-    prix: "19 €",
-    sous: "par mois, sans engagement",
-    pour: "Pour suivre toutes les courses",
-    points: [
-      "Classement et plan de mise illimités",
-      "Paris de valeur en temps réel",
-      "Argent pro détecté sur le marché",
-      "Assistant IA et créateur de stratégies",
-      "Alertes e-mail et notifications",
-    ],
-    cta: "Passer Expert",
-    href: "/tarifs",
-    fort: true,
-  },
+  { nom: "Gratuit", prix: "0 €", sous: "pour toujours", points: ["Programme + cotes en direct", "1 course analysée / jour", "Défi du mois"], cta: "Créer mon compte", href: INSCRIPTION, fort: false },
+  { nom: "Pass Jour", prix: "5 €", sous: "24 h · sans abonnement", points: ["Tout débloqué 24 h", "Rien ne se renouvelle", "Parfait un jour de Quinté+"], cta: "Tester 24 h", href: "/tarifs#passes", fort: false },
+  { nom: "Expert", prix: "19 €", sous: "/ mois · sans engagement", points: ["Toutes les courses, sans limite", "Paris de valeur en direct", "Assistant IA + alertes"], cta: "Passer Expert", href: "/tarifs", fort: true },
 ];
+
+function Telephone({ src, alt, priority = false }: { src: string; alt: string; priority?: boolean }) {
+  return (
+    <div className="mx-auto w-[220px] shrink-0 rounded-[2.2rem] bg-stone-900 p-2 shadow-[0_30px_60px_-20px_rgba(0,0,0,.45)] ring-1 ring-stone-700 sm:w-[240px]">
+      <div className="relative overflow-hidden rounded-[1.7rem] bg-white">
+        <div className="absolute left-1/2 top-2 z-10 h-5 w-20 -translate-x-1/2 rounded-full bg-stone-900" aria-hidden />
+        <Image src={src} alt={alt} width={560} height={774} priority={priority} className="h-auto w-full" />
+      </div>
+    </div>
+  );
+}
 
 export default async function DecouvrirPage() {
   const tr = await fetchTrackRecord();
   const g = tr?.global;
+  const mesure = g && g.nb_courses_analysees > 0 && g.accuracy_top3 != null && g.hasard_top3 != null;
+
+  const chiffres = mesure
+    ? [
+        { v: nb(g.nb_courses_analysees), l: "courses analysées" },
+        { v: pct(g.accuracy_top3), l: `n°1 de l'algo dans le top 3 (hasard ${pct(g.hasard_top3)})` },
+        { v: "Chaque nuit", l: "le modèle réapprend" },
+        { v: "100 %", l: "des résultats publiés" },
+      ]
+    : [];
 
   return (
-    <>
-      <SeoHero
-        eyebrow="Tu viens de nos vidéos ?"
-        title="Chaque course PMU,"
-        accent="décortiquée en chiffres"
-        lead="BlackTurf fait pour chaque course ce que nos vidéos font pour un sujet : il lit les données, calcule les chances de chaque cheval et te montre le résultat en clair. Voici le site en 2 minutes."
-        chips={
-          <>
-            {g && g.nb_courses_analysees > 0 && <Chip tone="gold">{nb(g.nb_courses_analysees)} courses analysées</Chip>}
-            <Chip>Modèle réentraîné chaque nuit</Chip>
-            <Chip>Résultats publiés, pertes comprises</Chip>
-          </>
-        }
-      >
-        <div className="mt-7 flex flex-col gap-3 sm:flex-row">
-          <Link
-            href={INSCRIPTION}
-            className="btn-shimmer inline-flex items-center justify-center gap-1.5 rounded-xl bg-gradient-gold px-5 py-3 text-sm font-semibold text-brand-dark shadow-sm transition-transform hover:scale-[1.02]"
-          >
-            Créer mon compte gratuit <ArrowRight className="h-4 w-4" />
-          </Link>
-          <Link
-            href="/tarifs"
-            className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-amber-200 bg-white px-5 py-3 text-sm font-semibold text-brand-dark transition-colors hover:bg-amber-50"
-          >
-            Voir les formules
-          </Link>
+    <div className="bg-[#fbf8f2]">
+      {/* Accroche */}
+      <section className="relative overflow-hidden bg-gradient-to-br from-stone-950 via-stone-900 to-emerald-950 text-white">
+        <div className="mx-auto grid max-w-5xl items-center gap-10 px-4 py-12 sm:py-16 md:grid-cols-[1.1fr_1fr]">
+          <div>
+            <span className="inline-flex rounded-full bg-amber-400/15 px-3 py-1 text-xs font-semibold uppercase tracking-wider text-amber-300 ring-1 ring-amber-400/30">
+              Tu viens de nos vidéos ?
+            </span>
+            <h1 className="mt-5 font-display text-4xl font-bold leading-[1.05] tracking-tight sm:text-5xl">
+              Chaque course PMU,
+              <br />
+              <span className="bg-gradient-to-r from-amber-200 to-amber-500 bg-clip-text text-transparent">en chiffres.</span>
+            </h1>
+            <p className="mt-4 max-w-md text-base text-stone-300">Les chances de chaque cheval. Un plan à ton budget. Tout vérifié.</p>
+            <div className="mt-7 flex flex-col gap-3 sm:flex-row">
+              <Link
+                href={INSCRIPTION}
+                className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-gradient-to-b from-amber-300 to-amber-500 px-6 py-3.5 text-base font-bold text-stone-900 shadow-lg transition-transform hover:scale-[1.02]"
+              >
+                Essayer gratuitement <ArrowRight className="h-5 w-5" />
+              </Link>
+              <Link
+                href="/tarifs"
+                className="inline-flex items-center justify-center rounded-xl px-6 py-3.5 text-base font-semibold text-white ring-1 ring-white/25 hover:bg-white/10"
+              >
+                Voir les prix
+              </Link>
+            </div>
+            <p className="mt-3 text-xs text-stone-400">Sans carte bancaire · 18 ans et plus</p>
+          </div>
+          <Telephone src={ECRANS[0].src} alt={ECRANS[0].alt} priority />
         </div>
-        <p className="mt-3 text-xs text-brand-charcoal">Gratuit, sans carte bancaire. 18 ans et plus.</p>
-      </SeoHero>
+      </section>
 
-      <Container>
-        <Section title="Ce que tu trouves sur le site">
-          <div className="grid gap-3 sm:grid-cols-2">
-            {OUTILS.map((o) => (
-              <div key={o.t} className="rounded-xl border border-gray-200 bg-white p-4">
-                <o.icon className="h-5 w-5 text-brand-gold-dark" aria-hidden />
-                <h3 className="mt-2 font-display text-[15px] font-semibold text-brand-dark">{o.t}</h3>
-                <p className="mt-1 text-sm leading-relaxed text-brand-charcoal">{o.d}</p>
+      {/* Chiffres clés */}
+      {mesure && (
+        <section className="border-b border-amber-100 bg-white">
+          <div className="mx-auto grid max-w-5xl grid-cols-2 gap-px bg-amber-100 md:grid-cols-4">
+            {chiffres.map((c) => (
+              <div key={c.l} className="bg-white px-4 py-7 text-center">
+                <div className="font-display text-3xl font-bold text-brand-dark sm:text-4xl">{c.v}</div>
+                <div className="mt-1 text-xs leading-snug text-brand-charcoal sm:text-sm">{c.l}</div>
               </div>
             ))}
           </div>
-        </Section>
+        </section>
+      )}
 
-        <Section title="Comment ça marche">
-          <ol className="grid gap-3 sm:grid-cols-3">
-            {ETAPES.map((e) => (
-              <li key={e.n} className="rounded-xl border border-gray-200 bg-white p-4">
-                <span className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-gold font-display text-sm font-bold text-brand-dark">
-                  {e.n}
+      {/* Le site en 3 écrans */}
+      <section className="mx-auto max-w-5xl px-4 py-14">
+        <h2 className="text-center font-display text-2xl font-bold text-brand-dark sm:text-3xl">Le site en 3 écrans</h2>
+        <div className="-mx-4 mt-8 flex snap-x snap-mandatory gap-6 overflow-x-auto px-4 pb-4 md:mx-0 md:grid md:grid-cols-3 md:overflow-visible md:px-0">
+          {ECRANS.map((e, i) => (
+            <figure key={e.src} className="snap-center">
+              <Telephone src={e.src} alt={e.alt} />
+              <figcaption className="mt-4 flex items-center justify-center gap-2 font-display text-base font-semibold text-brand-dark">
+                <span className="flex h-7 w-7 items-center justify-center rounded-full bg-gradient-to-b from-amber-300 to-amber-500 text-sm font-bold text-stone-900">
+                  {i + 1}
                 </span>
-                <h3 className="mt-3 font-display text-[15px] font-semibold text-brand-dark">{e.t}</h3>
-                <p className="mt-1 text-sm leading-relaxed text-brand-charcoal">{e.d}</p>
-              </li>
-            ))}
-          </ol>
-        </Section>
+                {e.t}
+              </figcaption>
+            </figure>
+          ))}
+        </div>
+        <p className="mt-2 text-center text-xs text-brand-charcoal">Écrans réels d&apos;une course du 3 octobre 2026.</p>
+      </section>
 
-        {g && g.nb_courses_analysees > 0 && g.accuracy_top3 != null && (
-          <Section title="Les chiffres, sans maquillage">
-            <div className="grid gap-3 sm:grid-cols-3">
-              <div className="rounded-xl border border-amber-200 bg-amber-50/60 p-4">
-                <div className="font-display text-3xl font-bold text-brand-dark">{pct(g.accuracy_top3)}</div>
-                <p className="mt-1 text-sm text-brand-charcoal">
-                  des courses : le n°1 de l&apos;algorithme finit dans les 3 premiers (hasard : {pct(g.hasard_top3)}).
-                </p>
+      {/* Formules */}
+      <section className="mx-auto max-w-5xl px-4 pb-14">
+        <h2 className="text-center font-display text-2xl font-bold text-brand-dark sm:text-3xl">Commence gratuit. Débloque tout quand tu veux.</h2>
+        <div className="mt-8 grid gap-4 md:grid-cols-3 md:items-center">
+          {FORMULES.map((f) => (
+            <div
+              key={f.nom}
+              className={
+                f.fort
+                  ? "relative rounded-3xl bg-gradient-to-br from-stone-900 via-stone-900 to-emerald-950 p-6 text-white ring-2 ring-amber-400/70 md:scale-[1.04]"
+                  : "rounded-3xl border border-gray-200 bg-white p-6"
+              }
+            >
+              {f.fort && (
+                <span className="absolute -top-3 left-6 inline-flex items-center gap-1 rounded-full bg-gradient-to-b from-amber-300 to-amber-500 px-3 py-1 text-xs font-bold text-stone-900">
+                  <Crown className="h-3 w-3" /> Le plus complet
+                </span>
+              )}
+              <div className={`text-sm font-semibold ${f.fort ? "text-amber-300" : "text-brand-gold-dark"}`}>{f.nom}</div>
+              <div className="mt-1 flex items-baseline gap-1.5">
+                <span className="font-display text-5xl font-extrabold">{f.prix}</span>
+                <span className={`text-xs ${f.fort ? "text-stone-300" : "text-brand-charcoal"}`}>{f.sous}</span>
               </div>
-              <div className="rounded-xl border border-gray-200 bg-white p-4">
-                <div className="font-display text-3xl font-bold text-brand-dark">{nb(g.nb_courses_analysees)}</div>
-                <p className="mt-1 text-sm text-brand-charcoal">courses mesurées, chacune comparée à l&apos;arrivée officielle.</p>
-              </div>
-              <div className="rounded-xl border border-gray-200 bg-white p-4">
-                <div className="font-display text-3xl font-bold text-brand-dark">{g.nb_partants_moyen == null ? "—" : nb(Math.round(g.nb_partants_moyen * 10) / 10)}</div>
-                <p className="mt-1 text-sm text-brand-charcoal">partants en moyenne par course : trouver le bon trio n&apos;a rien d&apos;évident.</p>
-              </div>
-            </div>
-            <p className="mt-4 text-sm leading-relaxed text-brand-charcoal">
-              Tout est publié, les bons jours comme les mauvais, sur la page{" "}
-              <Link href="/track-record" className="font-medium text-brand-gold-dark underline">
-                Performances
-              </Link>
-              . Aucun résultat n&apos;est garanti : une probabilité de 30 % veut aussi dire 70 % de
-              chances que ça ne passe pas.
-            </p>
-          </Section>
-        )}
-
-        <Section title="Gratuit ou payant : à toi de voir">
-          <div className="grid gap-4 md:grid-cols-3">
-            {FORMULES.map((f) => (
-              <div
-                key={f.nom}
+              <ul className="mt-5 space-y-2">
+                {f.points.map((p) => (
+                  <li key={p} className="flex items-center gap-2 text-sm">
+                    <Check className={`h-4 w-4 shrink-0 ${f.fort ? "text-amber-300" : "text-brand-gold-dark"}`} />
+                    <span className={f.fort ? "text-stone-100" : "text-brand-charcoal"}>{p}</span>
+                  </li>
+                ))}
+              </ul>
+              <Link
+                href={f.href}
                 className={
                   f.fort
-                    ? "relative rounded-2xl bg-gradient-to-br from-stone-900 via-stone-900 to-emerald-950 p-5 text-white ring-2 ring-amber-400/70"
-                    : "rounded-2xl border border-gray-200 bg-white p-5"
+                    ? "mt-6 inline-flex w-full items-center justify-center gap-1.5 rounded-xl bg-gradient-to-b from-amber-300 to-amber-500 px-4 py-3 text-sm font-bold text-stone-900"
+                    : "mt-6 inline-flex w-full items-center justify-center gap-1.5 rounded-xl border border-amber-200 px-4 py-3 text-sm font-semibold text-brand-dark hover:bg-amber-50"
                 }
               >
-                {f.fort && (
-                  <span className="absolute -top-3 left-5 inline-flex items-center gap-1 rounded-full bg-gradient-to-b from-amber-300 to-amber-500 px-3 py-1 text-xs font-bold text-stone-900">
-                    <Crown className="h-3 w-3" /> Le plus complet
-                  </span>
-                )}
-                <h3 className={`font-display text-lg font-bold ${f.fort ? "text-white" : "text-brand-dark"}`}>{f.nom}</h3>
-                <p className={`text-xs ${f.fort ? "text-stone-300" : "text-brand-charcoal"}`}>{f.pour}</p>
-                <div className="mt-3 flex items-baseline gap-1.5">
-                  <span className="text-3xl font-extrabold">{f.prix}</span>
-                  <span className={`text-xs ${f.fort ? "text-stone-300" : "text-brand-charcoal"}`}>{f.sous}</span>
-                </div>
-                <ul className="mt-4 space-y-2">
-                  {f.points.map((p) => (
-                    <li key={p} className="flex items-start gap-2 text-sm">
-                      <Check className={`mt-0.5 h-4 w-4 shrink-0 ${f.fort ? "text-amber-300" : "text-brand-gold-dark"}`} />
-                      <span className={f.fort ? "text-stone-100" : "text-brand-charcoal"}>{p}</span>
-                    </li>
-                  ))}
-                </ul>
-                <Link
-                  href={f.href}
-                  className={
-                    f.fort
-                      ? "mt-5 inline-flex w-full items-center justify-center gap-1.5 rounded-xl bg-gradient-to-b from-amber-300 to-amber-500 px-4 py-2.5 text-sm font-bold text-stone-900"
-                      : "mt-5 inline-flex w-full items-center justify-center gap-1.5 rounded-xl border border-amber-200 px-4 py-2.5 text-sm font-semibold text-brand-dark hover:bg-amber-50"
-                  }
-                >
-                  {f.cta} <ArrowRight className="h-4 w-4" />
-                </Link>
-              </div>
-            ))}
-          </div>
-          <p className="mt-3 text-xs text-brand-charcoal">
-            Aussi : Standard à 12 €/mois (5 courses par jour), Pass Semaine 12 € et Pass Mois 24 €.{" "}
-            <Link href="/tarifs" className="underline">Toutes les formules</Link>
-          </p>
-        </Section>
-
-        <Section title="Envie de voir avant de t'inscrire ?">
-          <div className="grid gap-3 sm:grid-cols-2">
-            <Link href="/quinte-du-jour" className="glass-card group flex items-start gap-3 rounded-2xl p-5">
-              <Trophy className="mt-0.5 h-5 w-5 shrink-0 text-brand-gold-dark" aria-hidden />
-              <span>
-                <span className="block font-display font-semibold text-brand-dark group-hover:text-brand-gold-dark">
-                  Le Quinté+ du jour
-                </span>
-                <span className="mt-1 block text-sm text-brand-charcoal">La course phare du jour : partants, terrain et analyse.</span>
-              </span>
-            </Link>
-            <Link href="/pronostics-ia" className="glass-card group flex items-start gap-3 rounded-2xl p-5">
-              <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-brand-gold-dark" aria-hidden />
-              <span>
-                <span className="block font-display font-semibold text-brand-dark group-hover:text-brand-gold-dark">
-                  La méthode en détail
-                </span>
-                <span className="mt-1 block text-sm text-brand-charcoal">Les données, le modèle et la façon dont on le vérifie.</span>
-              </span>
-            </Link>
-          </div>
-        </Section>
-
-        <p className="mt-12 rounded-xl bg-gray-50 p-4 text-xs leading-relaxed text-brand-charcoal">
-          Jouer comporte des risques : endettement, dépendance… Appelez le 09 74 75 13 13 (appel non
-          surtaxé). Réservé aux personnes majeures. BlackTurf est un outil d&apos;analyse : il ne prend
-          aucun pari et ne garantit aucun gain.
+                {f.cta} <ArrowRight className="h-4 w-4" />
+              </Link>
+            </div>
+          ))}
+        </div>
+        <p className="mt-6 text-center text-xs text-brand-charcoal">
+          Aussi : Standard 12 €/mois, Pass Semaine 12 €, Pass Mois 24 €.{" "}
+          <Link href="/tarifs" className="underline">Tous les prix</Link>
         </p>
-      </Container>
-    </>
+      </section>
+
+      <p className="mx-auto max-w-3xl px-4 pb-12 text-center text-[11px] leading-relaxed text-brand-charcoal">
+        Jouer comporte des risques : endettement, dépendance… Appelez le 09 74 75 13 13 (appel non surtaxé).
+        Réservé aux majeurs. BlackTurf est un outil d&apos;analyse : aucun gain n&apos;est garanti.
+      </p>
+    </div>
   );
 }
