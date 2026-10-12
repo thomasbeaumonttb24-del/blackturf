@@ -1086,7 +1086,7 @@ def compute_field_overround(features_list: list[dict]) -> Optional[float]:
     (comparaison au marché brut, plus prudente — cf. detect_value_bet) plutôt que
     de le neutraliser.
     """
-    from ml.valuebets import cote_marche_ponderee
+    from ml.valuebets import _sans_sources_non_fiables, cote_marche_ponderee
 
     if not features_list:
         return None
@@ -1094,12 +1094,15 @@ def compute_field_overround(features_list: list[dict]) -> Optional[float]:
     total_implied = 0.0
     n_priced = 0
     for f in features_list:
-        cote = cote_marche_ponderee({
+        # Mêmes sources que la cote de marché de `detect_value_bet` (Geny exclu) :
+        # sinon la proba implicite et l'overround qui la dé-vigge ne portent pas
+        # sur le même marché.
+        cote = cote_marche_ponderee(_sans_sources_non_fiables({
             "pmu": f.get("cote_pmu"), "geny": f.get("cote_geny"),
             "bzh": f.get("cote_bzh"), "winamax": f.get("cote_winamax"),
             "betclic": f.get("cote_betclic"), "unibet": f.get("cote_unibet"),
             "betfair": f.get("cote_betfair_exchange"),
-        })
+        }))
         if cote and cote > 1.0:
             total_implied += 1.0 / cote
             n_priced += 1
@@ -1142,18 +1145,16 @@ def cotes_reelles_de(feat: dict, reelles: Optional[dict]) -> dict:
     si la lecture a échoué — on garde alors les valeurs des features, comme avant
     (repli explicite, journalisé par l'appelant).
 
-    Cote PMU réelle présente → valeurs des features, inchangées (un bookmaker
-    absent y vaut la cote PMU réelle : une vraie cote, déjà le comportement de la
-    détection). Cote PMU absente → les replis des features sont fabriqués : seules
-    les cotes réellement publiées par chaque source sont rendues, None sinon.
+    Chaque source rend la cote qu'ELLE a publiée, None sinon — que la cote PMU
+    soit présente ou non (2026-10-12). Avant, une cote PMU présente faisait rendre
+    les valeurs des features, où chaque bookmaker absent vaut la cote PMU : Winamax
+    et Betclic (plus scrapés, 0 % de couverture) comptaient comme deux sources de
+    poids 1,5 recopiant le PMU. La cote de marché pondérée, la médiane anti
+    winner's curse, l'overround et `nb_sources` (toujours ~6) étaient tirés vers le
+    PMU, et l'écart PMU/Betfair du SPI comparait le PMU à lui-même.
     """
     if reelles is None:
         return {k: feat.get(k) for k in _CLES_COTES}
-    pmu = _cote_reelle(reelles.get("cote_pmu"))
-    if pmu is not None:
-        out = {k: feat.get(k) for k in _CLES_COTES}
-        out["cote_pmu"] = pmu
-        return out
     return {k: _cote_reelle(reelles.get(k)) for k in _CLES_COTES}
 
 

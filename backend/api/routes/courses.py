@@ -2666,9 +2666,10 @@ async def get_comparaison_cotes(
                 "unibet":        r[7],
                 "betfair":       r[8],   # exchange
             },
-            "cote_min": min(
-                c for c in [r[2], r[3], r[4], r[5], r[7], r[8]] if c and c > 1.0
-            ) if any(c for c in [r[2], r[3], r[4], r[5], r[7], r[8]] if c and c > 1.0) else None,
+            # Hors Geny (source non fiable), comme `cote_min`/`cote_max` des partants.
+            # La meilleure cote pour le parieur est la plus HAUTE.
+            "cote_min": min(_fiables) if (_fiables := [c for c in (r[2], r[4], r[5], r[7], r[8]) if c and c > 1.0]) else None,
+            "cote_max": max(_fiables) if _fiables else None,
             "mouvement_pct": r[9],  # positif = cote baissée = argent dessus
             "is_value": (
                 r[2] is not None and r[8] is not None

@@ -3589,6 +3589,9 @@ export default function CoursePage({
                     const nb = keys.filter((k) => actifs.some((p) => p[k] != null)).length;
                     return nb;
                   })()} sources · vert = meilleure cote
+                  {/* `cote_max` exclut Geny (source non fiable) : sans ce rappel, une
+                      cote Geny plus haute laissée en noir passait pour une erreur. */}
+                  {course.partants.some((p) => !p.non_partant && p.cote_geny != null) && " (hors Geny)"}
                 </span>
                 <ChevronDown className="ml-auto transition-transform group-open:rotate-180 h-4 w-4" style={{ color: CX.gray400 }} />
               </summary>

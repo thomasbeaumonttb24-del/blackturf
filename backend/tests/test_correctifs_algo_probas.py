@@ -56,10 +56,24 @@ def test_partant_absent_de_participations_n_a_aucune_cote():
     assert all(v is None for v in cotes_reelles_de(FEAT_REPLI, {}).values())
 
 
-def test_cote_pmu_reelle_garde_les_valeurs_des_features():
-    feat = dict(FEAT_REPLI, cote_pmu=3.2, cote_geny=3.2, cote_winamax=3.4)
-    c = cotes_reelles_de(feat, {"cote_pmu": 3.2})
-    assert c["cote_pmu"] == 3.2 and c["cote_winamax"] == 3.4
+def test_bookmaker_absent_ne_recopie_pas_la_cote_pmu():
+    # Features : chaque bookmaker absent y vaut la cote PMU. Hors du modèle, une
+    # source qui n'a rien publié reste absente (2026-10-12).
+    feat = dict(FEAT_REPLI, cote_pmu=3.2, cote_geny=3.2, cote_winamax=3.2,
+                cote_betclic=3.2, cote_unibet=3.2)
+    c = cotes_reelles_de(feat, {"cote_pmu": 3.2, "cote_unibet": 3.6})
+    assert c["cote_pmu"] == 3.2 and c["cote_unibet"] == 3.6
+    assert c["cote_winamax"] is None and c["cote_betclic"] is None
+    assert c["cote_geny"] is None and c["cote_betfair_exchange"] is None
+
+
+def test_nb_sources_compte_les_cotes_publiees():
+    c = cotes_reelles_de(dict(FEAT_REPLI, cote_pmu=8.0), {"cote_pmu": 8.0, "cote_unibet": 8.5})
+    vb = detect_value_bet(0.2, cote_pmu=c["cote_pmu"], cote_geny=c["cote_geny"],
+                          cote_bzh=c["cote_bzh"], cote_winamax=c["cote_winamax"],
+                          cote_betclic=c["cote_betclic"], cote_unibet=c["cote_unibet"],
+                          cote_betfair=c["cote_betfair_exchange"])
+    assert vb is not None and vb["nb_sources"] == 2
 
 
 def test_lecture_impossible_retombe_sur_les_features():

@@ -83,3 +83,11 @@ def test_seuil_par_defaut_est_0_70():
     """Documente la valeur choisie (majorité qualifiée du champ) — si ce test
     casse, c'est que la constante a changé, pas un accident silencieux."""
     assert MIN_OVERROUND_COVERAGE == 0.70
+
+
+def test_geny_exclu_comme_dans_la_cote_de_marche():
+    """La cote de marché de `detect_value_bet` exclut Geny (source non fiable) :
+    l'overround qui la dé-vigge doit porter sur les MÊMES sources."""
+    sans = [_partant(cote_pmu=c) for c in (2.0, 4.0, 8.0)]
+    avec = [_partant(cote_pmu=c, cote_geny=g) for c, g in ((2.0, 9.0), (4.0, 9.0), (8.0, 9.0))]
+    assert compute_field_overround(avec) == pytest.approx(compute_field_overround(sans))
