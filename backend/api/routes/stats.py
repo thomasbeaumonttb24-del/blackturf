@@ -1443,7 +1443,7 @@ async def _palmares_rows(db: AsyncSession) -> dict:
         return {"gagnants": [], "top_gains": [], "n": 0, "n_courses": 0,
                 "n_courses_reglees": 0, "by_profil": {}, "total_gain": 0.0,
                 "total_mise": 0.0, "mise_cohorte": 0.0, "retour_cohorte": 0.0,
-                "integrite": _PALMARES_INTEGRITE}
+                "depuis": None, "integrite": _PALMARES_INTEGRITE}
 
     PROFIL_LBL = {"conservateur": "Prudent", "equilibre": "Modéré", "agressif": "Risqué"}
     gagnants = []
@@ -1453,6 +1453,9 @@ async def _palmares_rows(db: AsyncSession) -> dict:
     # bénéfice alors que c'est un retour brut (biais du survivant).
     mise_cohorte = 0.0
     retour_cohorte = 0.0
+    # Départ de la plus ancienne course réglée de la cohorte : le « depuis » affiché
+    # sous le montant du palmarès.
+    depuis = None
     by_profil: dict = {p: {"courses": set(), "mise": 0.0, "gain": 0.0,
                            "courses_benef": 0, "paris_gagnes": 0} for p in PROFIL_LBL}
     for profil, resultat, settled_at, created_at, hippo, dh, cid, n_reunion, n_course, plan in rows:
@@ -1467,6 +1470,8 @@ async def _palmares_rows(db: AsyncSession) -> dict:
         # profil (un ticket risqué figé à ×14,1 payé ×3,3 le 2026-08-27 à Saratoga).
         vise = _rapports_vises(plan)
         courses_reglees.add(cid)
+        if dh and (depuis is None or dh < depuis):
+            depuis = dh
         mise_cohorte += float(res.get("total_mise") or 0)
         retour_cohorte += float(res.get("total_gain") or 0)
         agg = by_profil.get(profil)
@@ -1529,6 +1534,7 @@ async def _palmares_rows(db: AsyncSession) -> dict:
         # compris, remboursés exclus) et retours encaissés.
         "mise_cohorte": round(mise_cohorte, 2),
         "retour_cohorte": round(retour_cohorte, 2),
+        "depuis": depuis.isoformat() if depuis else None,
         "integrite": _PALMARES_INTEGRITE,
     }
 
@@ -1915,6 +1921,7 @@ async def stats_palmares_public(
         # qui en résulte : sans eux, le retour brut ci-dessus serait trompeur.
         "total_mise_engagee": data["mise_cohorte"],
         "total_net": round(data["retour_cohorte"] - data["mise_cohorte"], 2),
+        "depuis": data["depuis"],
         # Ticket Quinté+ : ligne SÉPARÉE, jamais mêlée aux paris ni aux totaux
         # ci-dessus. Version publique = comptages seulement (pas de ROI ni de
         # montants agrégés, cf. _quinte_public) ; l'admin a le bloc complet.
@@ -2060,6 +2067,7 @@ async def stats_palmares_gagnants(
         "total_benefice": round(data["retour_cohorte"] - data["mise_cohorte"], 2),
         "total_mise_engagee": data["mise_cohorte"],
         "total_net": round(data["retour_cohorte"] - data["mise_cohorte"], 2),
+        "depuis": data["depuis"],
         "profils": profils,
         # Ligne à part, hors totaux ci-dessus (ses tickets gagnants figurent dans les listes).
         "quinte": {k: v for k, v in quinte.items() if k != "gagnants"},

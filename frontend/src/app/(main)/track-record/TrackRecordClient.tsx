@@ -504,6 +504,8 @@ type PalmaresData = {
   gagnants: WinningBet[]; top_gains?: WinningBet[]; n: number; n_courses?: number; total_gain?: number; total_benefice?: number;
   /** Mise engagée sur TOUTES les courses réglées (perdues comprises) et net qui en résulte. */
   total_mise_engagee?: number; total_net?: number;
+  /** Départ de la plus ancienne course réglée de la cohorte (ISO). */
+  depuis?: string | null;
   profils?: Array<{ profil: string; label: string; nb_courses: number; mise_totale?: number; gain_total?: number; gain_net: number; roi: number | null; paris_gagnes: number; taux_courses_beneficiaires: number | null }>;
   quinte?: QuintePalmaresData | null;   // ligne Quinté+ à part (hors de tous les totaux)
   updated_at?: string;
@@ -521,6 +523,7 @@ function versPalmares(pub: PalmaresPublicBrut): PalmaresData {
     total_gain: pub.total_gain,
     total_mise_engagee: pub.total_mise_engagee,
     total_net: pub.total_net,
+    depuis: pub.depuis ?? null,
     quinte: pub.quinte ?? null,
     updated_at: pub.updated_at,
   };
@@ -662,9 +665,12 @@ export default function TrackRecordPage({ initialTrackRecord, initialPalmares }:
   const netCohorte = miseEngagee != null && typeof gagnantsData?.total_net === "number" ? gagnantsData.total_net : null;
   const eur = (v: number) => `${nf(Math.round(v))} €`;
   const eurSigne = (v: number) => `${v > 0 ? "+" : v < 0 ? "−" : ""}${nf(Math.abs(Math.round(v)))} €`;
-  const bilanCohorte = miseEngagee != null
-    ? `Pour ${eur(miseEngagee)} misés sur ${nf(nbCoursesReglees)} courses réglées${netCohorte != null ? ` · net ${eurSigne(netCohorte)}` : ""}`
-    : `Sur ${nf(nbCoursesReglees)} courses réglées`;
+  // Début de la cohorte du palmarès ; repli sur le début de la mesure pour un cache
+  // public antérieur au champ.
+  const palmaresDepuisIso = gagnantsData?.depuis ?? data.global.mesure_depuis ?? null;
+  const palmaresDepuis = palmaresDepuisIso
+    ? new Date(palmaresDepuisIso).toLocaleDateString("fr-FR", { timeZone: "Europe/Paris", day: "numeric", month: "long", year: "numeric" })
+    : null;
   const hasard3 = g.hasard_top3 ?? null;
   const hasard1 = g.hasard_top1 ?? null;
   const facteur3 = hasard3 && hasard3 > 0 ? g.accuracy_top3 / hasard3 : null;
@@ -720,13 +726,11 @@ export default function TrackRecordPage({ initialTrackRecord, initialPalmares }:
             note: depuis ? `Depuis le ${depuis}` : undefined,
           },
           {
-            value: !gagnantsData ? "—" : gainConnu
-              ? <CountUpEuro value={gagnantsData.total_gain ?? 0} />
-              : <CountUp value={nbGagnants} />,
-            // Retour BRUT (somme des rapports des paris gagnés), jamais présenté seul :
-            // la mise de toutes les courses réglées et le net l'accompagnent.
-            label: gainConnu ? "Retours bruts encaissés" : "Paris gagnés",
-            note: bilanCohorte,
+            // Plus de montant brut dans le hero (demande du 2026-10-12) : le nombre de
+            // paris gagnés, avec son dénominateur.
+            value: !gagnantsData ? "—" : <CountUp value={nbGagnants} />,
+            label: "Paris gagnés",
+            note: `Sur ${nf(nbCoursesReglees)} courses réglées`,
           },
         ]}
       />
@@ -842,7 +846,7 @@ export default function TrackRecordPage({ initialTrackRecord, initialPalmares }:
             eyebrow="Vue d'ensemble"
             title="Les paris qui sont passés"
             description={gainConnu
-              ? "Les retours encaissés, avec en face le nombre de courses réglées et la mise engagée sur toutes — perdantes comprises."
+              ? "Les gains encaissés, avec en face le nombre de courses réglées et la mise engagée sur toutes — perdantes comprises."
               : "Le total des paris gagnés — et, juste à côté, le nombre de courses réglées. Sans ce second chiffre, n'afficher que les gagnants serait malhonnête."}
             icon={Coins}
           />
@@ -875,9 +879,12 @@ export default function TrackRecordPage({ initialTrackRecord, initialPalmares }:
                       ) : (
                         <CountUp value={nbGagnants} className="tr-pop mt-4 block font-display text-6xl font-black leading-none tabular-nums sm:text-8xl" />
                       )}
+                      {palmaresDepuis && (
+                        <p className="mt-3 text-sm font-semibold text-emerald-100">Depuis le {palmaresDepuis}</p>
+                      )}
                       <p className="mt-4 max-w-md text-sm leading-6 text-emerald-50/85">
                         {gainConnu
-                          ? `Retours bruts de ${nf(nbGagnants)} paris gagnés, sur ${nf(nbCoursesReglees)} courses réglées.${miseEngagee != null ? ` Mises engagées sur ces courses : ${eur(miseEngagee)}${netCohorte != null ? `, soit un résultat net de ${eurSigne(netCohorte)}` : ""}.` : ""}`
+                          ? `Rapports officiels de ${nf(nbGagnants)} paris gagnés, sur ${nf(nbCoursesReglees)} courses réglées.${miseEngagee != null ? ` Mises engagées sur ces courses : ${eur(miseEngagee)}${netCohorte != null ? `, soit un résultat net de ${eurSigne(netCohorte)}` : ""}.` : ""}`
                           : `paris gagnés, tous profils confondus, sur ${nf(nbCoursesReglees)} courses réglées. Chacun est consultable sur sa course.`}
                       </p>
                     </div>
