@@ -289,3 +289,92 @@ def test_les_anciens_appelants_a_deux_colonnes_sont_inchanges():
     deux colonnes : pas de clé `etendu`, même verdict qu'avant."""
     v = ma.evaluer(_simuler(1500))
     assert "etendu" not in v and v["retenu"] is True
+
+
+# ── Consensus des bookmakers (2026-10-13) ────────────────────────────────────
+
+def test_le_consensus_ignore_les_sources_qui_ne_cotent_pas_tout_le_champ():
+    complet = ma.consensus_bookmakers({"unibet": [2.0, 4.0, 4.0]})
+    assert np.exp(complet).sum() == pytest.approx(1.0)
+    assert np.exp(complet) == pytest.approx([0.5, 0.25, 0.25])
+    # Bet365 incomplète, Geny hors liste : seule Unibet compte.
+    assert ma.consensus_bookmakers({"unibet": [2.0, 4.0, 4.0], "bet365": [2.0, None, 3.0],
+                                    "geny": [10.0, 1.5, 3.0]}) == pytest.approx(complet)
+    assert ma.consensus_bookmakers({"bet365": [2.0, None, 3.0]}) is None
+    assert ma.consensus_bookmakers({}) is None and ma.consensus_bookmakers(None) is None
+
+
+def test_le_consensus_est_la_moyenne_geometrique_des_sources():
+    a, b = [2.0, 4.0, 4.0], [4.0, 2.0, 4.0]
+    qa, qb = ma.probas_marche(a), ma.probas_marche(b)
+    attendu = np.sqrt(qa * qb) / np.sqrt(qa * qb).sum()
+    assert np.exp(ma.consensus_bookmakers({"unibet": a, "ladbrokes": b})) == pytest.approx(attendu)
+
+
+def _simuler_consensus(n_courses: int, gamma_cons: float, seed: int = 21,
+                       servi_vrai: bool = False) -> list[dict]:
+    """Le vrai gagnant suit un marché « juste » dont le PMU et les bookmakers sont
+    deux lectures bruitées ; `gamma_cons` = poids du consensus dans le vrai logit."""
+    rng = np.random.default_rng(seed)
+    courses = []
+    for _ in range(n_courses):
+        k = int(rng.integers(6, 15))
+        fm = rng.normal(0, 1.0, k)
+        q = np.exp(fm) / np.exp(fm).sum()
+        qc = np.exp(fm + rng.normal(0, 0.4, k))
+        qc /= qc.sum()
+        sig = rng.normal(0, 1.0, k)
+        m = np.exp(sig) / np.exp(sig).sum()
+        cotes = 1.0 / (q * 1.15)
+        cov = ma.matrice_covariables(cotes, rng.normal(0, 0.25, k),
+                                     cotes * np.exp(rng.normal(0, 0.3, k)))
+        if cov is None:
+            continue
+        lnqc = ma.consensus_bookmakers({"unibet": list(1.0 / (qc * 1.1))})
+        if lnqc is None:                            # favori écrasant : cote ≤ 1
+            continue
+        z = 0.3 * np.log(m) + 0.7 * np.log(q) + cov @ np.array([-0.3, 0.25, -0.3]) \
+            + gamma_cons * lnqc
+        vrai = np.exp(z - z.max())
+        vrai /= vrai.sum()
+        g = int(rng.choice(k, p=vrai))
+        c = ma._vers_course(m, cotes, g, vrai if servi_vrai else 0.5 * m + 0.5 * q, cov)
+        c["lnqc"] = lnqc
+        courses.append(c)
+    return courses
+
+
+def test_un_consensus_informatif_est_retenu_et_servi_avec_ses_gammas():
+    v = ma.evaluer(_simuler_consensus(3000, gamma_cons=0.6))
+    cb = v["consensus_bk"]
+    assert cb["retenu"] is True, cb
+    assert cb["gain_logv_vs_etendu"] >= ma.GAIN_MIN_CONSENSUS
+    assert cb["gammas"][-1] == pytest.approx(0.6, abs=0.2)
+    ma._cache = {"retenu": True, "beta_modele": 0.3, "beta_marche": 0.7,
+                 "consensus_bk": cb}
+    bm, bk, gm = ma.en_service_consensus()
+    assert len(gm) == len(ma.COVARIABLES) + 1
+    ma._cache = None
+
+
+def test_un_consensus_sans_information_n_est_pas_servi():
+    v = ma.evaluer(_simuler_consensus(2000, gamma_cons=0.0, seed=8))
+    assert v["consensus_bk"]["retenu"] is False
+    ma._cache = {"retenu": True, "consensus_bk": v["consensus_bk"]}
+    assert ma.en_service_consensus() is None
+    ma._cache = None
+
+
+def test_le_consensus_servi_ne_fige_pas_le_reapprentissage_de_l_etendu():
+    """Servi partout où il se calcule, il bat l'étendu face à la proba servie ;
+    l'étendu n'est plus jugé « vs servi » que là où il est servi (sans consensus)."""
+    courses = _simuler_consensus(4000, gamma_cons=0.8, seed=31, servi_vrai=True)
+    for c in courses[::5]:                       # 20 % de courses sans bookmaker :
+        c["lnqc"] = None                         # là, l'étendu est ce qui est servi
+        c["servi"] = 0.5 * np.exp(c["x"][:, 0]) + 0.5 * c["q"]
+    fige = ma.evaluer(courses, consensus_servi=False)
+    assert fige["consensus_bk"]["retenu"] is True
+    v = ma.evaluer(courses, consensus_servi=True)
+    assert v["retenu"] is True
+    assert v["etendu"]["retenu"] is True, v["etendu"]
+    assert fige["etendu"]["gain_logv_vs_servi"] < v["etendu"]["gain_logv_vs_servi"]

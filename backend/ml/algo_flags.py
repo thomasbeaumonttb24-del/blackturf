@@ -252,6 +252,16 @@ class AlgoFlags:
     # Rollback immédiat vers deux paramètres : BT_MELANGE_COVARIABLES=0.
     melange_covariables: bool = field(
         default_factory=lambda: _env_bool("BT_MELANGE_COVARIABLES", True))
+    # Consensus des bookmakers (Unibet, Bet365, Ladbrokes, Betfair Exchange) en
+    # covariable de ce mélange (2026-10-13, `ml.melange_arrivees.consensus_bookmakers`).
+    # Rejeu au pronostic (2 015 courses, cotes lues AVANT le calcul) : +0,029
+    # [+0,010 ; +0,048] de log-vraisemblance sur le mélange étendu, hors échantillon,
+    # même sens sur les deux moitiés ; favori gagnant 29,4 % → 30,0 %.
+    # DÉFAUT OFF : le nocturne l'examine et le trace chaque nuit (clé `consensus_bk`),
+    # il n'est SERVI qu'avec BT_MELANGE_CONSENSUS_BK=1 et s'il est retenu. Avant
+    # d'activer : banc des plans apparié (les plans lisent cette proba).
+    melange_consensus_bk: bool = field(
+        default_factory=lambda: _env_bool("BT_MELANGE_CONSENSUS_BK", False))
 
     # ── Modèle technique (2026-09-16) ────────────────────────────────────────
     # Modèles de victoire et de placement SANS aucune information de marché
@@ -343,6 +353,7 @@ class AlgoFlags:
             "sharpness_calibration": self.sharpness_calibration,
             "melange_arrivees": self.melange_arrivees,
             "melange_covariables": self.melange_covariables,
+            "melange_consensus_bk": self.melange_consensus_bk,
             "modele_technique": self.modele_technique,
             "vb_confirmation_technique": self.vb_confirmation_technique,
             "refit_full": self.refit_full,

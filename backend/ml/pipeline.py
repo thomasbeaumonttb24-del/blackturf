@@ -1175,6 +1175,37 @@ async def _lire_cotes_reelles(session: AsyncSession, course_id: str) -> Optional
     return {r[0]: dict(zip(_CLES_COTES, r[1:])) for r in rows}
 
 
+async def _consensus_bookmakers_au_calcul(session: AsyncSession,
+                                          participation_ids: list) -> Optional[np.ndarray]:
+    """ln q_consensus des bookmakers pour ces partants (ordre conservé), ou None.
+
+    Dernière cote de chaque source de `melange_arrivees.SOURCES_CONSENSUS` lue dans
+    les `AGE_CONSENSUS_MIN` minutes : exactement ce que le nocturne relit au
+    `created_at` de la prédiction. Lecture sur une SESSION DÉDIÉE : l'appelant a déjà
+    écrit dans la sienne, un rollback sur échec l'annulerait.
+    """
+    from ml import melange_arrivees as _ma
+    if not participation_ids or any(p is None for p in participation_ids):
+        return None
+    try:
+        async with AsyncSessionLocal() as s2:
+            rows = (await s2.execute(text(f"""
+                SELECT DISTINCT ON (participation_id, source) participation_id, source, cote
+                FROM cotes_bookmakers
+                WHERE participation_id = ANY(:pids) AND source = ANY(:srcs)
+                  AND scraped_at >= now() - interval '{_ma.AGE_CONSENSUS_MIN} minutes'
+                  AND scraped_at <= now()
+                ORDER BY participation_id, source, scraped_at DESC
+            """), {"pids": list(participation_ids),
+                   "srcs": list(_ma.SOURCES_CONSENSUS)})).all()
+    except Exception as e:
+        log.warning("pipeline.consensus_bk_indisponible", err=str(e)[:160])
+        return None
+    cotes = {(r[0], r[1]): r[2] for r in rows}
+    return _ma.consensus_bookmakers(
+        {s: [cotes.get((p, s)) for p in participation_ids] for s in _ma.SOURCES_CONSENSUS})
+
+
 def imposer_top3_sup_top1(p1, p3) -> np.ndarray:
     """P(top 3) ≥ P(victoire) pour chaque partant, à somme du champ inchangée.
 
@@ -2995,7 +3026,23 @@ async def predict_course(course_id: str, user_bankroll: float = 100.0) -> Option
                 if _ma is not None:
                     _p_ma = None
                     _ext = _ma_mod.en_service_etendu() if _AFma.melange_covariables else None
-                    if _ext is not None:
+                    # Consensus des bookmakers (BT_MELANGE_CONSENSUS_BK, défaut OFF) :
+                    # mêmes cotes qu'à l'apprentissage — dernière lue de chaque source,
+                    # vieille d'au plus AGE_CONSENSUS_MIN. Sans consensus : étendu.
+                    _cons = (_ma_mod.en_service_consensus()
+                             if _AFma.melange_covariables and _AFma.melange_consensus_bk
+                             else None)
+                    if _cons is not None:
+                        _lnqc = await _consensus_bookmakers_au_calcul(
+                            session, [f.get("participation_id") for f in features_list])
+                        _cov = _ma_mod.covariables_de_features(features_list, cotes_pmu)
+                        if _lnqc is not None and _cov is not None:
+                            _p_ma = _ma_mod.appliquer(
+                                _raw_p1_snap, cotes_pmu, _cons[0], _cons[1],
+                                covariables=np.column_stack([_cov, _lnqc]),
+                                gammas=_cons[2])
+                            _melange_etendu = _p_ma is not None
+                    if _p_ma is None and _ext is not None:
                         _cov = _ma_mod.covariables_de_features(features_list, cotes_pmu)
                         if _cov is not None:
                             _p_ma = _ma_mod.appliquer(_raw_p1_snap, cotes_pmu, _ext[0], _ext[1],

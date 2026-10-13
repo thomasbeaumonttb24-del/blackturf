@@ -73,6 +73,25 @@ Mesurés et ÉCARTÉS : traiter à part les écarts positifs et négatifs du mod
 échantillon et IC entièrement positif, le mélange à deux paramètres de la même
 nuit, avec des γ de même signe sur les deux moitiés. Sinon : deux paramètres.
 
+Le consensus des bookmakers (2026-10-13)
+───────────────────────────────────────
+Rejeu à l'heure du pronostic (dernière cote de chaque bookmaker AVANT le calcul,
+vieille d'au plus `AGE_CONSENSUS_MIN`), 2 015 courses 29/08 → 12/10, pronostic
+médian à T-10,8 min. Consensus = moyenne géométrique des probas implicites
+normalisées des sources qui cotent TOUT le champ (Unibet, Bet365, Ladbrokes,
+Betfair Exchange). Log-loss du gagnant, 60 % premiers jours → 40 % derniers :
+
+    cote PMU seule                    2,0368
+    consensus bookmakers seul         2,0049     favori gagnant 31,6 % (PMU 28,0)
+    proba servie (mélange étendu)     2,0088
+    étendu + ln q_consensus           1,9826     +0,029 [+0,010 ; +0,048] sur l'étendu
+
+Même sens dans les deux moitiés (+0,036 et +0,032), γ_consensus 0,60-0,81 ; il
+prend le poids du marché PMU (β_marché 0,76 → 0,44) et efface γ_geny. Servi
+seulement derrière `BT_MELANGE_CONSENSUS_BK` (défaut OFF) ET si le nocturne le
+retient (bat l'étendu hors échantillon d'au moins `GAIN_MIN_CONSENSUS`, γ du
+consensus positif sur les deux moitiés). Course sans consensus → étendu.
+
 Ce qu'elles ne font PAS : battre la cote de CLÔTURE. Le PMU paie la clôture, qui
 rachète l'essentiel de l'écart vu avant le départ (rendement des écarts 1,2-1,5
 au rapport de clôture ≈ 0). La cote juste dit vrai sur la chance ; elle ne promet
@@ -156,6 +175,16 @@ MOUVEMENT_BORNE = 1.0
 # marché. Hors bornes on refuse de servir, donc on refuse d'apprendre.
 GAMMA_MAX = 3.0
 
+# ── Consensus des bookmakers (cf. docstring, 2026-10-13) ──────────────────────
+# Colonne ajoutée APRÈS les covariables du marché : x = [ln p̂, ln q, COVARIABLES…,
+# ln q_consensus]. Geny n'en fait pas partie (pire source mesurée, déjà covariable).
+SOURCES_CONSENSUS = ("unibet", "bet365", "ladbrokes", "betfair_exchange")
+# Une cote bookmaker plus vieille que ça au moment du calcul n'est plus le marché.
+AGE_CONSENSUS_MIN = 60
+# Gain hors échantillon exigé sur le mélange étendu (log-vraisemblance par course) :
+# en deçà, une source de plus à surveiller ne vaut pas le risque de panne.
+GAIN_MIN_CONSENSUS = 0.005
+
 _cache: Optional[dict] = None
 
 
@@ -220,6 +249,30 @@ def matrice_covariables(cotes: Sequence[float], mouvements=None,
     fav = np.zeros(n)
     fav[int(np.argmax(q))] = 1.0          # ex æquo : le premier dans l'ordre reçu
     return np.column_stack([mv, np.log(np.clip(qg, PLANCHER, None)), fav])
+
+
+def consensus_bookmakers(cotes_par_source) -> Optional[np.ndarray]:
+    """ln q_consensus par partant, ou None. Fonction PURE.
+
+    `cotes_par_source` : {source: [cote du partant i, …]} dans l'ordre des partants.
+    Seules comptent les sources de `SOURCES_CONSENSUS` qui cotent TOUT le champ (une
+    source partielle ne se normalise pas). Consensus = moyenne géométrique de leurs
+    probas implicites normalisées, renormalisée.
+    """
+    logs = []
+    for s in SOURCES_CONSENSUS:
+        c = np.asarray([np.nan if v is None else v for v in (cotes_par_source or {}).get(s) or []],
+                       dtype=float)
+        if c.size < 2 or not np.isfinite(c).all() or (c <= 1.0).any():
+            continue
+        q = 1.0 / c
+        logs.append(np.log(q / q.sum()))
+    if not logs or len({v.size for v in logs}) != 1:
+        return None
+    z = np.mean(logs, axis=0)
+    z = z - z.max()
+    q = np.exp(z) / np.exp(z).sum()
+    return np.log(np.clip(q, PLANCHER, None))
 
 
 def covariables_de_features(features: Sequence[dict],
@@ -301,6 +354,25 @@ def en_service_etendu() -> Optional[tuple[float, float, tuple[float, ...]]]:
     try:
         gammas = tuple(float(v) for v in e["gammas"])
         if len(gammas) != len(COVARIABLES) or list(e.get("noms") or []) != list(COVARIABLES):
+            return None
+        return float(e["beta_modele"]), float(e["beta_marche"]), gammas
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def en_service_consensus() -> Optional[tuple[float, float, tuple[float, ...]]]:
+    """(β_modèle, β_marché, γ covariables + γ consensus) retenu, ou None.
+
+    Les covariables à passer à `appliquer` : `matrice_covariables` suivie de la
+    colonne `consensus_bookmakers`.
+    """
+    d = _cache or {}
+    e = d.get("consensus_bk") or {}
+    if not d.get("retenu") or not e.get("retenu"):
+        return None
+    try:
+        gammas = tuple(float(v) for v in e["gammas"])
+        if len(gammas) != len(COVARIABLES) + 1:
             return None
         return float(e["beta_modele"]), float(e["beta_marche"]), gammas
     except (KeyError, TypeError, ValueError):
@@ -423,7 +495,8 @@ def _ic(valeurs) -> tuple[float, list[float]]:
 
 
 def _examiner_etendu(courses: list[dict], base: dict, ll_marche: np.ndarray,
-                     ll_servi: np.ndarray, auc_servi: np.ndarray) -> dict:
+                     ll_servi: np.ndarray, auc_servi: np.ndarray,
+                     servi_ici: Optional[np.ndarray] = None) -> dict:
     """Le mélange AVEC covariables face au mélange à deux paramètres de la même nuit.
 
     Retenu seulement s'il bat ce mélange hors échantillon (IC entièrement positif),
@@ -434,8 +507,9 @@ def _examiner_etendu(courses: list[dict], base: dict, ll_marche: np.ndarray,
     cv = _validation_croisee(courses, k)
     gain_base, gain_base_ic = _ic(base["ll"] - cv["ll"])
     gm, gm_ic = _ic(ll_marche - cv["ll"])
-    gs, _gs_ic = _ic(ll_servi - cv["ll"])
-    da, da_ic = _ic(cv["auc"] - auc_servi)
+    m = _masque(servi_ici, len(courses))
+    gs, _gs_ic = _ic((ll_servi - cv["ll"])[m]) if m.any() else (0.0, [0.0, 0.0])
+    da, da_ic = _ic((cv["auc"] - auc_servi)[m]) if m.any() else (0.0, [0.0, 0.0])
     final = ajuster_beta(courses, k=k)
     g1, g2 = np.asarray(cv["plis"][0][2:]), np.asarray(cv["plis"][1][2:])
     stables = bool(np.all(np.sign(g1) == np.sign(g2)) and np.all(g1 != 0))
@@ -467,7 +541,69 @@ def _examiner_etendu(courses: list[dict], base: dict, ll_marche: np.ndarray,
     return {"retenu": True, **verdict}
 
 
-def evaluer(courses: Sequence[dict]) -> dict:
+def _masque(servi_ici: Optional[np.ndarray], n: int) -> np.ndarray:
+    """Courses où l'étage examiné est CE QUI SERA SERVI (critères « vs servi »)."""
+    if servi_ici is None:
+        return np.ones(n, dtype=bool)
+    return np.asarray(servi_ici, dtype=bool)
+
+
+def _examiner_consensus(courses: list[dict]) -> dict:
+    """Le mélange étendu + ln q_consensus face au mélange étendu, sur les SEULES
+    courses où le consensus se calcule (ailleurs il ne serait pas servi).
+
+    Retenu s'il bat l'étendu hors échantillon (IC entièrement positif ET gain moyen
+    ≥ `GAIN_MIN_CONSENSUS`), avec un γ du consensus positif sur les deux moitiés,
+    sans annoncer ni classer moins bien que ce qui est servi sur ces courses.
+    """
+    k5 = 2 + len(COVARIABLES)
+    sous = [c for c in courses if c.get("lnqc") is not None]
+    base = {"n_courses": len(sous)}
+    if len(sous) < MIN_COURSES:
+        return {"retenu": False, "raison": "échantillon trop court", **base}
+    x6 = [{"x": np.column_stack([c["x"][:, :k5], c["lnqc"]]), "g": c["g"]} for c in sous]
+    cv5 = _validation_croisee(sous, k5)
+    cv6 = _validation_croisee(x6, k5 + 1)
+    ll_marche = np.array([-math.log(max(float(c["q"][c["g"]]), 1e-15)) for c in sous])
+    ll_servi = np.array([-math.log(max(float(c["servi"][c["g"]]), 1e-15)) for c in sous])
+    ll_cons = np.array([-float(c["lnqc"][c["g"]]) for c in sous])
+    auc_servi = np.array([_auc_course(c["servi"], c["g"]) for c in sous])
+    gain, gain_ic = _ic(cv5["ll"] - cv6["ll"])
+    gs, gs_ic = _ic(ll_servi - cv6["ll"])
+    da, da_ic = _ic(cv6["auc"] - auc_servi)
+    final = ajuster_beta(x6, k=k5 + 1)
+    g1, g2 = cv6["plis"][0][-1], cv6["plis"][1][-1]
+    verdict = {
+        **base,
+        "noms": list(COVARIABLES) + ["ln_q_consensus_bk"],
+        "sources": list(SOURCES_CONSENSUS),
+        "beta_modele": round(float(final[0]), 4),
+        "beta_marche": round(float(final[1]), 4),
+        "gammas": [round(float(v), 4) for v in final[2:]],
+        "coefs_par_moitie": cv6["plis"],
+        "gain_logv_vs_etendu": gain,
+        "gain_logv_vs_etendu_ic95": gain_ic,
+        "gain_logv_vs_marche": _ic(ll_marche - cv6["ll"])[0],
+        "gain_logv_consensus_seul_vs_marche": _ic(ll_marche - ll_cons)[0],
+        "gain_logv_vs_servi": gs,
+        "gain_logv_vs_servi_ic95": gs_ic,
+        "delta_auc_vs_servi": da,
+        "delta_auc_vs_servi_ic95": da_ic,
+    }
+    if not (gain_ic[0] > 0 and gain >= GAIN_MIN_CONSENSUS):
+        return {"retenu": False, "raison": "ne bat pas le mélange étendu", **verdict}
+    if not (g1 > 0 and g2 > 0):
+        return {"retenu": False, "raison": "coefficients instables d'une moitié à l'autre",
+                **verdict}
+    if gs < -TOL_LOGV:
+        return {"retenu": False, "raison": "annonce moins juste que ce qui est servi", **verdict}
+    if da < -TOL_AUC:
+        return {"retenu": False, "raison": "classerait moins bien que ce qui est servi",
+                **verdict}
+    return {"retenu": True, **verdict}
+
+
+def evaluer(courses: Sequence[dict], consensus_servi: bool = False) -> dict:
     """Validation croisée chronologique en deux moitiés + ajustement final.
 
     Fonction PURE. Chaque course est jugée avec des coefficients appris sur l'AUTRE
@@ -479,11 +615,24 @@ def evaluer(courses: Sequence[dict]) -> dict:
     le mélange étendu s'il est retenu, sinon celui à deux paramètres. Sans cette
     règle, une fois les covariables en service, le mélange à deux paramètres
     échouerait chaque nuit face à elles et plus rien ne se réapprendrait.
+
+    Même règle pour le consensus des bookmakers (clé `consensus_bk`, courses portant
+    `lnqc`) : quand il est retenu ET servi (`consensus_servi`, le drapeau), les
+    courses où il se calcule ne comptent plus dans les critères « vs servi » de
+    l'étendu et des deux paramètres — ce n'est pas eux qui y sont servis.
     """
     courses = list(courses)
     n = len(courses)
     if n < 2:
         return {"retenu": False, "raison": "échantillon vide", "n_courses": n}
+    consensus = None
+    servi_ici = None
+    if any(c.get("lnqc") is not None for c in courses) and all(
+            c["x"].shape[1] >= 2 + len(COVARIABLES) for c in courses):
+        consensus = _examiner_consensus(courses)
+        if consensus.get("retenu") and consensus_servi:
+            servi_ici = np.array([c.get("lnqc") is None for c in courses])
+    m = _masque(servi_ici, n)
     base = _validation_croisee(courses, 2)
     ll_marche = np.array([-math.log(max(float(c["q"][c["g"]]), 1e-15)) for c in courses])
     ll_servi = np.array([-math.log(max(float(c["servi"][c["g"]]), 1e-15)) for c in courses])
@@ -491,8 +640,11 @@ def evaluer(courses: Sequence[dict]) -> dict:
     auc_marche = np.array([_auc_course(c["q"], c["g"]) for c in courses])
 
     gm, gm_bas, gm_haut = _moy_ic(ll_marche - base["ll"])
-    gs, gs_bas, gs_haut = _moy_ic(ll_servi - base["ll"])
-    da, da_bas, da_haut = _moy_ic(base["auc"] - auc_servi)
+    if m.any():
+        gs, gs_bas, gs_haut = _moy_ic((ll_servi - base["ll"])[m])
+        da, da_bas, da_haut = _moy_ic((base["auc"] - auc_servi)[m])
+    else:
+        gs = gs_bas = gs_haut = da = da_bas = da_haut = 0.0
     final = ajuster_beta(courses)
     verdict = {
         "beta_modele": round(float(final[0]), 4),
@@ -516,8 +668,10 @@ def evaluer(courses: Sequence[dict]) -> dict:
                 **verdict}
     etendu = None
     if all(c["x"].shape[1] >= 2 + len(COVARIABLES) for c in courses):
-        etendu = _examiner_etendu(courses, base, ll_marche, ll_servi, auc_servi)
+        etendu = _examiner_etendu(courses, base, ll_marche, ll_servi, auc_servi, servi_ici)
         verdict["etendu"] = etendu
+    if consensus is not None:
+        verdict["consensus_bk"] = consensus
     if etendu is not None and etendu.get("retenu"):
         return {"retenu": True, **verdict}
     if gs < -TOL_LOGV:
@@ -545,10 +699,12 @@ async def _charger_courses(session: AsyncSession) -> list[dict]:
     # Les covariables se lisent dans le vecteur de features FIGÉ avec la prédiction
     # (jamais dans `features_ml`, que les recalculs réécrivent après la course).
     mv, geny = _extraits_features(session)
+    bk = _extraits_bookmakers(session)
     rows = (await session.execute(text(f"""
         SELECT pe.course_id, pa.numero, pe.proba_top1_raw, pe.cote_figee,
                pe.proba_top1, r.classement, c.date_heure, pe.created_at, np.n,
-               pe.features IS NOT NULL AS a_features, {mv} AS mv30, {geny} AS geny
+               pe.features IS NOT NULL AS a_features, {mv} AS mv30, {geny} AS geny,
+               {bk}
         FROM prediction_evaluation pe
         JOIN participations pa ON pa.participation_id = pe.participation_id
         JOIN courses c         ON c.course_id         = pe.course_id
@@ -574,7 +730,7 @@ async def _charger_courses(session: AsyncSession) -> list[dict]:
     fraicheur = timedelta(minutes=FRAICHEUR_MAX_MIN)
     par_course: dict[str, dict] = {}
     for (course_id, numero, brut, cote, servi, classement, dh, cree, n_partants,
-         a_features, mv30, cote_geny) in rows:
+         a_features, mv30, cote_geny, *cotes_bk) in rows:
         d = par_course.setdefault(course_id, {"lignes": [], "classement": classement,
                                               "n_partants": int(n_partants or 0)})
         depart, calcul = _vers_datetime(dh), _vers_datetime(cree)
@@ -585,7 +741,7 @@ async def _charger_courses(session: AsyncSession) -> list[dict]:
             d["sans_features"] = True
         d["lignes"].append((int(numero), float(brut),
                             float(cote) if cote is not None else float("nan"),
-                            float(servi), mv30, cote_geny))
+                            float(servi), mv30, cote_geny, cotes_bk))
 
     out: list[dict] = []
     for d in par_course.values():
@@ -622,8 +778,36 @@ async def _charger_courses(session: AsyncSession) -> list[dict]:
         c = _vers_course([ligne[1] for ligne in lignes], cotes,
                          numeros.index(gagnant), [ligne[3] for ligne in lignes], cov)
         if c is not None:
+            c["lnqc"] = consensus_bookmakers(
+                {s: [ligne[6][j] if j < len(ligne[6]) else None for ligne in lignes]
+                 for j, s in enumerate(SOURCES_CONSENSUS)})
             out.append(c)
     return out
+
+
+def _extraits_bookmakers(session: AsyncSession) -> str:
+    """Colonnes SQL : cote de chaque source de `SOURCES_CONSENSUS` AU MOMENT du
+    pronostic (dernière lue avant `pe.created_at`, vieille d'au plus
+    `AGE_CONSENSUS_MIN`). Jamais `participations.cote_*`, réécrites jusqu'au départ.
+
+    PostgreSQL seulement (index participation_id × source) ; ailleurs NULL, le
+    consensus n'est alors pas examiné.
+    """
+    try:
+        dialecte = session.bind.dialect.name
+    except AttributeError:
+        dialecte = "postgresql"
+    cols = []
+    for i, s in enumerate(SOURCES_CONSENSUS):
+        if dialecte == "sqlite":
+            cols.append(f"NULL AS bk{i}")
+            continue
+        cols.append(f"""(SELECT cb.cote FROM cotes_bookmakers cb
+              WHERE cb.participation_id = pe.participation_id AND cb.source = '{s}'
+                AND cb.scraped_at <= pe.created_at
+                AND cb.scraped_at >= pe.created_at - interval '{AGE_CONSENSUS_MIN} minutes'
+              ORDER BY cb.scraped_at DESC LIMIT 1) AS bk{i}""")
+    return ",\n               ".join(cols)
 
 
 def _extraits_features(session: AsyncSession) -> tuple[str, str]:
@@ -705,7 +889,12 @@ async def calculer_et_persister(session: AsyncSession) -> dict:
     global _cache
     await session.execute(text(_DDL))
     courses = await _charger_courses(session)
-    verdict = evaluer(courses)
+    try:
+        from ml.algo_flags import FLAGS
+        consensus_servi = bool(FLAGS.melange_consensus_bk)
+    except Exception:                                            # noqa: BLE001
+        consensus_servi = False
+    verdict = evaluer(courses, consensus_servi=consensus_servi)
     examen = {**verdict, "examine_le": datetime.now(timezone.utc).isoformat(),
               "fenetre_jours": FENETRE_JOURS, "fraicheur_max_min": FRAICHEUR_MAX_MIN}
     try:
@@ -716,7 +905,8 @@ async def calculer_et_persister(session: AsyncSession) -> dict:
     if not verdict.get("retenu"):
         log.info("melange_arrivees.valeur_conservee", **{k: v for k, v in verdict.items()
                                                           if k not in ("betas_par_moitie",
-                                                                       "etendu")})
+                                                                       "etendu",
+                                                                       "consensus_bk")})
         return {"status": "valeur_conservee", **verdict}
     donnees = {**examen, "applique_depuis": datetime.now(timezone.utc).isoformat()}
     await _ecrire(session, _ID_SERVICE, donnees)
@@ -725,6 +915,7 @@ async def calculer_et_persister(session: AsyncSession) -> dict:
     log.info("melange_arrivees.ajuste", beta_modele=verdict["beta_modele"],
              beta_marche=verdict["beta_marche"], n_courses=verdict["n_courses"],
              etendu=bool(_et.get("retenu")), gammas=_et.get("gammas"),
+             consensus_bk=bool((verdict.get("consensus_bk") or {}).get("retenu")),
              gain_etendu=_et.get("gain_logv_vs_deux_parametres"),
              gain_logv_vs_marche=verdict["gain_logv_vs_marche"],
              gain_logv_vs_servi=verdict["gain_logv_vs_servi"])
