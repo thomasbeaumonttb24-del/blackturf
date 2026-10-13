@@ -6,8 +6,9 @@
  *
  * Le parieur joue au PMU : une cote PMU PLUS HAUTE que le prix juste des
  * bookmakers lui fait gagner plus à mise égale (intéressant) ; plus basse, moins
- * (à éviter). Aucun ROI n'est annoncé : la mesure de référence porte sur des cotes
- * de clôture, que le parieur ne connaît pas au moment de jouer.
+ * (à éviter). C'est une INFORMATION de prix, pas un conseil de pari : rejoué sur
+ * 1 926 courses (13/10), jouer un écart vu ~10 min avant le départ n'a pas
+ * rapporté (−19 %, comme tout jouer) — l'écart se referme avant le départ.
  */
 
 import { useState } from "react";
@@ -124,6 +125,10 @@ function LigneEcart({ e, avecCourse }: { e: Ecart; avecCourse?: boolean }) {
 const EXPLICATION =
   "Vous jouez au PMU : quand sa cote est plus haute que le prix juste des bookmakers (Unibet, Bet365, Ladbrokes, Betfair, marge retirée), vous gagnez plus à mise égale. Plus basse, vous gagnez moins.";
 
+/** Ce que l'écart ne dit pas, mesuré : dit en toutes lettres sous chaque liste. */
+const AVERTISSEMENT =
+  "Information de prix, pas un conseil de pari : l'écart se referme souvent avant le départ, quand la cote PMU rejoint le marché. Rejoué sur 1 926 courses, jouer un écart vu 10 minutes avant le départ n'a pas rapporté. Pariez de façon responsable.";
+
 /** Carte de la page course (onglet Marché). Rien si aucune source bookmaker. */
 export function EcartsCotesCourse({ courseId, terminee }: { courseId: string; terminee?: boolean }) {
   const { data } = useSWR<{ ecarts: Ecart[] }>(
@@ -163,7 +168,7 @@ export function EcartsCotesCourse({ courseId, terminee }: { courseId: string; te
         </div>
       )}
       <p className="mt-3 text-[11px] leading-relaxed text-stone-400">
-        Un écart se vérifie sur la durée, jamais sur un pari isolé. Pariez de façon responsable.
+        {AVERTISSEMENT}
       </p>
     </section>
   );
@@ -202,6 +207,7 @@ export function EcartsCotesJour({ max = 12 }: { max?: number }) {
           )}
         </>
       )}
+      <p className="mt-3 text-[11.5px] leading-relaxed text-stone-500">{AVERTISSEMENT}</p>
     </section>
   );
 }

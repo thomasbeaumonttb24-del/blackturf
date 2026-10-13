@@ -105,7 +105,7 @@ def test_raisons_contextuelles():
     assert "étrangère" in texte
     assert "Betfair" in texte
     prud = " ".join(e["prudence"])
-    assert "90 min" in prud and "8 000 €" in prud and "au départ" in prud
+    assert "90 min" in prud and "8 000 €" in prud and "se referme" in prud
     # Course terminée : pas de prudence sur l'évolution d'avant départ.
     e2 = _par_numero(detecter_ecarts(champ, course_terminee=True, pool_gagnant_eur=8000))[1]
     assert not any("départ" in t or "enjeux" in t for t in e2["prudence"])

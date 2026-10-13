@@ -18,12 +18,16 @@ Geny est exclu (source non fiable, cf. `services.data_quality`) : sur 1 033
 courses (21 jours, 2026-09-21 → 10-11) c'est la pire source (log-loss 1,97 contre
 1,91 pour le PMU et 1,89 pour le consensus).
 
-Mesure du 2026-10-12 (cotes FINALES, simple gagnant à 1 €, 11 691 partants) :
-tout jouer −16,6 % ; écart > 10 % +4,5 % ; > 20 % +15,1 % ; ≤ −20 % −35,4 %.
-Stable en SENS sur deux demi-périodes, pas en ampleur (> 20 % : +26,7 % puis
-+3,9 %). Le signal classe bien les chevaux ; il ne garantit pas un gain — le
-site ne publie donc AUCUN ROI tiré de cette mesure, faite sur des cotes de
-clôture que le parieur ne connaît pas au moment de jouer.
+CE QUE L'ÉCART NE DIT PAS (mesuré, ne pas le présenter comme un pari gagnant) :
+  · cotes de CLÔTURE (12/10, 11 691 partants) : écart > 10 % +4,5 %, > 20 %
+    +15,1 % — mais la cote PMU de clôture EST le rapport payé : mesure biaisée ;
+  · cotes AU PRONOSTIC (13/10, rejeu prod, 1 926 courses, cote figée ~T-10,
+    cote bookmaker ≤ 1 h) : tout −19,9 %, écart > 10 % −19,4 %, > 20 % −20,7 %,
+    > 50 % −13,9 % [−35 ; +7], ≤ −20 % −17,0 %. Aucun seuil ne sort du négatif
+    de façon fiable : l'écart vu 10 min avant le départ se REFERME avant le
+    départ (la cote PMU rejoint le marché).
+L'écart est donc une INFORMATION de prix (« à cet instant, le PMU paie plus que
+les bookmakers »), jamais une promesse de gain : le site le dit en toutes lettres.
 """
 from __future__ import annotations
 
@@ -50,9 +54,9 @@ SOURCES_MIN = 2              # sous ce nombre, un écart positif n'est pas propo
 SEUIL_NET = 0.10             # PMU paie ≥ 10 % de plus que le prix juste
 SEUIL_FORT = 0.20
 SEUIL_DEFAVORABLE = -0.20    # PMU paie ≥ 20 % de moins
-# Au-delà, un écart n'est pas PROPOSÉ (niveau « a_confirmer ») : mesuré le 12/10,
-# cote ≥ 40 et écart > 10 % = 1 394 paris pour 20 gagnants (−3 %), du bruit ; sous
-# 40 avec ≥ 2 sources, l'écart > 10 % est positif dans chaque tranche (+19,6 %).
+# Au-delà, l'écart est rangé « a_confirmer » et sort de la liste du jour : sur ces
+# cotes, quelques euros d'enjeux déplacent la cote PMU et l'écart est surtout du
+# bruit (20 gagnants sur 1 394 chevaux à écart > 10 %, cotes de clôture du 12/10).
 COTE_MAX_PROPOSITION = 40.0
 ECART_SUSPECT = 1.50         # PMU ≥ 2,5 × le prix juste : appariement à vérifier
 DISPERSION_ACCORD = 0.15     # écart-type des log-probas entre sources
@@ -247,8 +251,9 @@ def _expliquer(p, *, ecart, cote_pmu, cote_fav, dispo, dispersion, etranger,
             prudence.append(f"Peu d'enjeux en simple gagnant ({int(pool_gagnant_eur):,} €)"
                             .replace(",", " ") + " : la cote PMU peut encore beaucoup bouger.")
         if ecart > 0:
-            prudence.append("La cote PMU définitive n'est connue qu'au départ : elle "
-                            "baisse souvent dans les dernières minutes.")
+            prudence.append("L'écart se referme souvent avant le départ : la cote PMU "
+                            "rejoint le marché. Mesuré sur 1 926 courses, jouer un écart "
+                            "vu 10 minutes avant le départ n'a pas rapporté.")
     return raisons, prudence
 
 
