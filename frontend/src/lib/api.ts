@@ -175,6 +175,10 @@ export const coursesApi = {
   // s'il est offert). Évite de proposer/sélectionner un pari injouable.
   parisDisponibles: (id: string) => api.get(`/courses/${id}/paris-disponibles`),
   confrontations: (id: string) => api.get(`/courses/${id}/confrontations`),
+  // Écarts PMU / bookmakers (public) : où le PMU paie plus — ou moins — que le prix
+  // juste des bookmakers, avec les raisons. Cf. backend services/ecarts_cotes.py.
+  ecartsCotes: (id: string) => api.get(`/courses/${id}/ecarts-cotes`),
+  ecartsCotesJour: () => api.get("/ecarts-cotes/jour"),
   cheval: (id: string) => api.get(`/chevaux/${id}`),
   jockey: (id: string) => api.get(`/jockeys/${id}`),
   entraineur: (id: string) => api.get(`/entraineurs/${id}`),

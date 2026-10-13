@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { IdentiteCheval } from "@/components/courses/identite-cheval";
+import { EcartsCotesJour } from "@/components/courses/EcartsCotes";
 import { Reveal, Tilt } from "@/components/track-record/effets";
 import { Compteur, Etoiles, Plan3D, SectionTitre, nf } from "@/components/espace/kit";
 import { useAuth } from "@/hooks/useAuth";
@@ -451,6 +452,8 @@ export default function ValueBetsPage() {
               </div>
             </div>
           </Reveal>
+          {/* Données de marché publiques : visibles sans abonnement. */}
+          <Reveal className="mt-10"><EcartsCotesJour max={8} /></Reveal>
         </div>
       </div>
     );
@@ -594,6 +597,9 @@ export default function ValueBetsPage() {
             </div>
           </Reveal>
         )}
+
+        {/* Écarts de marché PMU / bookmakers : indépendants du pronostic, complètent la sélection. */}
+        <Reveal className="mt-12"><EcartsCotesJour /></Reveal>
 
         <p className="mx-auto mt-12 max-w-2xl text-center text-xs leading-relaxed text-stone-500">
           <span className="font-medium text-stone-700">Espérance = cote × chance calculée − 1.</span>{" "}

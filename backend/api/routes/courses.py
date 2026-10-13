@@ -2,6 +2,7 @@
 Courses routes — BlackTurf.
 Programme du jour, détail course, partants.
 """
+import re
 import structlog
 from datetime import date, datetime, time as dtime, timezone, timedelta
 from typing import Optional
@@ -9,7 +10,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_, func, text
+from sqlalchemy import select, and_, func, text, bindparam
 
 from api.routes.auth import get_current_user, require_pro
 from api.middleware.rate_limit import rate_limit_public, rate_limit_predictions
@@ -2678,6 +2679,156 @@ async def get_comparaison_cotes(
         }
         for r in rows
     ]
+
+
+# ─────────────────────────────────────────────────────────────
+# Écarts PMU / bookmakers (cf. services.ecarts_cotes)
+# ─────────────────────────────────────────────────────────────
+async def _ecarts_pour_courses(db: AsyncSession, course_ids: list[str]) -> dict[str, list[dict]]:
+    """{course_id: écarts détectés} — une lecture des partants, une des fraîcheurs."""
+    from services.ecarts_cotes import SOURCES, SOURCE_HISTORIQUE, detecter_ecarts
+    from services.hippodromes import zone_hippodrome, ZONE_ETRANGER
+    if not course_ids:
+        return {}
+    cols = ", ".join(f"p.{c}" for c in SOURCES)
+    rows = (await db.execute(text(f"""
+        SELECT p.course_id, p.participation_id, p.numero, ch.nom, p.non_partant,
+               p.cote_pmu, p.mouvement_cote_pct, {cols}
+        FROM participations p
+        JOIN chevaux ch ON ch.cheval_id = p.cheval_id
+        WHERE p.course_id IN :cids
+        ORDER BY p.course_id, p.numero
+    """).bindparams(bindparam("cids", expanding=True)), {"cids": course_ids})).all()
+    # Colonnes simples, pas d'objets ORM : le rollback ci-dessous (lecture de
+    # fraîcheur en échec) expirerait des objets et leur relecture lèverait
+    # MissingGreenlet.
+    courses = {r.course_id: r for r in (await db.execute(
+        select(Course.course_id, Course.hippodrome_nom, Course.pool_gagnant_centimes,
+               Course.statut).where(Course.course_id.in_(course_ids)))).all()}
+    # Âge du dernier relevé par partant et par source (prudence « cote ancienne »).
+    fraicheur: dict[str, dict[str, float]] = {}
+    inverse = {v: k for k, v in SOURCE_HISTORIQUE.items()}
+    try:
+        for pid, src, age in (await db.execute(text("""
+            SELECT participation_id, source,
+                   EXTRACT(EPOCH FROM (now() - max(scraped_at))) / 60.0
+            FROM cotes_bookmakers
+            WHERE course_id IN :cids AND source IN :srcs
+            GROUP BY participation_id, source
+        """).bindparams(bindparam("cids", expanding=True), bindparam("srcs", expanding=True)),
+            {"cids": course_ids, "srcs": list(inverse)})).all():
+            if src in inverse and age is not None:
+                fraicheur.setdefault(pid, {})[inverse[src]] = float(age)
+    except Exception as e:
+        await db.rollback()
+        log.debug("courses.ecarts_fraicheur_indisponible", err=str(e)[:160])
+    par_course: dict[str, list[dict]] = {}
+    for r in rows:
+        par_course.setdefault(r[0], []).append({
+            "participation_id": r[1], "numero": r[2], "nom": r[3], "non_partant": r[4],
+            "cote_pmu": r[5], "mouvement_cote_pct": r[6],
+            **dict(zip(SOURCES, r[7:])),
+        })
+    zones: dict[str, Optional[str]] = {}
+    out: dict[str, list[dict]] = {}
+    for cid, partants in par_course.items():
+        c = courses.get(cid)
+        hippo = c.hippodrome_nom if c else None
+        if hippo not in zones:
+            zones[hippo] = await zone_hippodrome(db, hippo)
+        out[cid] = detecter_ecarts(
+            partants,
+            etranger=zones[hippo] == ZONE_ETRANGER,
+            pool_gagnant_eur=(c.pool_gagnant_centimes / 100) if c and c.pool_gagnant_centimes else None,
+            fraicheur_min=fraicheur,
+            course_terminee=bool(c and c.statut not in ("a_venir", "en_cours")),
+        )
+    return out
+
+
+@router.get("/courses/{course_id}/ecarts-cotes")
+async def get_ecarts_cotes(
+    course_id: str,
+    db: AsyncSession = Depends(get_db),
+    _rl: None = Depends(rate_limit_public),
+):
+    """Où le PMU paie plus (ou moins) que le prix juste des bookmakers.
+
+    Public, comme la comparaison des cotes dont il découle. Cache 60 s : les
+    cotes bougent jusqu'au départ.
+    """
+    import json
+    from services.ecarts_cotes import resume_course
+    cache_key = f"ecarts_cotes:v1:{course_id}"
+    try:
+        redis = await get_redis()
+        cached = await redis.get(cache_key)
+        if cached:
+            return json.loads(cached)
+    except Exception:
+        redis = None
+    ecarts = (await _ecarts_pour_courses(db, [course_id])).get(course_id, [])
+    result = {"course_id": course_id, "ecarts": ecarts, **resume_course(ecarts)}
+    if redis is not None:
+        try:
+            await redis.setex(cache_key, 60, json.dumps(result))
+        except Exception:
+            pass
+    return result
+
+
+@router.get("/ecarts-cotes/jour")
+async def get_ecarts_cotes_jour(
+    db: AsyncSession = Depends(get_db),
+    _rl: None = Depends(rate_limit_public),
+):
+    """Écarts « net » et « fort » des courses du jour pas encore parties, le plus
+    grand écart d'abord. Cache 2 min."""
+    import json
+    cache_key = f"ecarts_cotes:jour:v1:{jour_courses().isoformat()}"
+    try:
+        redis = await get_redis()
+        cached = await redis.get(cache_key)
+        if cached:
+            return json.loads(cached)
+    except Exception:
+        redis = None
+    maintenant = datetime.now(timezone.utc)
+    # Colonnes simples (cf. `_ecarts_pour_courses` : un rollback y expirerait des objets).
+    courses = (await db.execute(
+        select(Course.course_id, Course.numero_reunion, Course.numero,
+               Course.hippodrome_nom, Course.date_heure).where(
+            Course.date_heure >= maintenant,
+            Course.date_heure < maintenant + timedelta(hours=24),
+            Course.statut == "a_venir",
+        ).order_by(Course.date_heure)
+    )).all()
+    def _aware(d):
+        return d if d.tzinfo else d.replace(tzinfo=timezone.utc)
+    courses = [c for c in courses
+               if _aware(c.date_heure).astimezone(PARIS).date() == jour_courses()]
+    ecarts = await _ecarts_pour_courses(db, [c.course_id for c in courses])
+    lignes = []
+    for c in courses:
+        for e in ecarts.get(c.course_id, []):
+            if e["niveau"] in ("fort", "net"):
+                lignes.append({
+                    **e, "course_id": c.course_id,
+                    # Repli sur le course_id ("12102026R2C1" → "R2C1"), comme le palmarès.
+                    "code": (f"R{c.numero_reunion}C{c.numero}" if c.numero_reunion and c.numero
+                             else (m.group(1) if (m := re.search(r"(R\d+C\d+)", c.course_id)) else None)),
+                    "hippodrome": c.hippodrome_nom,
+                    "depart": _aware(c.date_heure).isoformat(),
+                })
+    lignes.sort(key=lambda x: x["ecart"], reverse=True)
+    result = {"jour": jour_courses().isoformat(), "ecarts": lignes[:60],
+              "maj": maintenant.isoformat()}
+    if redis is not None:
+        try:
+            await redis.setex(cache_key, 120, json.dumps(result))
+        except Exception:
+            pass
+    return result
 
 
 @router.get("/courses/{course_id}/pool-evolution")

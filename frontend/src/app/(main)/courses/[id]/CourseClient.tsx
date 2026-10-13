@@ -35,6 +35,7 @@ import {
   ClassementAlgo, ClassementApercu, ClassementVerrouille, formatCoteFr, type ClassementSignal,
 } from "@/components/courses/classement";
 import { OutsidersCourse } from "@/components/outsiders/Outsiders";
+import { EcartsCotesCourse } from "@/components/courses/EcartsCotes";
 import { formatCote, formatCoteJuste, formatEV, etoiles, formatDateTime, formatMontantDevise, cn } from "@/lib/utils";
 import { toast } from "sonner";
 import {
@@ -3574,6 +3575,9 @@ export default function CoursePage({
           {course.statut !== "termine" && (
             <MarcheCotes courseId={id} partants={course.partants} statut={course.statut} connecte={!!user} authLoading={authLoading} />
           )}
+
+          {/* ── Écarts PMU / bookmakers : où le PMU paie plus (ou moins) que le prix juste ── */}
+          <EcartsCotesCourse courseId={id} terminee={course.statut !== "a_venir" && course.statut !== "en_cours"} />
 
           {/* ── Comparaison multi-bookmakers — ouverte : c'est le contenu principal de l'onglet Marché ── */}
           {course.partants.some((p) => p.cote_geny || p.cote_winamax || p.cote_betclic || p.cote_unibet || p.cote_bet365 || p.cote_ladbrokes || p.cote_betfair_exchange) && (
