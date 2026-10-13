@@ -268,6 +268,9 @@ services:
       - BT_STAKING_SAFE=${BT_STAKING_SAFE:-1}
       - BT_RANKER_BLEND=${BT_RANKER_BLEND:-0}
       - BT_MARKET_GATE=${BT_MARKET_GATE:-1}
+      # Consensus bookmakers dans le mélange appris (activé 13/10 après le banc des
+      # plans ; sans effet tant que le nocturne ne l'a pas retenu). Rollback : 0 dans .env.
+      - BT_MELANGE_CONSENSUS_BK=${BT_MELANGE_CONSENSUS_BK:-1}
     expose:
       - "8000"
     depends_on:
@@ -357,6 +360,9 @@ services:
       - BT_STAKING_SAFE=${BT_STAKING_SAFE:-1}
       - BT_RANKER_BLEND=${BT_RANKER_BLEND:-0}
       - BT_MARKET_GATE=${BT_MARKET_GATE:-1}
+      # Consensus bookmakers dans le mélange appris (activé 13/10 après le banc des
+      # plans ; sans effet tant que le nocturne ne l'a pas retenu). Rollback : 0 dans .env.
+      - BT_MELANGE_CONSENSUS_BK=${BT_MELANGE_CONSENSUS_BK:-1}
     depends_on:
       db:
         condition: service_healthy
@@ -456,6 +462,9 @@ services:
       - BT_STAKING_SAFE=${BT_STAKING_SAFE:-1}
       - BT_RANKER_BLEND=${BT_RANKER_BLEND:-0}
       - BT_MARKET_GATE=${BT_MARKET_GATE:-1}
+      # Consensus bookmakers dans le mélange appris (activé 13/10 après le banc des
+      # plans ; sans effet tant que le nocturne ne l'a pas retenu). Rollback : 0 dans .env.
+      - BT_MELANGE_CONSENSUS_BK=${BT_MELANGE_CONSENSUS_BK:-1}
       # Fenêtre d'historique du retraining. Elle est GLISSANTE : à trois mois elle
       # perdait chaque nuit plus de partants anciens qu'elle n'en gagnait de
       # récents, et le dataset rétrécissait version après version (42 285 le
@@ -686,6 +695,9 @@ services:
       - BT_STAKING_SAFE=${BT_STAKING_SAFE:-1}
       - BT_RANKER_BLEND=${BT_RANKER_BLEND:-0}
       - BT_MARKET_GATE=${BT_MARKET_GATE:-1}
+      # Consensus bookmakers dans le mélange appris (activé 13/10 après le banc des
+      # plans ; sans effet tant que le nocturne ne l'a pas retenu). Rollback : 0 dans .env.
+      - BT_MELANGE_CONSENSUS_BK=${BT_MELANGE_CONSENSUS_BK:-1}
     depends_on:
       db:
         condition: service_healthy
