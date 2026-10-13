@@ -195,7 +195,8 @@ function InscriptionContent() {
                     {parrain.prenom ? `${parrain.prenom} vous invite` : "Vous êtes invité"} :{" "}
                     {euros(parrain.remise)} offerts
                   </span>{" "}
-                  sur votre premier abonnement Standard ou Expert, mensuel ou annuel.
+                  remboursés sur votre premier paiement : abonnement Standard ou Expert, Pass Semaine ou Mois
+                  (pas le Pass Jour).
                 </p>
               </div>
             )}
