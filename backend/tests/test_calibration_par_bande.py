@@ -259,6 +259,10 @@ def test_verdict_bande_regles():
     assert dq.verdict_bande(_b(0.16, 0.024), _b(0.08, 0.02, 600)) == "defaut_modele"
     # Marché qui dérive dans l'AUTRE sens : rien d'hérité.
     assert dq.verdict_bande(_b(0.082, 0.024), _b(-0.08, 0.02, 600)) == "defaut_modele"
+    # Cas de la prod du 13/10 : modèle +8,1 pts (z 3,4), marché +5,8 pts sur 490
+    # partants (z ≈ 2,6, sous le seuil seul) — surplus 0,7σ, le modèle ne fait pas
+    # pire : hérité, pas d'alerte.
+    assert dq.verdict_bande(_b(0.081, 0.0237, 442), _b(0.058, 0.0224, 490)) == "herite_du_marche"
     # Marché non concluant dans la bande : on ne peut pas excuser.
     assert dq.verdict_bande(_b(0.082, 0.024), _b(0.09, 0.05, 100)) == "defaut_modele"
     # Écart non significatif : rien à dire, référence ou pas.

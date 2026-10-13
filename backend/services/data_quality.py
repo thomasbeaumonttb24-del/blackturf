@@ -1017,13 +1017,17 @@ def verdict_bande(bande: dict, bande_marche: dict | None) -> str:
         return "ok"
     if not bande_marche or not bande_marche.get("concluant"):
         return "defaut_modele"
-    meme_sens = (bande_marche["ecart"] > 0) == (bande["ecart"] > 0)
-    if not (meme_sens and bande_marche.get("significatif")):
-        return "defaut_modele"
+    # La question posée est « le modèle fait-il PIRE que le marché ? », pas « le
+    # marché dérive-t-il significativement seul ? ». Exiger z ≥ 3 du marché avant de
+    # comparer classait en défaut un modèle à +8,1 pts quand le marché dérivait de
+    # +5,8 pts (z ≈ 2,6) dans la même bande — surplus 0,7σ, aucune différence réelle
+    # (prod, 13/10). Seule la part de la dérive du marché qui va dans le MÊME sens
+    # que celle du modèle l'excuse ; un marché qui dérive à l'opposé n'excuse rien.
     # Les deux écarts portent sur des populations différentes (sélectionnées par la
     # proba de chacun) : on compose les deux bruits binomiaux.
     sigma = math.sqrt(bande["sigma"] ** 2 + bande_marche["sigma"] ** 2)
-    surplus = abs(bande["ecart"]) - abs(bande_marche["ecart"])
+    signe = 1.0 if bande["ecart"] > 0 else -1.0
+    surplus = abs(bande["ecart"]) - max(0.0, signe * bande_marche["ecart"])
     if sigma > 0 and surplus / sigma >= Z_PIRE_QUE_MARCHE:
         return "defaut_modele"
     return "herite_du_marche"
