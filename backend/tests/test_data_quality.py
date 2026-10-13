@@ -252,6 +252,84 @@ async def test_courses_a_venir_sans_aucune_cote_sont_signalees(db):
     out = await dq.courses_non_pronosticables(db)
     assert out["n_a_venir"] == 1
     assert out["n_sans_aucune_cote"] == 1
+    # La course est NOMMÉE, avec son motif : la prochaine alerte dit où chercher.
+    assert out["courses_sans_cote"][0]["course_id"] == "CC"
+    assert "aucun rapport direct" in out["courses_sans_cote"][0]["motif"]
+
+
+@pytest.mark.asyncio
+async def test_course_sans_simple_gagnant_n_est_pas_une_anomalie(db):
+    """`cote_pmu` = rapport direct du SIMPLE GAGNANT. Une course que le PMU liste
+    sans l'ouvrir au simple gagnant n'aura jamais de cote : l'alerte (8 fois) ne
+    pouvait pas se résoudre. Elle est comptée à part, pas signalée."""
+    depart = MAINTENANT + timedelta(hours=1)
+    _course_paris = [("CP1", ["E_SIMPLE_GAGNANT", "E_TRIO"], 3.0),   # normale, cotée
+                     ("CP2", None, None),                              # aucun pari offert
+                     ("CP3", ["E_REPORT_PLUS"], None)]                 # pas de gagnant
+    for cid, paris, cote in _course_paris:
+        db.add(Course(course_id=cid, reunion_id="R1", numero=1, nom="T",
+                      date_heure=depart, hippodrome_nom="Vichy", discipline="Plat",
+                      distance=2000, statut="a_venir", paris_disponibles=paris))
+        for n in range(1, 4):
+            await _partant(db, cid, n, cote_pmu=cote)
+    await db.commit()
+
+    out = await dq.courses_non_pronosticables(db)
+    assert out["n_a_venir"] == 3
+    assert out["n_sans_aucune_cote"] == 0
+    assert out["n_sans_pari_pmu"] == 2
+
+
+def test_simple_gagnant_international_reste_exige():
+    """Le pool international (`SIMPLE_GAGNANT_INTERNATIONAL`) offre un gagnant : une
+    course qui le propose sans cote reste une anomalie."""
+    out = dq.classer_courses_sans_cote([
+        ("CI1", "Meydan", MAINTENANT, ["SIMPLE_GAGNANT_INTERNATIONAL"], 8, 0),
+    ])
+    assert out["n_sans_aucune_cote"] == 1 and out["n_sans_pari_pmu"] == 0
+
+
+def test_paris_illisibles_partout_n_excusent_rien():
+    """Garde-fou : si AUCUNE course n'a de paris lisibles, c'est la lecture de
+    `paris[]` qui est cassée — l'exclusion ne doit pas faire taire l'alerte."""
+    out = dq.classer_courses_sans_cote([
+        ("CX1", "Vichy", MAINTENANT, None, 8, 0),
+        ("CX2", "Vichy", MAINTENANT, "null", 0, 0),
+    ])
+    assert out["n_sans_aucune_cote"] == 2 and out["n_sans_pari_pmu"] == 0
+    assert out["courses_sans_cote"][1]["motif"] == "aucun partant enregistré"
+
+
+@pytest.mark.asyncio
+async def test_une_anomalie_disparue_est_close_automatiquement(db):
+    """La clé fusionnait les répétitions, mais rien ne refermait la ligne : une
+    anomalie vue il y a 15 jours restait « ouverte ». Le contrôle recalcule tout
+    chaque heure, donc ce qu'il ne relève plus est résolu."""
+    from sqlalchemy import text
+
+    await db.execute(text("""
+        CREATE TABLE IF NOT EXISTS system_errors (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, source VARCHAR(80),
+            message TEXT, cle VARCHAR(160), resolved BOOLEAN NOT NULL DEFAULT 0)
+    """))
+    for src, cle in (("data_quality", "courses_non_pronosticables"),
+                     ("data_quality", "calibration_derive"),
+                     ("data_quality", None),               # sans clé : ponctuelle
+                     ("scraper", "courses_non_pronosticables")):
+        await db.execute(text(
+            "INSERT INTO system_errors (source, message, cle, resolved) "
+            "VALUES (:s, 'x', :k, 0)"), {"s": src, "k": cle})
+    await db.commit()
+
+    n = await dq._clore_anomalies_disparues(db, {"calibration_derive"})
+    assert n == 1
+    ouvertes = (await db.execute(text(
+        "SELECT source, cle FROM system_errors WHERE resolved = 0 ORDER BY id"))).all()
+    assert [tuple(r) for r in ouvertes] == [
+        ("data_quality", "calibration_derive"),
+        ("data_quality", None),
+        ("scraper", "courses_non_pronosticables"),
+    ]
 
 
 # ── Horodatage RÉEL de la cote (migration 0033) ──────────────────────────────

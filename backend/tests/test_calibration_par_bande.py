@@ -134,3 +134,141 @@ async def test_la_mesure_isole_ce_qui_a_ete_servi_APRES_la_correction(db):
     # La mesure de fond, elle, continue de rapporter la dérive historique.
     bande = next(b for b in out["bandes"] if b["bande"] == "0.40-0.50")
     assert bande["ecart"] == pytest.approx(0.09, abs=0.005)
+
+
+# ── Alerte ACTIONNABLE : significativité et référence marché (2026-10-13) ─────
+#
+# L'alerte `calibration_derive` s'est répétée 813 fois sur la bande 0,40-0,50
+# (440 partants, 44,3 % annoncés, 36,1 % réalisés). L'écart est RÉEL (z ≈ 3,5),
+# mais la cote PMU porte le même dans la même bande, et aucun recalibrage après
+# le mélange n'a battu le servi hors échantillon (mesure du 2026-10-04). Une
+# alerte qu'aucune action ne peut résoudre n'informe plus : elle ne doit se lever
+# que si le modèle fait SIGNIFICATIVEMENT pire que le marché.
+
+async def _seed_champs(db, *, n, modele, marche, gagnants):
+    """`n` courses de trois partants (numéros 7, 8, 9).
+
+    `modele` / `marche` : probas du modèle et du marché par partant (le marché est
+    stocké en cote figée = 1/p). `gagnants` : nombre de victoires de 7 et de 8 sur
+    les `n` courses (9 gagne le reste).
+    """
+    from datetime import datetime, timedelta, timezone
+
+    from db.models import Course, Participation, Prediction, Resultat
+
+    depart = datetime.now(timezone.utc) - timedelta(days=1)
+    g7, g8 = gagnants
+    for i in range(n):
+        cid = f"M{i:06d}"
+        gagnant = 7 if i < g7 else 8 if i < g7 + g8 else 9
+        db.add(Course(course_id=cid, reunion_id="R1", numero=1, nom="T",
+                      date_heure=depart, hippodrome_nom="Vincennes",
+                      discipline="Attelé", distance=2700, nb_partants=3,
+                      statut="termine"))
+        for k, num in enumerate((7, 8, 9)):
+            pid = f"P{i:06d}{num}"
+            db.add(Participation(participation_id=pid, course_id=cid,
+                                 cheval_id=f"H{i:06d}{num}", numero=num,
+                                 non_partant=False))
+            db.add(Prediction(prediction_id=f"PR{i:06d}{num}", participation_id=pid,
+                              course_id=cid, proba_top1=modele[k], proba_top3=0.9,
+                              rang_predit=k + 1, cote_figee=round(1.0 / marche[k], 4),
+                              created_at=depart - timedelta(minutes=30)))
+        db.add(Resultat(course_id=cid,
+                        classement=[{"numero": gagnant, "position": 1}]))
+    await db.commit()
+
+
+def _bande(rapport, nom):
+    return next(b for b in rapport["calibration_par_bande"]["bandes"] if b["bande"] == nom)
+
+
+@pytest.mark.asyncio
+async def test_la_bande_porte_sa_significativite(db):
+    """Le cas de production : annoncé 45 %, réalisé 36 % sur 400 → z ≈ 3,6."""
+    await _seed(db, n_par_bande=[(0.45, 0.36, 400)])
+    out = await dq.calibration_par_bande(db)
+    b = next(b for b in out["bandes"] if b["bande"] == "0.40-0.50")
+    assert b["sigma"] == pytest.approx(0.0249, abs=0.001)
+    assert b["z"] == pytest.approx(3.6, abs=0.1)
+    assert b["significatif"] is True
+    bas, haut = b["ic95_reel"]
+    assert bas < 0.36 < haut and haut < 0.45        # l'IC exclut l'annoncé
+
+
+@pytest.mark.asyncio
+async def test_une_derive_heritee_du_marche_n_ouvre_plus_d_anomalie(db):
+    """Le modèle et le marché annoncent 45 %, 36 % gagnent : biais hérité.
+
+    La mesure reste PUBLIÉE (verdict, écart marché) ; seule l'anomalie se tait —
+    sinon elle se répète chaque heure sans qu'aucun correctif ne puisse la clore.
+    """
+    await _seed_champs(db, n=400, modele=(0.45, 0.30, 0.25),
+                       marche=(0.45, 0.30, 0.25), gagnants=(144, 136))
+    rapport = await dq.rapport_qualite(db)
+    b = _bande(rapport, "0.40-0.50")
+    assert b["significatif"] is True
+    assert b["verdict"] == "herite_du_marche"
+    assert b["ecart_marche"] == pytest.approx(b["ecart"], abs=0.002)
+    assert "calibration_derive" not in {a["code"] for a in rapport["anomalies"]}
+
+
+@pytest.mark.asyncio
+async def test_un_modele_plus_mal_calibre_que_le_marche_alerte(db):
+    """Le marché annonce juste (36 %), le modèle 45 % : défaut DU MODÈLE."""
+    await _seed_champs(db, n=400, modele=(0.45, 0.30, 0.25),
+                       marche=(0.36, 0.34, 0.30), gagnants=(144, 136))
+    rapport = await dq.rapport_qualite(db)
+    b = _bande(rapport, "0.40-0.50")
+    assert b["verdict"] == "defaut_modele"
+    alerte = next(a for a in rapport["anomalies"] if a["code"] == "calibration_derive")
+    assert "z = +3." in alerte["message"]
+    assert "IC95" in alerte["message"]
+
+
+@pytest.mark.asyncio
+async def test_sans_cote_figee_la_derive_significative_alerte_toujours(db):
+    """Pas de référence marché = pas d'excuse : l'alerte d'origine demeure."""
+    await _seed(db, n_par_bande=[(0.45, 0.36, 400)])
+    rapport = await dq.rapport_qualite(db)
+    assert rapport["calibration_par_bande"]["bandes_marche"] == []
+    assert _bande(rapport, "0.40-0.50")["verdict"] == "defaut_modele"
+    assert "calibration_derive" in {a["code"] for a in rapport["anomalies"]}
+
+
+@pytest.mark.asyncio
+async def test_un_ecart_de_5_points_non_significatif_ne_crie_pas(db):
+    """300 observations, 5,5 points d'écart : z ≈ 1,9, du bruit possible."""
+    await _seed(db, n_par_bande=[(0.45, 0.395, 300)])
+    rapport = await dq.rapport_qualite(db)
+    b = _bande(rapport, "0.40-0.50")
+    assert b["concluant"] is True and abs(b["ecart"]) >= dq.SEUIL_ECART_CALIBRATION
+    assert b["significatif"] is False and b["verdict"] == "ok"
+    assert "calibration_derive" not in {a["code"] for a in rapport["anomalies"]}
+
+
+def _b(ecart, sigma, n=440):
+    return {"ecart": ecart, "sigma": sigma, "n": n, "concluant": n >= 300,
+            "significatif": n >= 300 and abs(ecart / sigma) >= dq.Z_SIGNIFICATIF_CALIBRATION}
+
+
+def test_verdict_bande_regles():
+    # Écart réel, marché identique → hérité.
+    assert dq.verdict_bande(_b(0.082, 0.024), _b(0.085, 0.02, 600)) == "herite_du_marche"
+    # Marché dérive aussi, mais le modèle fait nettement pire (surplus > 2σ composé).
+    assert dq.verdict_bande(_b(0.16, 0.024), _b(0.08, 0.02, 600)) == "defaut_modele"
+    # Marché qui dérive dans l'AUTRE sens : rien d'hérité.
+    assert dq.verdict_bande(_b(0.082, 0.024), _b(-0.08, 0.02, 600)) == "defaut_modele"
+    # Marché non concluant dans la bande : on ne peut pas excuser.
+    assert dq.verdict_bande(_b(0.082, 0.024), _b(0.09, 0.05, 100)) == "defaut_modele"
+    # Écart non significatif : rien à dire, référence ou pas.
+    assert dq.verdict_bande(_b(0.055, 0.029, 300), None) == "ok"
+
+
+def test_proba_marche_ecarte_un_champ_incomplet():
+    """Renormaliser sur un champ à moitié coté gonflerait les cotés : on écarte."""
+    out = dq._probas_marche({
+        "A": [(1, 2.0), (0, 2.0)],
+        "B": [(1, 2.0), (0, None)],
+    })
+    assert out == [(0.5, 1), (0.5, 0)]
