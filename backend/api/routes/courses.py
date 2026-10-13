@@ -268,24 +268,33 @@ async def _load_partants(course_id: str, db: AsyncSession) -> list[PartantOut]:
     except Exception as e:
         log.warning("courses.stats_saison_failed", error=str(e)[:120])
 
-    # Associations jockey × entraîneur pour les paires de cette course
+    # Associations jockey × entraîneur pour les paires de cette course.
+    # Filtrées sur les jockeys ET entraîneurs du champ : la requête lisait toute
+    # la saison (chaque paire de France) à chaque fiche course non cachée, pour
+    # n'en garder qu'une quinzaine. Les vieilles courses (archives, robots) sont
+    # toujours servies hors cache : c'était le coût évitable de la route.
     asso_map: dict[tuple, dict] = {}
     try:
         from datetime import datetime as dt
         saison = dt.now().year
-        asso_res = await db.execute(
-            select(
-                AssociationJockeyEntraineur.jockey_id,
-                AssociationJockeyEntraineur.entraineur_id,
-                AssociationJockeyEntraineur.taux_victoire,
-                AssociationJockeyEntraineur.nb_courses,
-            ).where(AssociationJockeyEntraineur.saison == saison)
-        )
-        for r in asso_res.fetchall():
-            asso_map[(r.jockey_id, r.entraineur_id)] = {
-                "taux": r.taux_victoire,
-                "nb": r.nb_courses,
-            }
+        if jockey_ids and entraineur_ids:
+            asso_res = await db.execute(
+                select(
+                    AssociationJockeyEntraineur.jockey_id,
+                    AssociationJockeyEntraineur.entraineur_id,
+                    AssociationJockeyEntraineur.taux_victoire,
+                    AssociationJockeyEntraineur.nb_courses,
+                ).where(
+                    AssociationJockeyEntraineur.saison == saison,
+                    AssociationJockeyEntraineur.jockey_id.in_(set(jockey_ids)),
+                    AssociationJockeyEntraineur.entraineur_id.in_(set(entraineur_ids)),
+                )
+            )
+            for r in asso_res.fetchall():
+                asso_map[(r.jockey_id, r.entraineur_id)] = {
+                    "taux": r.taux_victoire,
+                    "nb": r.nb_courses,
+                }
     except Exception as e:
         log.warning("courses.asso_map_failed", error=str(e))
 
