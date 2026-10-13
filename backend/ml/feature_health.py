@@ -79,16 +79,15 @@ _META_KEYS = {
 # ont été rattrapés — le PMU efface les commentaires au bout de 30 jours, rien
 # n'existe avant le 26/08/2026. Ces features retrouvent donc de la variance, et
 # le registre le signalera : c'est voulu, l'entrée sera à retirer.
-_COMMENTAIRE = ("commentaire_course jamais écrit avant le 25/09/2026 : "
-                "/performances-detaillees ne publie pas de commentaire ; /participants "
-                "le publie APRÈS la course (relu chaque matin depuis, effacé par le "
-                "PMU à 30 jours)")
-
+# RETIRÉES LE 2026-10-13. L'alerte `registre_features_perime` le répétait depuis
+# 418 passages horaires : les quatre features ont bien retrouvé de la variance.
+# Source vérifiée dans le code ce jour : `services.jobs.job_commentaires_pmu`
+# (cron 07:10 UTC) → `services.commentaires_pmu.relire_commentaires` écrit
+# `historique_courses.commentaire_course` ; `ml.features` le relit (h[15]) pour
+# `compute_commentaire_signal`. Ce ne sont plus des features SANS SOURCE : si
+# elles redevenaient constantes, ce serait une panne de la relecture du matin, et
+# elles doivent alors remonter dans le lot « inexpliqué » — pas y être excusées.
 SANS_SOURCE: dict[str, str] = {
-    "commentaire_signal": _COMMENTAIRE,
-    "commentaire_malchance_recente": _COMMENTAIRE,
-    "commentaire_gagne_facile": _COMMENTAIRE,
-    "nb_commentaires_lus": _COMMENTAIRE,
     # `acceleration_label` se déduit des temps de passage. `temps_passage` n'a ni
     # source ni écrivain dans tout le code (vérifié 2026-08-31) : la colonne est vide
     # depuis l'origine, et les trois taux de dynamique valent donc 0 partout.

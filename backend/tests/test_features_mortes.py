@@ -83,14 +83,39 @@ def test_sans_colonne_constante_rien_n_est_ecarte(tmp_path, monkeypatch):
 
 def test_le_registre_separe_ce_qui_est_explique_de_ce_qui_ne_l_est_pas():
     out = fh.classer_mortes([
-        "commentaire_signal", "dyn_finit_fort",      # cause établie
+        "dyn_finit_fort", "retard_gains",            # cause établie
         "career_momentum", "draw_bias_score",        # personne n'a établi la cause
     ])
-    assert out["documentees"] == ["commentaire_signal", "dyn_finit_fort"]
+    assert out["documentees"] == ["dyn_finit_fort", "retard_gains"]
     assert out["inexpliquees"] == ["career_momentum", "draw_bias_score"]
-    # La cause dit OÙ la donnée manque, pas seulement qu'elle manque : le
-    # commentaire est absent de /performances-detaillees, pas de l'API entière.
-    assert "performances-detaillees" in out["raisons"]["commentaire_signal"]
+    # La cause dit OÙ la donnée manque, pas seulement qu'elle manque.
+    assert "temps_passage" in out["raisons"]["dyn_finit_fort"]
+
+
+COMMENTAIRES = ("commentaire_signal", "commentaire_malchance_recente",
+                "commentaire_gagne_facile", "nb_commentaires_lus")
+
+
+def test_les_features_de_commentaire_ne_sont_plus_excusees():
+    """Depuis le 25/09, les commentaires PMU sont relus chaque matin
+    (`job_commentaires_pmu`) : ces features ONT une source. Les laisser au registre
+    a produit 418 alertes « registre périmé » — et, pire, le jour où la relecture
+    tomberait, leur retour à la constante serait excusé au lieu d'être signalé."""
+    for f in COMMENTAIRES:
+        assert f not in fh.SANS_SOURCE
+    out = fh.classer_mortes(list(COMMENTAIRES))
+    assert out["inexpliquees"] == sorted(COMMENTAIRES)
+    # Vivantes, elles ne rendent plus le registre périmé.
+    assert fh.registre_perime(list(fh.SANS_SOURCE)) == []
+
+
+def test_la_source_des_commentaires_existe_dans_le_code():
+    """Le retrait n'est légitime que si la chaîne d'écriture existe vraiment."""
+    import inspect
+
+    from services import commentaires_pmu, jobs
+    assert "commentaire_course" in inspect.getsource(commentaires_pmu)
+    assert "relire_commentaires" in inspect.getsource(jobs.job_commentaires_pmu)
 
 
 def test_une_source_eteinte_expres_n_est_pas_une_feature_inexpliquee():

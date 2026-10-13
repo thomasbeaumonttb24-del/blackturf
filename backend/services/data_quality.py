@@ -27,6 +27,7 @@ déclaré sain : sur trois partants, 0 % de couverture ne prouve rien.
 from __future__ import annotations
 
 import json
+import math
 from datetime import datetime, timedelta, timezone
 
 import structlog
@@ -163,6 +164,27 @@ SEUIL_HAUSSE_FEATURES_MORTES = 5
 MIN_OBS_BANDE_CALIBRATION = 300
 SEUIL_ECART_CALIBRATION = 0.05
 BANDES_CALIBRATION = ((0.0, 0.40), (0.40, 0.50), (0.50, 0.60), (0.60, 0.70), (0.70, 1.01))
+# Seuil de SIGNIFICATIVITÉ de l'écart (en écarts-types binomiaux). « 300
+# observations » ne suffit pas : à 300, un écart de 5 points n'est qu'à 1,7 sigma.
+# Cinq bandes sont testées à CHAQUE passage horaire : à 2 sigma, une bande saine
+# finirait par crier sur du pur hasard. 3 sigma (p ≈ 0,003 bilatéral) tient
+# même après correction de Bonferroni sur les cinq bandes (0,05 / 5 = 0,01).
+# Mesure du 13/10 : bande 0,40-0,50, 440 partants, 44,3 % annoncés pour 36,1 %
+# réalisés, σ = √(Σp(1−p))/n ≈ 2,4 points → z ≈ 3,5 : l'écart est RÉEL.
+Z_SIGNIFICATIF_CALIBRATION = 3.0
+# Le marché sert de RÉFÉRENCE : une dérive que la cote PMU porte elle-même, dans la
+# même bande, n'est pas un défaut du modèle (qui apprend ~70 % de son mélange sur
+# la cote, β ≈ 0,31 / 0,70) mais un biais hérité. Mesuré le 2026-10-04 sur
+# 2 454 courses : marché 44 % annoncés → 35,5 % réalisés, servi 40-50 % → ~34 % ; et
+# une isotone ou une puissance APRÈS le mélange, testée hors échantillon sur deux
+# découpes, ne fait pas mieux que le servi (+0,003, non concluant). Décision : ne
+# pas recalibrer à l'aveugle. L'alerte ne doit donc se lever que si le modèle est
+# SIGNIFICATIVEMENT plus mal calibré que le marché dans la bande — c'est le seul cas
+# où il existe un correctif à chercher de notre côté.
+Z_PIRE_QUE_MARCHE = 2.0
+# Part minimale des partants de la fenêtre dont la course a un champ ENTIÈREMENT
+# coté (`cote_figee`) pour que la référence marché soit jugée représentative.
+PART_MIN_REFERENCE_MARCHE = 0.8
 
 
 def _as_dt(valeur) -> datetime | None:
@@ -416,23 +438,85 @@ async def courses_non_pronosticables(session: AsyncSession) -> dict:
     Fenêtre `FENETRE_COURSE_SANS_COTE_H` et non `FENETRE_AVANT_DEPART_H` : une
     course sans cote six heures avant son départ n'est pas une panne, c'est le
     fonctionnement normal du PMU (cf. la mesure documentée sur la constante).
+
+    COURSES LÉGITIMEMENT SANS COTE (2026-10-13). `cote_pmu` est le rapport direct du
+    SIMPLE GAGNANT (`dernierRapportDirect`, cf. `scraper.sources.pmu`). Une course
+    pour laquelle le PMU ne propose pas de simple gagnant — typiquement une course
+    d'une réunion étrangère retransmise sans être ouverte aux paris, que le
+    programme liste quand même — n'aura JAMAIS de cote : l'alerte (8 occurrences)
+    ne pouvait pas se résoudre. `paris_disponibles` est réécrit à CHAQUE scrape du
+    programme (`db_writer.champs_maj_course`), donc pour une course à moins de 2 h du
+    départ, son absence veut bien dire « aucun pari offert ».
+    Garde-fou : si AUCUNE course de la fenêtre n'a de paris lisibles, c'est la
+    lecture de `paris[]` qui est cassée, pas le PMU qui ferme tout — rien n'est
+    alors excusé.
+    Les courses qui restent sont NOMMÉES : la prochaine occurrence dira laquelle,
+    ce qui manquait pour remonter à la cause côté scraper.
     """
     maintenant = datetime.now(timezone.utc)
-    row = (await session.execute(text("""
-        SELECT count(*) AS n_a_venir,
-               SUM(CASE WHEN (
-                        SELECT count(p.cote_pmu) FROM participations p
-                        WHERE p.course_id = c.course_id
-                          AND COALESCE(p.non_partant, false) = false) = 0
-                    THEN 1 ELSE 0 END) AS n_sans_aucune_cote
+    lignes = (await session.execute(text("""
+        SELECT c.course_id, c.hippodrome_nom, c.date_heure, c.paris_disponibles,
+               (SELECT count(*) FROM participations p
+                 WHERE p.course_id = c.course_id
+                   AND COALESCE(p.non_partant, false) = false) AS n_partants,
+               (SELECT count(p.cote_pmu) FROM participations p
+                 WHERE p.course_id = c.course_id
+                   AND COALESCE(p.non_partant, false) = false) AS n_cotes
         FROM courses c
         WHERE c.statut = 'a_venir'
           AND c.date_heure >= :maintenant AND c.date_heure <= :horizon
+        ORDER BY c.date_heure
     """), {"maintenant": maintenant,
-           "horizon": maintenant + timedelta(hours=FENETRE_COURSE_SANS_COTE_H)})).first()
+           "horizon": maintenant + timedelta(hours=FENETRE_COURSE_SANS_COTE_H)})).all()
+    return classer_courses_sans_cote(lignes)
+
+
+def _codes_paris(valeur) -> list[str]:
+    """`paris_disponibles` tel que la base le rend (liste, texte JSON, 'null', NULL)."""
+    if isinstance(valeur, str):
+        try:
+            valeur = json.loads(valeur)
+        except (TypeError, ValueError):
+            return []
+    if not isinstance(valeur, list):
+        return []
+    return [str(c).upper() for c in valeur if c]
+
+
+def classer_courses_sans_cote(lignes) -> dict:
+    """Range les courses de la fenêtre. Fonction PURE (testable sans base).
+
+    `lignes` = [(course_id, hippodrome, date_heure, paris_disponibles, n_partants,
+    n_cotes)]. Une course sans cote est EXCUSÉE seulement si le PMU n'y offre pas
+    de simple gagnant ; sinon c'est une anomalie, avec son motif.
+    """
+    lignes = list(lignes)
+    paris_lisibles = any(_codes_paris(l[3]) for l in lignes)
+    sans_cote: list[dict] = []
+    sans_pari = 0
+    for course_id, hippo, depart, paris, n_partants, n_cotes in lignes:
+        if int(n_cotes or 0) > 0:
+            continue
+        codes = _codes_paris(paris)
+        if paris_lisibles and not any("SIMPLE_GAGNANT" in c for c in codes):
+            sans_pari += 1                   # pas de simple gagnant : pas de cote
+            continue
+        _dt = _as_dt(depart)
+        sans_cote.append({
+            "course_id": course_id,
+            "hippodrome": hippo,
+            "depart": _dt.isoformat() if _dt else None,
+            # Le motif oriente la recherche : zéro partant actif = le programme ou
+            # les partants n'ont pas été lus ; des partants sans cote = le rapport
+            # direct n'arrive pas (rafraîchissement des cotes à vérifier).
+            "motif": ("aucun partant enregistré" if not int(n_partants or 0)
+                      else f"{int(n_partants)} partants, aucun rapport direct"),
+        })
     return {
-        "n_a_venir": int(row[0] or 0) if row else 0,
-        "n_sans_aucune_cote": int(row[1] or 0) if row else 0,
+        "n_a_venir": len(lignes),
+        "n_sans_aucune_cote": len(sans_cote),
+        "n_sans_pari_pmu": sans_pari,
+        "courses_sans_cote": sans_cote[:10],
         "fenetre_h": FENETRE_COURSE_SANS_COTE_H,
     }
 
@@ -749,7 +833,7 @@ async def calibration_par_bande(session: AsyncSession, jours: int = 90) -> dict:
     # sur la fenêtre, contre une jointure latérale par partant.
     depuis = datetime.now(timezone.utc) - timedelta(days=int(jours))
     partants = (await session.execute(text("""
-        SELECT p.course_id, pa.numero, p.proba_top1, p.created_at
+        SELECT p.course_id, pa.numero, p.proba_top1, p.created_at, p.cote_figee
         FROM prediction_evaluation p
         JOIN participations pa ON pa.participation_id = p.participation_id
         JOIN courses c ON c.course_id = p.course_id
@@ -791,18 +875,27 @@ async def calibration_par_bande(session: AsyncSession, jours: int = 90) -> dict:
                     continue
 
     lignes: list[tuple[float, int, datetime | None]] = []
-    for course_id, numero, proba, produit_le in partants:
+    # Par course : [(gagné, cote figée)] — de quoi rebâtir la proba du MARCHÉ.
+    cotes_par_course: dict[str, list[tuple[int, float | None]]] = {}
+    for course_id, numero, proba, produit_le, cote in partants:
         gagnant = vainqueur.get(course_id)
         if gagnant is None:
             continue                      # course sans arrivée exploitable
         try:
-            lignes.append((float(proba), 1 if int(numero) == gagnant else 0,
-                           _as_dt(produit_le)))
+            gagne = 1 if int(numero) == gagnant else 0
+            lignes.append((float(proba), gagne, _as_dt(produit_le)))
         except (TypeError, ValueError):
             continue
+        try:
+            cote = float(cote) if cote is not None else None
+        except (TypeError, ValueError):
+            cote = None
+        cotes_par_course.setdefault(course_id, []).append((gagne, cote))
 
     if len(lignes) < MIN_OBS_BANDE_CALIBRATION:
         return {"disponible": False, "raison": "cohorte trop courte", "n": len(lignes)}
+
+    lignes_marche = _probas_marche(cotes_par_course)
 
     # Date de mise en service de la correction de netteté, s'il y en a une. Une
     # fenêtre de 90 jours regarde très majoritairement des pronostics produits AVANT
@@ -826,6 +919,14 @@ async def calibration_par_bande(session: AsyncSession, jours: int = 90) -> dict:
         "bandes": _bandes(lignes),
         "correction_nettete_depuis": (corrige_depuis.isoformat() if corrige_depuis else None),
         "dernier_examen_nettete": examen,
+        # Le MARCHÉ jugé par la même règle, sur les mêmes courses (proba = 1/cote
+        # figée, renormalisée Σ = 1 sur le champ). Sans cette référence, une dérive
+        # héritée de la cote se lit comme un défaut du modèle — et l'alerte la
+        # répétait 813 fois sans qu'aucun correctif ne puisse la faire taire.
+        "n_marche": len(lignes_marche),
+        "bandes_marche": (_bandes(lignes_marche)
+                          if len(lignes_marche) >= PART_MIN_REFERENCE_MARCHE * len(lignes)
+                          else []),
     }
     if corrige_depuis:
         depuis_correction = [l for l in lignes if l[2] and l[2] >= corrige_depuis]
@@ -844,18 +945,88 @@ def _bandes(lignes) -> list[dict]:
         n = len(pris)
         servi = sum(p for p, _ in pris) / n
         reel = sum(g for _, g in pris) / n
+        # Écart-type de la fréquence réalisée SI les probas annoncées étaient justes
+        # (somme de Bernoulli de paramètres p_i) : c'est l'hypothèse que l'on teste.
+        sigma = math.sqrt(sum(p * (1.0 - p) for p, _ in pris)) / n
+        z = (servi - reel) / sigma if sigma > 0 else 0.0
+        bas_ic, haut_ic = _wilson(reel, n)
         bandes.append({
             "bande": f"{bas:.2f}-{min(haut, 1.0):.2f}",
             "n": n,
             "proba_moyenne": round(servi, 4),
             "taux_reel": round(reel, 4),
             "ecart": round(servi - reel, 4),
+            "sigma": round(sigma, 4),
+            "z": round(z, 2),
+            # Intervalle de confiance à 95 % (Wilson) de la fréquence réalisée.
+            "ic95_reel": [round(bas_ic, 4), round(haut_ic, 4)],
             # `concluant` : au-dessus, l'écart n'est plus explicable par le seul bruit
             # d'échantillonnage. En dessous, le chiffre est PUBLIÉ mais n'autorise
             # aucune conclusion — c'est la différence entre mesurer et conclure.
             "concluant": n >= MIN_OBS_BANDE_CALIBRATION,
+            # `significatif` : volume suffisant ET écart hors du bruit binomial.
+            "significatif": (n >= MIN_OBS_BANDE_CALIBRATION
+                             and abs(z) >= Z_SIGNIFICATIF_CALIBRATION),
         })
     return bandes
+
+
+def _wilson(freq: float, n: int, z: float = 1.96) -> tuple[float, float]:
+    """Intervalle de Wilson d'une fréquence observée. Fonction PURE."""
+    if n <= 0:
+        return 0.0, 1.0
+    den = 1.0 + z * z / n
+    centre = (freq + z * z / (2 * n)) / den
+    demi = z * math.sqrt(freq * (1 - freq) / n + z * z / (4 * n * n)) / den
+    return max(0.0, centre - demi), min(1.0, centre + demi)
+
+
+def _probas_marche(cotes_par_course: dict) -> list[tuple[float, int]]:
+    """(proba du marché, gagné) par partant. Fonction PURE.
+
+    Proba du marché = 1/cote figée renormalisée sur la course (retire la marge du
+    pari mutuel). Une course dont un seul partant n'a pas de cote exploitable est
+    ÉCARTÉE entière : la renormaliser sur un champ incomplet gonflerait tout le
+    reste — un biais fabriqué au moment précis où l'on cherche un biais.
+    """
+    out: list[tuple[float, int]] = []
+    for champ in cotes_par_course.values():
+        if not champ or any(c is None or not (c > 1.0) for _, c in champ):
+            continue
+        inv = [1.0 / c for _, c in champ]
+        somme = sum(inv)
+        if somme <= 0:
+            continue
+        out.extend((v / somme, g) for v, (g, _) in zip(inv, champ))
+    return out
+
+
+def verdict_bande(bande: dict, bande_marche: dict | None) -> str:
+    """Que faire d'une bande ? Fonction PURE — c'est elle qui décide de l'alerte.
+
+      - `ok`                : écart sous le seuil, ou pas assez de preuve ;
+      - `herite_du_marche`  : écart RÉEL, mais la cote PMU porte la même dérive dans
+                              la même bande et le modèle n'y est pas significativement
+                              pire — aucun correctif de notre côté (décision du
+                              2026-10-04, recalibration testée hors échantillon) :
+                              mesuré et publié, mais pas d'alerte ;
+      - `defaut_modele`     : écart réel et le modèle fait significativement pire que
+                              le marché (ou pas de référence marché) — à corriger.
+    """
+    if not bande.get("significatif") or abs(bande["ecart"]) < SEUIL_ECART_CALIBRATION:
+        return "ok"
+    if not bande_marche or not bande_marche.get("concluant"):
+        return "defaut_modele"
+    meme_sens = (bande_marche["ecart"] > 0) == (bande["ecart"] > 0)
+    if not (meme_sens and bande_marche.get("significatif")):
+        return "defaut_modele"
+    # Les deux écarts portent sur des populations différentes (sélectionnées par la
+    # proba de chacun) : on compose les deux bruits binomiaux.
+    sigma = math.sqrt(bande["sigma"] ** 2 + bande_marche["sigma"] ** 2)
+    surplus = abs(bande["ecart"]) - abs(bande_marche["ecart"])
+    if sigma > 0 and surplus / sigma >= Z_PIRE_QUE_MARCHE:
+        return "defaut_modele"
+    return "herite_du_marche"
 
 
 async def _correction_nettete_depuis(session: AsyncSession) -> datetime | None:
@@ -894,9 +1065,13 @@ def _suffixe_examen_nettete(examen) -> str:
                 f"mis en service le {_jour}")
     _cand = examen.get("exposant_candidat")
     _cand_txt = f"candidat {_cand} écarté" if _cand is not None else "aucun candidat"
+    # Depuis le 2026-10-04, l'exposant n'agit plus que sur la proba de DÉTECTION des
+    # paris de valeur : la proba servie est reconstruite par `melange_arrivees`. Le
+    # citer sans le dire laissait croire qu'il pouvait corriger cette bande.
     return (f" ; correcteur de netteté examiné le {_jour} : {_cand_txt} "
             f"({examen.get('raison') or 'sans conclusion'}) — l'exposant en service "
-            f"reste {examen.get('exposant_en_place', 1.0)}")
+            f"reste {examen.get('exposant_en_place', 1.0)} (il n'agit que sur la "
+            "détection des paris de valeur, pas sur la proba servie)")
 
 
 async def rapport_qualite(session: AsyncSession) -> dict:
@@ -1002,9 +1177,27 @@ async def rapport_qualite(session: AsyncSession) -> dict:
     # produits avant la correction en vigueur. Sans le dire, l'alerte se répète des
     # semaines après le correctif et laisse croire qu'il n'a rien donné.
     _depuis_corr = {b["bande"]: b for b in (calibration.get("bandes_depuis_correction") or [])}
+    _marche = {b["bande"]: b for b in (calibration.get("bandes_marche") or [])}
     for bande in (calibration.get("bandes") or []):
-        if bande["concluant"] and abs(bande["ecart"]) >= SEUIL_ECART_CALIBRATION:
+        # 813 répétitions du 08/09 au 13/10 : l'écart de la bande 0,40-0,50 est réel
+        # (z ≈ 3,5), mais la cote PMU porte le même, et aucun recalibrage n'a battu
+        # le servi hors échantillon. Une alerte qu'aucune action ne peut faire taire
+        # n'est plus une alerte. Le verdict est PUBLIÉ dans le rapport pour chaque
+        # bande ; seul `defaut_modele` — le modèle fait pire que le marché, donc il
+        # y a quelque chose à corriger chez nous — ouvre une anomalie.
+        _ref = _marche.get(bande["bande"])
+        bande["verdict"] = verdict_bande(bande, _ref)
+        if _ref:
+            bande["ecart_marche"] = _ref["ecart"]
+            bande["n_marche"] = _ref["n"]
+        if bande["verdict"] == "defaut_modele":
             _suite = _suffixe_examen_nettete(calibration.get("dernier_examen_nettete"))
+            if _ref and _ref.get("concluant"):
+                _suite += (f" ; le marché, dans la même bande, dérive de "
+                           f"{_ref['ecart']:+.1%} sur {_ref['n']} partants — le modèle "
+                           "fait significativement pire")
+            else:
+                _suite += " ; pas de référence marché concluante pour départager"
             _recent = _depuis_corr.get(bande["bande"])
             if _recent:
                 _suite += (f" ; depuis la correction de netteté, l'écart est de "
@@ -1016,7 +1209,9 @@ async def rapport_qualite(session: AsyncSession) -> dict:
                 "message": (f"Probabilités de la bande {bande['bande']} sur "
                             f"{calibration.get('fenetre_jours')} j : annoncées "
                             f"{bande['proba_moyenne']:.1%}, réalisées {bande['taux_reel']:.1%} "
-                            f"({bande['ecart']:+.1%} sur {bande['n']} partants) — la cote "
+                            f"({bande['ecart']:+.1%} sur {bande['n']} partants, "
+                            f"z = {bande['z']:+.1f}, réalisé IC95 "
+                            f"{bande['ic95_reel'][0]:.1%}-{bande['ic95_reel'][1]:.1%}) — la cote "
                             "juste affichée et l'espérance qui en découle sont faussées "
                             f"d'autant{_suite}"),
             })
@@ -1077,7 +1272,11 @@ async def rapport_qualite(session: AsyncSession) -> dict:
             "code": "courses_non_pronosticables",
             "gravite": "warning",
             "message": (f"{incompletes['n_sans_aucune_cote']} course(s) partant sous "
-                        f"{incompletes['fenetre_h']} h sans aucune cote PMU"),
+                        f"{incompletes['fenetre_h']} h sans aucune cote PMU alors que le "
+                        "simple gagnant y est proposé ("
+                        + "; ".join(f"{c['course_id']} {c['hippodrome']} : {c['motif']}"
+                                    for c in incompletes["courses_sans_cote"][:3])
+                        + ")"),
         })
 
     return {
@@ -1096,6 +1295,40 @@ async def rapport_qualite(session: AsyncSession) -> dict:
         "statut_global": ("critical" if any(a["gravite"] == "critical" for a in anomalies)
                           else "warning" if anomalies else "ok"),
     }
+
+
+async def _clore_anomalies_disparues(session: AsyncSession, codes_actifs: set[str]) -> int:
+    """Clôt les anomalies `data_quality` ouvertes que ce passage n'a PAS relevées.
+
+    La clé (`cle` = code) fusionnait déjà les répétitions en une ligne, mais rien ne
+    la refermait : « 1 course sans cote PMU » restait affichée « ouverte » quinze
+    jours après sa dernière occurrence, et une anomalie corrigée (registre des
+    features mis à jour) le serait restée jusqu'à un clic manuel. Ce job recalcule
+    TOUT le rapport chaque heure : une anomalie absente du passage courant est,
+    par construction, résolue. Si elle revient, `record_error` rouvre une ligne
+    neuve — et son compteur repart de 1, ce qui distingue une récidive d'un fait
+    qui dure.
+    """
+    try:
+        if codes_actifs:
+            marque = ", ".join(f":c{i}" for i in range(len(codes_actifs)))
+            params = {f"c{i}": c for i, c in enumerate(sorted(codes_actifs))}
+            filtre = f" AND cle NOT IN ({marque})"
+        else:
+            params, filtre = {}, ""
+        res = await session.execute(text(
+            "UPDATE system_errors SET resolved = true "
+            "WHERE source = 'data_quality' AND resolved = false AND cle IS NOT NULL"
+            + filtre), params)
+        await session.commit()
+        return int(res.rowcount or 0)
+    except Exception as e:                                        # noqa: BLE001
+        # Table absente (base neuve) : rien à clore. Ne jamais faire échouer le
+        # contrôle pour une tâche d'entretien — mais désempoisonner la transaction.
+        from db.database import desempoisonner
+        await desempoisonner(session)
+        log.info("data_quality.cloture_ignoree", err=str(e)[:160])
+        return 0
 
 
 async def verifier_et_alerter(session: AsyncSession) -> dict:
@@ -1121,6 +1354,7 @@ async def verifier_et_alerter(session: AsyncSession) -> dict:
                 # des compteurs qui varient d'un passage à l'autre).
                 cle=anomalie["code"],
             )
+    await _clore_anomalies_disparues(session, {a["code"] for a in rapport["anomalies"]})
     log.info("data_quality.checked", statut=rapport["statut_global"],
              n_anomalies=len(rapport["anomalies"]),
              codes=[a["code"] for a in rapport["anomalies"]])
