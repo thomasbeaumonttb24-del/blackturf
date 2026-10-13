@@ -108,3 +108,26 @@ def test_le_jour_est_celui_de_paris_et_non_d_utc():
     # 23/09 21:30 UTC = 23/09 23:30 à Paris : encore le 23.
     debut = pe._debut_jour_paris(datetime(2026, 9, 23, 21, 30, tzinfo=timezone.utc))
     assert debut == datetime(2026, 9, 22, 22, 0, tzinfo=timezone.utc)
+
+
+def test_les_lectures_a_une_ligne_reposent_sur_des_cles_uniques():
+    """Erreurs ouvertes `MultipleResultsFound` (POST envoyer-pronostic, 23/09 :
+    R6C5 ×3, R8C7) : le quota du jour lisait `scalar_one_or_none()` sur TOUS les
+    envois du jour d'une adresse — or une adresse en avait reçu deux le 23/09
+    (10 h 55 et 10 h 58) avant le verrou quotidien. Corrigé par d3651b2
+    (`.limit(1)` + `.first()` ; le test « deux envois déjà présents » ci-dessus
+    reproduit l'erreur sur l'ancien code). Les lectures « une ligne » qui
+    restent sur la route (course, envoi par adresse+course, blocage, jeton de
+    désinscription) ne sont sûres que tant que ces clés restent uniques : ce
+    test casse si l'une d'elles perd son unicité.
+    """
+    from sqlalchemy import UniqueConstraint
+    from db.models import PronosticEmailBlocage
+
+    assert [c.name for c in Course.__table__.primary_key.columns] == ["course_id"]
+    assert [c.name for c in PronosticEmailBlocage.__table__.primary_key.columns] == ["email"]
+    table = PronosticEmailEnvoi.__table__
+    assert table.c.token_desinscription.unique is True
+    uniques = {tuple(c.name for c in u.columns)
+               for u in table.constraints if isinstance(u, UniqueConstraint)}
+    assert ("email", "course_id") in uniques
