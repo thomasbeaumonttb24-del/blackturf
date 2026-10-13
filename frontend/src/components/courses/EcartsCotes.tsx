@@ -139,7 +139,12 @@ export function EcartsCotesCourse({ courseId, terminee }: { courseId: string; te
   const [voirMoins, setVoirMoins] = useState(false);
   const ecarts = data?.ecarts ?? [];
   if (ecarts.length === 0) return null;
-  const plus = ecarts.filter((e) => e.niveau === "fort" || e.niveau === "net" || e.niveau === "a_confirmer");
+  // Écarts proposables d'abord (fort, net), puis ceux « à confirmer » (une source ou
+  // cote ≥ 40) : sinon un 309 contre 60 « à confirmer » passait en tête.
+  const plus = [
+    ...ecarts.filter((e) => e.niveau === "fort" || e.niveau === "net"),
+    ...ecarts.filter((e) => e.niveau === "a_confirmer"),
+  ];
   const moins = ecarts.filter((e) => e.niveau === "defavorable").sort((a, b) => a.ecart - b.ecart);
   return (
     <section aria-label="Écarts PMU et bookmakers" className="rounded-2xl bg-white p-4 ring-1 ring-stone-200 sm:p-5">
@@ -161,7 +166,7 @@ export function EcartsCotesCourse({ courseId, terminee }: { courseId: string; te
         <div className="mt-2 border-t border-stone-100 pt-2">
           <button type="button" onClick={() => setVoirMoins((v) => !v)} aria-expanded={voirMoins}
             className="flex w-full items-center gap-1.5 text-left text-[12.5px] font-semibold text-rose-800">
-            {moins.length} cheval{moins.length > 1 ? "x" : ""} moins bien payé{moins.length > 1 ? "s" : ""} au PMU
+            {moins.length} {moins.length > 1 ? "chevaux moins bien payés" : "cheval moins bien payé"} au PMU
             <ChevronDown className={cn("h-4 w-4 transition-transform", voirMoins && "rotate-180")} aria-hidden="true" />
           </button>
           {voirMoins && <ul className="divide-y divide-stone-100">{moins.map((e) => <LigneEcart key={e.numero} e={e} />)}</ul>}
