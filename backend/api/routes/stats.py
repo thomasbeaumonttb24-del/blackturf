@@ -1894,11 +1894,87 @@ async def stats_palmares_public(
     Ce qui N'EST PAS exposé : le ROI en pourcentage et les agrégats par profil
     restent réservés à l'admin.
     """
-    CACHE_KEY = "stats:palmares-public"
-    cached = await _cache_get(redis, CACHE_KEY)
-    if cached:
+    cached, frais = await _cache_get_swr(redis, PALMARES_PUBLIC_CACHE_KEY)
+    if cached is not None and frais:
+        return cached
+    if cached is not None:
+        # Périmé mais exploitable : réponse immédiate, recalcul unique en fond.
+        task = asyncio.create_task(refresh_palmares_public_cache())
+        _bg_tasks.add(task)
+        task.add_done_callback(_bg_tasks.discard)
         return cached
 
+    # Aucune copie (Redis vidé, premier démarrage) : UN seul calcul. Les autres
+    # requêtes attendent qu'il ait écrit le cache plutôt que d'en lancer un chacune.
+    try:
+        verrou = await redis.set(PALMARES_PUBLIC_LOCK_KEY, "1", ex=PALMARES_PUBLIC_LOCK_TTL, nx=True)
+    except Exception:
+        verrou = True
+    if not verrou:
+        for _ in range(PALMARES_PUBLIC_ATTENTE_S):
+            await asyncio.sleep(1)
+            cached, _frais = await _cache_get_swr(redis, PALMARES_PUBLIC_CACHE_KEY)
+            if cached is not None:
+                return cached
+    try:
+        result = await _compute_palmares_public(db)
+        await _cache_set_swr(redis, PALMARES_PUBLIC_CACHE_KEY, result,
+                             fresh_ttl=PALMARES_PUBLIC_FRESH_TTL)
+        return result
+    finally:
+        if verrou:
+            try:
+                await redis.delete(PALMARES_PUBLIC_LOCK_KEY)
+            except Exception:
+                pass
+
+
+# Cache du palmarès public : copie conservée 24 h, fraîche 5 min, recalcul sous
+# verrou. Incident 2026-10-13 07:06-07:09 UTC : la clé, supprimée à chaque fin de
+# course (`pipeline._invalidate_stats_caches`), était recalculée par CHAQUE visiteur
+# arrivé pendant le calcul — 3 `_palmares_rows` concurrents de 107-113 s, l'API en
+# 504 pour tous pendant trois minutes (lu à tort comme un bannissement fail2ban).
+PALMARES_PUBLIC_CACHE_KEY = "stats:palmares-public"
+PALMARES_PUBLIC_LOCK_KEY = f"{PALMARES_PUBLIC_CACHE_KEY}:lock"
+PALMARES_PUBLIC_FRESH_TTL = 300
+PALMARES_PUBLIC_LOCK_TTL = 300
+PALMARES_PUBLIC_ATTENTE_S = 50
+
+
+async def refresh_palmares_public_cache() -> bool:
+    """Recalcule le palmarès public et réécrit son cache. True si réécrit.
+
+    Sous verrou Redis : un seul recalcul à la fois, quel que soit le nombre de
+    visiteurs servis avec la copie périmée. Session dédiée : la tâche survit à la
+    requête qui l'a lancée."""
+    from db.database import AsyncSessionLocal
+    from db.redis_client import get_redis as _get_redis
+    try:
+        redis = await _get_redis()
+        verrou = await redis.set(PALMARES_PUBLIC_LOCK_KEY, "1", ex=PALMARES_PUBLIC_LOCK_TTL, nx=True)
+    except Exception as e:
+        log.warning("stats.palmares_public.refresh_lock_failed", error=str(e)[:200])
+        return False
+    if not verrou:
+        return False
+    try:
+        async with AsyncSessionLocal() as session:
+            result = await _compute_palmares_public(session)
+        await _cache_set_swr(redis, PALMARES_PUBLIC_CACHE_KEY, result,
+                             fresh_ttl=PALMARES_PUBLIC_FRESH_TTL)
+        log.info("stats.palmares_public.refreshed")
+        return True
+    except Exception as e:
+        log.warning("stats.palmares_public.refresh_failed", error=str(e)[:200])
+        return False
+    finally:
+        try:
+            await redis.delete(PALMARES_PUBLIC_LOCK_KEY)
+        except Exception:
+            pass
+
+
+async def _compute_palmares_public(db: AsyncSession) -> dict:
     data = await _palmares_rows(db)
     quinte = await _quinte_palmares(db)
     gagnants, top_gains = _avec_quinte(data, quinte)
@@ -1929,7 +2005,6 @@ async def stats_palmares_public(
         "integrite": data["integrite"],
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
-    await _cache_set(redis, CACHE_KEY, result, ttl=300)  # 5 min
     return result
 
 

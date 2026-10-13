@@ -671,7 +671,7 @@ async def job_warm_caches() -> None:
     chauffait donc rien : on chauffe `palmares-public`, celui que la page utilise.
     """
     import httpx
-    from api.routes.stats import refresh_track_record_cache
+    from api.routes.stats import refresh_palmares_public_cache, refresh_track_record_cache
 
     try:
         reecrit = await refresh_track_record_cache()
@@ -679,8 +679,15 @@ async def job_warm_caches() -> None:
     except Exception as e:  # noqa: BLE001
         log.warning("jobs.warm_cache.failed", url="track-record", err=str(e)[:120])
 
+    # Palmarès public en direct, comme le track-record : par HTTP, une copie fraîche
+    # ne serait jamais réécrite et l'expiration retomberait sur un visiteur.
+    try:
+        reecrit = await refresh_palmares_public_cache()
+        log.info("jobs.warm_cache.palmares_public", reecrit=reecrit)
+    except Exception as e:  # noqa: BLE001
+        log.warning("jobs.warm_cache.failed", url="palmares-public", err=str(e)[:120])
+
     urls = [
-        "http://api:8000/api/v1/stats/palmares-public",
         "http://api:8000/api/v1/stats/profils",
     ]
     async with httpx.AsyncClient(timeout=60.0) as client:

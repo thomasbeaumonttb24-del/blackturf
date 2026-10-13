@@ -1682,9 +1682,11 @@ async def _invalidate_stats_caches(course_id: str) -> None:
         keys = [
             "stats:public", "stats:equity-curve", "stats:ml-status",
             "stats:dashboard-summary",
-            # Palmarès public (page d'accueil) : « mis à jour à chaque fin de course »
-            # doit être vrai, sinon le bandeau live affiche jusqu'à 5 min de retard.
-            "stats:palmares-public",
+            # Palmarès public : on efface sa FRAÎCHEUR, pas la copie. Le visiteur
+            # suivant reçoit la copie et déclenche UN recalcul en fond (verrou) —
+            # supprimer la clé faisait recalculer chaque visiteur en parallèle
+            # (incident 2026-10-13 : API en 504 trois minutes).
+            "stats:palmares-public:fresh",
             # NB: stats:track-record n'est PAS purgé (recalcul froid ~29 s) : il est
             # marqué périmé ci-dessous et recalculé dans la minute par le scheduler.
             f"course_detail:{course_id}", f"analyse:{course_id}",
