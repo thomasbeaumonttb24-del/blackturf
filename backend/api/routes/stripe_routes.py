@@ -1499,20 +1499,43 @@ async def _handle_subscription_created(sub: dict, db: AsyncSession):
     else:
         statut_local = statut_reel
 
-    subscription = Subscription(
-        sub_id=str(uuid.uuid4()),
-        user_id=user.user_id,
-        stripe_subscription_id=sub["id"],
-        plan=plan,
-        periodicite=periodicite,
-        statut=statut_local,
-        periode_debut=_ts(sub, "current_period_start"),
-        periode_fin=_ts(sub, "current_period_end"),
-        # Essai refusé = essai inexistant : le garder en base ferait croire au
-        # suivi admin (et au client) qu'une période gratuite court encore.
-        essai_fin=None if essai_refuse else _ts(sub, "trial_end"),
+    # Insertion en `ON CONFLICT DO NOTHING` et non « lire puis ajouter » : au
+    # checkout, Stripe livre `customer.subscription.created` ET
+    # `customer.subscription.updated` (identifiants d'événement différents, donc
+    # l'anti-rejeu `stripe_events` laisse passer les deux) dans la même seconde, et
+    # `updated` délègue ici quand la ligne n'existe pas encore. Les deux webhooks
+    # lisaient « abonnement inconnu » plus haut, le second levait au flush :
+    # `IntegrityError subscriptions_stripe_subscription_id_key` → 500 → rejeu Stripe
+    # (constaté en prod sur sub_1UPAVJFiAG0jVlcjyneTX91s ; en `PendingRollbackError`
+    # quand le flush partait du point de sauvegarde de `journaliser`).
+    # PostgreSQL attend la fin de la transaction concurrente avant de trancher le
+    # conflit : la ligne gagnante est alors validée et visible.
+    sub_id_local = str(uuid.uuid4())
+    insertion = await db.execute(
+        _insert(db)(Subscription).values(
+            sub_id=sub_id_local,
+            user_id=user.user_id,
+            stripe_subscription_id=sub["id"],
+            plan=plan,
+            periodicite=periodicite,
+            statut=statut_local,
+            periode_debut=_ts(sub, "current_period_start"),
+            periode_fin=_ts(sub, "current_period_end"),
+            # Essai refusé = essai inexistant : le garder en base ferait croire au
+            # suivi admin (et au client) qu'une période gratuite court encore.
+            essai_fin=None if essai_refuse else _ts(sub, "trial_end"),
+        ).on_conflict_do_nothing(index_elements=["stripe_subscription_id"])
     )
-    db.add(subscription)
+    if insertion.rowcount != 1:
+        # Un webhook concurrent a créé la ligne entre-temps : l'état porté par CET
+        # événement est appliqué à la ligne existante (relecture Stripe comprise)
+        # au lieu d'être perdu ou de lever. Les écritures déjà faites ici (cartes
+        # mémorisées) rejoignent la même transaction.
+        log.info("stripe.subscription_created_concurrent", sub=sub.get("id"),
+                 user_id=user.user_id)
+        await _handle_subscription_updated(sub, db, depuis_created=True)
+        return
+    subscription = await db.get(Subscription, sub_id_local)
 
     # BUG corrigé (2026-08-17) : le plan était accordé ICI même quand `statut_reel`
     # valait "incomplete" (carte non validée / 3-D Secure non terminé / checkout
@@ -1559,12 +1582,21 @@ def _resiliation_programmee(sub: dict) -> bool:
     return bool(sub.get("cancel_at_period_end") or sub.get("cancel_at"))
 
 
-async def _handle_subscription_updated(sub: dict, db: AsyncSession):
+async def _handle_subscription_updated(sub: dict, db: AsyncSession,
+                                      depuis_created: bool = False):
     result = await db.execute(
         select(Subscription).where(Subscription.stripe_subscription_id == sub["id"])
+        # La ligne a pu être écrite par un webhook concurrent : relire la base,
+        # pas une version périmée gardée dans la session.
+        .execution_options(populate_existing=True)
     )
     subscription = result.scalar_one_or_none()
     if not subscription:
+        if depuis_created:
+            # Conflit d'insertion mais ligne introuvable (supprimée entre-temps) :
+            # ne jamais reboucler entre created et updated.
+            log.error("stripe.subscription_introuvable_apres_conflit", sub=sub.get("id"))
+            return
         await _handle_subscription_created(sub, db)
         return
 

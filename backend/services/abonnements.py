@@ -167,6 +167,12 @@ async def journaliser(
     N'appelle PAS `commit` : l'écriture rejoint la transaction du webhook, pour
     que le journal et l'état de l'abonnement soient vrais ensemble ou pas du tout.
     """
+    # Les écritures en attente de l'APPELANT sont envoyées ICI, hors du `try` :
+    # sans cela, `begin_nested()` les envoyait et leur échec (ex. doublon
+    # `subscriptions_stripe_subscription_id_key`) était avalé ci-dessous comme
+    # « journal en échec ». La session restait empoisonnée et le `commit` du
+    # webhook levait `PendingRollbackError`, qui masquait la vraie cause.
+    await db.flush()
     try:
         essai = essai_fin if essai_fin is not None else (sub.essai_fin if sub else None)
         maintenant = datetime.now(timezone.utc)
