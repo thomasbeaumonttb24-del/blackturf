@@ -19,6 +19,8 @@ from services import offre_anniversaire as oa
 CODE = "TESTANNIV50"
 AVANT = datetime(2026, 9, 1, tzinfo=timezone.utc)
 PENDANT = datetime(2026, 10, 10, 12, tzinfo=timezone.utc)
+# Inscrit après la relance « dernière chance » : refusé.
+RECENT = datetime(2026, 10, 15, 8, tzinfo=timezone.utc)
 _VRAIE_RAISON = oa.raison_refus
 _VRAI_COUPON = oa.assurer_coupon
 
@@ -86,14 +88,14 @@ async def test_sans_code_rien_ne_change(db, monkeypatch):
 @pytest.mark.parametrize("cas, message", [
     ("mauvais_code", "n'est pas valide"),
     ("annuel", "mensuel uniquement"),
-    ("compte_recent", "inscrits avant le 8 octobre"),
+    ("compte_recent", "inscrits avant le 15 octobre"),
     ("abonne", "sans abonnement en cours"),
     ("deja_utilisee", "déjà profité"),
     ("offre_fermee", "pas valide"),  # code retiré du .env : il ne vaut plus rien
 ])
 async def test_refus_sans_page_de_paiement(db, monkeypatch, cas, message):
     captured = _capture(monkeypatch)
-    user = await _user(db, created_at=datetime(2026, 10, 9, tzinfo=timezone.utc) if cas == "compte_recent" else AVANT)
+    user = await _user(db, created_at=RECENT if cas == "compte_recent" else AVANT)
     code, periodicite = CODE, "monthly"
     if cas == "mauvais_code":
         code = "ANNIV10"
@@ -131,7 +133,7 @@ async def test_code_revele_aux_seuls_eligibles(db):
     assert res["eligible"] is True and res["code"] == CODE
     assert res["prix"]["expert"] == {"avant": 1900, "apres": 950}
 
-    nouveau = await _user(db, created_at=datetime(2026, 10, 9, tzinfo=timezone.utc))
+    nouveau = await _user(db, created_at=RECENT)
     res = await sr.offre_anniversaire_du_compte(db=db, user=nouveau)
     assert res["eligible"] is False and "code" not in res
 
@@ -180,3 +182,19 @@ def test_coupon_premier_paiement_seulement(monkeypatch):
     assert len(cree["name"]) <= 40  # limite Stripe, sinon le coupon (et le paiement) échoue
     assert cree["redeem_by"] == int(vrai.FIN.timestamp())
     assert cree["applies_to"] == {"products": ["prod_exp", "prod_std"]}
+
+
+@pytest.mark.asyncio
+async def test_inscrit_apres_le_premier_mail_accepte(db):
+    """Relance du 14 octobre : l'offre s'étend aux comptes créés depuis le premier mail."""
+    user = await _user(db, created_at=datetime(2026, 10, 12, tzinfo=timezone.utc))
+    assert await _VRAIE_RAISON(user, db, PENDANT) is None
+
+
+def test_mail_derniere_chance_deux_versions():
+    from services.email_offre import derniere_chance
+    html, texte = derniere_chance("Léa", CODE, "https://blackturf.fr/x", deja_recu=True)
+    assert CODE in html and CODE in texte
+    assert "nous vous avons envoyé" in texte and "demain, jeudi 15 octobre" in texte
+    _, texte = derniere_chance(None, CODE, "https://blackturf.fr/x", deja_recu=False, ce_soir=True)
+    assert "créé depuis" in texte and "ce soir à minuit" in texte

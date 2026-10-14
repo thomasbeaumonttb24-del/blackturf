@@ -134,3 +134,76 @@ def anniversaire(prenom: Optional[str], mois: int, code: str, desinscription: st
     )
     return D.document(f"BlackTurf a {duree}", f"Merci d’être là depuis le début : −{POURCENT} % sur votre premier mois, jusqu’au {FIN_TEXTE}.",
                       rangees), texte
+
+
+def derniere_chance(prenom: Optional[str], code: str, desinscription: str, deja_recu: bool,
+                    ce_soir: bool = False) -> tuple[str, str]:
+    """Relance de l'offre la veille (ou le jour) de sa fin. `deja_recu` : le compte
+    a eu le premier mail ; sinon il s'est inscrit depuis et découvre l'offre."""
+    bonjour = f"Bonjour {e(prenom.strip())}," if prenom and prenom.strip() else "Bonjour,"
+    quand = "ce soir" if ce_soir else "demain soir"
+    echeance ="ce soir à minuit" if ce_soir else f"demain, {FIN_TEXTE}"
+    lien = lien_offre(code)
+    if deja_recu:
+        rappel = (
+            "La semaine dernière, pour l’anniversaire de BlackTurf, nous vous avons envoyé un "
+            f"{D.fort('code de réduction personnel')} : {D.fort(f'−{POURCENT} % sur votre premier mois')} "
+            "d’abonnement mensuel."
+        )
+        rappel_txt = ("La semaine dernière, pour l'anniversaire de BlackTurf, nous vous avons envoyé un code "
+                      f"de réduction personnel : −{POURCENT} % sur votre premier mois d'abonnement mensuel.")
+    else:
+        rappel = (
+            "La semaine dernière, pour l’anniversaire de BlackTurf, nous avons envoyé à nos membres un "
+            f"{D.fort('code de réduction')} : {D.fort(f'−{POURCENT} % sur le premier mois')} d’abonnement mensuel. "
+            "Votre compte a été créé depuis&nbsp;: bonne nouvelle, l’offre vaut aussi pour vous."
+        )
+        rappel_txt = ("La semaine dernière, pour l'anniversaire de BlackTurf, nous avons envoyé à nos membres un "
+                      f"code de réduction : −{POURCENT} % sur le premier mois d'abonnement mensuel. Votre compte "
+                      "a été créé depuis : bonne nouvelle, l'offre vaut aussi pour vous.")
+    intro = (
+        f"{bonjour}<br><br>{rappel}<br><br>"
+        f"Petit rappel : la réduction prend fin {D.fort(echeance)}. Passé ce délai, le code ne fonctionnera plus."
+    )
+    carte_offre = (
+        _ticket(code)
+        + f'<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;margin-top:18px"><tr>'
+        + _prix("standard", "Standard", "L’essentiel, avec des quotas", False)
+        + _prix("expert", "Expert", "Tout BlackTurf, sans limite", True)
+        + "</tr></table>"
+    )
+    etapes = (
+        f"1. Cliquez sur le bouton ci-dessus : le code est {D.fort('déjà renseigné')}.<br>"
+        "2. Choisissez Standard ou Expert, en mensuel.<br>"
+        f"3. La remise s’affiche sur la page de paiement sécurisé : {D.fort('vous ne payez que la moitié')} du premier mois.<br><br>"
+        "La remise porte sur le premier paiement uniquement ; l’abonnement se poursuit ensuite au prix habituel "
+        "et reste résiliable à tout moment depuis votre profil. Code personnel, non cumulable avec la remise "
+        "de parrainage."
+    )
+    rangees = (
+        D.barre_logo("Dernière chance")
+        + D.entete("galop", f"Fin de l’offre {quand}", f"Votre −{POURCENT}&nbsp;% expire {quand}", intro, lien=lien)
+        + D.rangee_nuit(carte_offre, padding="0 20px 24px")
+        + D.appel("Il est encore temps", f"Votre remise vous attend jusqu’à {quand}, minuit.",
+                  f"Profiter de −{POURCENT} %", lien,
+                  note=f"Le bouton ne s’affiche pas ? Rendez-vous sur blackturf.fr/tarifs et saisissez le code {e(code)}.")
+        + D.rangee_nuit(D.carte(D.surtitre("Ce que vous débloquez") + _avantages(), "22px 22px"), padding="0 20px 24px")
+        + D.encart("Comment en profiter", etapes)
+        + D.bloc_reseaux()
+        + D.pied("Vous recevez ce message parce que vous avez un compte sur blackturf.fr. "
+                 + D.lien_pied("Ne plus recevoir nos offres", desinscription) + " · "
+                 + D.lien_pied("Mes préférences", SITE + "/notifications"))
+    )
+    texte = (
+        f"{bonjour.replace('&#x27;', chr(39))}\n\n{rappel_txt}\n\n"
+        f"Petit rappel : la réduction prend fin {echeance}. Passé ce délai, le code ne fonctionnera plus.\n\n"
+        f"VOTRE CODE : {code}\n\n"
+        f"Standard : {_euros(PRIX['standard'][1])} le 1er mois au lieu de {_euros(PRIX['standard'][0])}\n"
+        f"Expert : {_euros(PRIX['expert'][1])} le 1er mois au lieu de {_euros(PRIX['expert'][0])}\n\n"
+        f"J'en profite : {lien}\n\n"
+        "La remise porte sur le premier paiement uniquement ; l'abonnement se poursuit ensuite au prix "
+        "habituel, résiliable à tout moment. Non cumulable avec la remise de parrainage.\n\n"
+        f"Ne plus recevoir nos offres : {desinscription}\n\n{D.RESPONSABLE}"
+    )
+    return D.document("Dernière chance", f"Fin {quand} : −{POURCENT} % sur votre premier mois avec votre code.",
+                      rangees), texte
