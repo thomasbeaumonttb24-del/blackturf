@@ -11,6 +11,7 @@ import json
 import re
 import time
 import urllib.parse
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -52,9 +53,23 @@ LICENCE_KO = re.compile(r"\b(nc|nd)\b", re.I)
 
 def api(params):
     params = {**params, "format": "json", "formatversion": "2"}
-    req = urllib.request.Request(API + "?" + urllib.parse.urlencode(params), headers={"User-Agent": UA})
-    with urllib.request.urlopen(req, timeout=30) as r:
-        return json.load(r)
+    req = urllib.request.Request(API + "?" + urllib.parse.urlencode(params),
+                                 headers={"User-Agent": UA, "Accept": "application/json"})
+    for essai in range(4):
+        try:
+            with urllib.request.urlopen(req, timeout=30) as r:
+                corps = r.read()
+            return json.loads(corps)
+        except urllib.error.HTTPError as e:
+            print(f"  HTTP {e.code} : {e.read()[:300]!r}")
+            if e.code in (429, 503):
+                time.sleep(5 * (essai + 1))
+                continue
+            raise
+        except json.JSONDecodeError:
+            print(f"  réponse non JSON : {corps[:300]!r}")
+            time.sleep(5 * (essai + 1))
+    raise RuntimeError("API Commons injoignable")
 
 
 def texte(v):
