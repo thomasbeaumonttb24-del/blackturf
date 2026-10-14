@@ -35,8 +35,12 @@ PARIS = ZoneInfo("Europe/Paris")
 
 POURCENT = 50
 COUPON_ID = "blackturf-anniversaire-2026-10"
-# Comptes inscrits AVANT cette date seulement (le jour de l'envoi compris).
-COMPTES_AVANT = datetime(2026, 10, 8, 0, 0, tzinfo=PARIS)
+# Premier mail (7 octobre) : comptes inscrits avant le 8 octobre.
+PREMIER_ENVOI_AVANT = datetime(2026, 10, 8, 0, 0, tzinfo=PARIS)
+# Relance « dernière chance » (décision de l'exploitant, 2026-10-14) : l'offre
+# s'étend aux inscrits depuis. Un compte créé après la relance reste refusé.
+COMPTES_AVANT = datetime(2026, 10, 15, 0, 0, tzinfo=PARIS)
+COMPTES_AVANT_TEXTE = "15 octobre"
 # Dernier instant où le checkout accepte le code (heure de Paris) : huit jours,
 # offre exceptionnelle (décision de l'exploitant).
 FIN = datetime(2026, 10, 15, 23, 59, 59, tzinfo=PARIS)
@@ -102,7 +106,7 @@ async def raison_refus(user: User, db: AsyncSession, now: Optional[datetime] = N
     if now > FIN:
         return "Cette offre exceptionnelle a pris fin le 15 octobre."
     if user.created_at is None or _utc(user.created_at) >= COMPTES_AVANT:
-        return "Cette offre est réservée aux membres inscrits avant le 8 octobre 2026."
+        return f"Cette offre est réservée aux membres inscrits avant le {COMPTES_AVANT_TEXTE} 2026."
     en_cours = await db.scalar(select(Subscription.sub_id).where(
         Subscription.user_id == user.user_id,
         Subscription.statut.in_(STATUTS_VIVANTS + STATUTS_EN_ATTENTE_PAIEMENT)).limit(1))

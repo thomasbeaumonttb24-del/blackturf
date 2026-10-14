@@ -19,6 +19,8 @@ from services import offre_anniversaire as oa
 CODE = "TESTANNIV50"
 AVANT = datetime(2026, 9, 1, tzinfo=timezone.utc)
 PENDANT = datetime(2026, 10, 10, 12, tzinfo=timezone.utc)
+# Inscrit après la relance « dernière chance » : refusé.
+RECENT = datetime(2026, 10, 15, 8, tzinfo=timezone.utc)
 _VRAIE_RAISON = oa.raison_refus
 _VRAI_COUPON = oa.assurer_coupon
 
@@ -86,14 +88,14 @@ async def test_sans_code_rien_ne_change(db, monkeypatch):
 @pytest.mark.parametrize("cas, message", [
     ("mauvais_code", "n'est pas valide"),
     ("annuel", "mensuel uniquement"),
-    ("compte_recent", "inscrits avant le 8 octobre"),
+    ("compte_recent", "inscrits avant le 15 octobre"),
     ("abonne", "sans abonnement en cours"),
     ("deja_utilisee", "déjà profité"),
     ("offre_fermee", "pas valide"),  # code retiré du .env : il ne vaut plus rien
 ])
 async def test_refus_sans_page_de_paiement(db, monkeypatch, cas, message):
     captured = _capture(monkeypatch)
-    user = await _user(db, created_at=datetime(2026, 10, 9, tzinfo=timezone.utc) if cas == "compte_recent" else AVANT)
+    user = await _user(db, created_at=RECENT if cas == "compte_recent" else AVANT)
     code, periodicite = CODE, "monthly"
     if cas == "mauvais_code":
         code = "ANNIV10"
@@ -131,7 +133,7 @@ async def test_code_revele_aux_seuls_eligibles(db):
     assert res["eligible"] is True and res["code"] == CODE
     assert res["prix"]["expert"] == {"avant": 1900, "apres": 950}
 
-    nouveau = await _user(db, created_at=datetime(2026, 10, 9, tzinfo=timezone.utc))
+    nouveau = await _user(db, created_at=RECENT)
     res = await sr.offre_anniversaire_du_compte(db=db, user=nouveau)
     assert res["eligible"] is False and "code" not in res
 
@@ -180,3 +182,108 @@ def test_coupon_premier_paiement_seulement(monkeypatch):
     assert len(cree["name"]) <= 40  # limite Stripe, sinon le coupon (et le paiement) échoue
     assert cree["redeem_by"] == int(vrai.FIN.timestamp())
     assert cree["applies_to"] == {"products": ["prod_exp", "prod_std"]}
+
+
+@pytest.mark.asyncio
+async def test_inscrit_apres_le_premier_mail_accepte(db):
+    """Relance du 14 octobre : l'offre s'étend aux comptes créés depuis le premier mail."""
+    user = await _user(db, created_at=datetime(2026, 10, 12, tzinfo=timezone.utc))
+    assert await _VRAIE_RAISON(user, db, PENDANT) is None
+
+
+def test_mail_derniere_chance_deux_versions():
+    from services.email_offre import derniere_chance
+    html, texte = derniere_chance("Léa", CODE, "https://blackturf.fr/x", deja_recu=True)
+    assert CODE in html and CODE in texte
+    assert "nous vous avons envoyé" in texte and "demain, jeudi 15 octobre" in texte
+    assert "exceptionnelle" in texte
+    _, texte = derniere_chance(None, CODE, "https://blackturf.fr/x", deja_recu=False, ce_soir=True)
+    assert "créé depuis" in texte and "ce soir à minuit" in texte
+
+
+@pytest.mark.asyncio
+async def test_relance_cible_gratuits_pass_et_anciens_abonnes(db, monkeypatch):
+    from scripts import envoyer_mail_anniversaire as mail
+    pass_en_cours = set()
+
+    async def _pass_actif(session, user_id):
+        return {"plan": "expert"} if user_id in pass_en_cours else None
+    monkeypatch.setattr("services.passes.pass_actif", _pass_actif)
+
+    gratuit = await _user(db)
+    porteur_pass = await _user(db, plan="expert")
+    pass_en_cours.add(porteur_pass.user_id)
+    ancien = await _user(db)
+    db.add(Subscription(sub_id=str(uuid.uuid4()), user_id=ancien.user_id, stripe_subscription_id="sub_old",
+                        plan="expert", periodicite="monthly", statut="canceled",
+                        periode_debut=AVANT, periode_fin=AVANT + timedelta(days=30)))
+    offert = await _user(db, plan="expert")
+    admin = await _user(db, is_admin=True)
+    await db.commit()
+
+    assert await mail.profil_relance(db, gratuit) == "gratuit"
+    assert await mail.profil_relance(db, porteur_pass) == "pass"
+    assert await mail.profil_relance(db, ancien) == "ancien abonné"
+    assert await mail.profil_relance(db, offert) is None
+    assert await mail.profil_relance(db, admin) is None
+
+
+@pytest.mark.asyncio
+async def test_relance_jamais_un_abonnement_en_cours(db):
+    for statut in ("active", "cancel_at_period_end", "past_due", "trialing"):
+        user = await _user(db)
+        db.add(Subscription(sub_id=str(uuid.uuid4()), user_id=user.user_id, stripe_subscription_id=f"sub_{statut}",
+                            plan="standard", periodicite="monthly", statut=statut,
+                            periode_debut=AVANT, periode_fin=AVANT + timedelta(days=30)))
+        await db.commit()
+        assert "sans abonnement en cours" in await _VRAIE_RAISON(user, db, PENDANT)
+
+
+@pytest.mark.asyncio
+async def test_relance_envoi_complet(db, monkeypatch):
+    """Bout en bout : bons destinataires, bon texte selon le premier mail, jamais deux fois."""
+    import argparse
+    from contextlib import asynccontextmanager
+    from types import SimpleNamespace
+    from db.models import EmailLivraison
+    from scripts import envoyer_mail_anniversaire as mail
+    import services.alerts as alerts
+
+    @asynccontextmanager
+    async def _session():
+        yield db
+    envoyes = []
+
+    async def _send(to, subject, html, text, **kw):
+        envoyes.append((to, subject, text))
+        return SimpleNamespace(id="msg", __bool__=lambda self: True)
+    monkeypatch.setattr(mail, "AsyncSessionLocal", _session)
+    monkeypatch.setattr(mail, "jour_relance", lambda now: False)
+    monkeypatch.setattr(mail, "PAUSE_S", 0)
+    monkeypatch.setattr(alerts, "send_email", _send)
+    monkeypatch.setattr(alerts, "_log_alerte", lambda *a, **k: _rien(), raising=False)
+
+    ancien_inscrit = await _user(db)
+    nouvel_inscrit = await _user(db, created_at=datetime(2026, 10, 12, tzinfo=timezone.utc))
+    abonne = await _user(db)
+    db.add(Subscription(sub_id=str(uuid.uuid4()), user_id=abonne.user_id, stripe_subscription_id="sub_live",
+                        plan="expert", periodicite="monthly", statut="active",
+                        periode_debut=AVANT, periode_fin=AVANT + timedelta(days=30)))
+    db.add(EmailLivraison(cle="k1", campagne=mail.CAMPAGNE, email=ancien_inscrit.email, statut="sent",
+                          created_at=AVANT, requete={}))
+    await db.commit()
+
+    args = argparse.Namespace(test=None, envoyer=True)
+    await mail.relance(args, CODE)
+    await mail.relance(args, CODE)  # relancé par erreur : personne ne le reçoit deux fois
+
+    par_adresse = {to: (sujet, texte) for to, sujet, texte in envoyes}
+    assert len(envoyes) == 2 and set(par_adresse) == {ancien_inscrit.email, nouvel_inscrit.email}
+    assert "Dernière chance" in par_adresse[ancien_inscrit.email][0]
+    assert "nous vous avons envoyé" in par_adresse[ancien_inscrit.email][1]
+    assert "créé depuis" in par_adresse[nouvel_inscrit.email][1]
+    assert all(CODE in texte and "exceptionnelle" in texte for _, texte in par_adresse.values())
+
+
+async def _rien():
+    return None
