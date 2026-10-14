@@ -6,6 +6,7 @@ Rend `(html, texte)`.
 """
 from __future__ import annotations
 
+import re
 from typing import Optional
 
 from services import email_design as D
@@ -15,6 +16,15 @@ from services.offre_anniversaire import FIN_TEXTE, POURCENT, PRIX
 
 def _euros(cents: int) -> str:
     return (f"{cents // 100}" if cents % 100 == 0 else f"{cents / 100:.2f}".replace(".", ",")) + " €"
+
+
+def _prenom(prenom: Optional[str]) -> str:
+    """« THOMAS » ou « jean-pierre » → « Thomas », « Jean-Pierre ». Une casse
+    déjà mixte (« McAllister ») est laissée telle que saisie."""
+    p = " ".join((prenom or "").split())
+    if p and (p.isupper() or p.islower()):
+        p = re.sub(r"[^\W\d_]+", lambda m: m.group(0).capitalize(), p)
+    return p
 
 
 def lien_offre(code: str) -> str:
@@ -140,9 +150,9 @@ def derniere_chance(prenom: Optional[str], code: str, desinscription: str, deja_
                     ce_soir: bool = False) -> tuple[str, str]:
     """Relance de l'offre la veille (ou le jour) de sa fin. `deja_recu` : le compte
     a eu le premier mail ; sinon il découvre l'offre (inscrit depuis, ou pas reçu)."""
-    bonjour = f"Bonjour {e(prenom.strip())}," if prenom and prenom.strip() else "Bonjour,"
-    quand = "ce soir" if ce_soir else "demain soir"
-    echeance ="ce soir à minuit" if ce_soir else f"demain, {FIN_TEXTE}"
+    bonjour = f"Bonjour {e(_prenom(prenom))}," if _prenom(prenom) else "Bonjour,"
+    quand ="ce soir" if ce_soir else "demain soir"
+    echeance = "ce soir à minuit" if ce_soir else f"demain, {FIN_TEXTE}"
     lien = lien_offre(code)
     if deja_recu:
         rappel = (

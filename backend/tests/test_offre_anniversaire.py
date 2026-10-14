@@ -287,3 +287,14 @@ async def test_relance_envoi_complet(db, monkeypatch):
 
 async def _rien():
     return None
+
+
+@pytest.mark.parametrize("saisi, attendu", [
+    ("THOMAS", "Bonjour Thomas,"), ("jean-pierre", "Bonjour Jean-Pierre,"), ("élodie", "Bonjour Élodie,"),
+    ("McAllister", "Bonjour McAllister,"), ("  marie   claire ", "Bonjour Marie Claire,"),
+    ("", "Bonjour,"), (None, "Bonjour,"),
+])
+def test_prenom_mis_en_forme(saisi, attendu):
+    from services.email_offre import derniere_chance
+    _, texte = derniere_chance(saisi, CODE, "https://blackturf.fr/x", deja_recu=True)
+    assert texte.startswith(attendu + "\n")
