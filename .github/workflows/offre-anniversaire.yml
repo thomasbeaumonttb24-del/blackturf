@@ -6,6 +6,7 @@ name: Offre anniversaire
 #   simulation — nombre de destinataires et de mois, AUCUN envoi
 #   test       — un exemplaire à ADMIN_EMAIL
 #   envoyer    — envoi réel (idempotent : personne ne le reçoit deux fois)
+#   relance-*  — mêmes étapes pour le mail « dernière chance » (--derniere-chance)
 #
 # Le dépôt et ses journaux sont publics : le code n'est jamais écrit ici. Il est
 # lu dans l'événement puis MASQUÉ avant la moindre sortie (« *** » dans les logs).
@@ -17,7 +18,7 @@ on:
         description: "Étape"
         required: true
         type: choice
-        options: [installer, verifier, simulation, test, envoyer]
+        options: [installer, verifier, simulation, test, envoyer, relance-simulation, relance-test, relance-envoyer]
       code:
         description: "Code de l'offre (étape installer seulement)"
         required: false
@@ -88,6 +89,15 @@ jobs:
                 ;;
               envoyer)
                 $DC exec -T api python scripts/envoyer_mail_anniversaire.py --envoyer
+                ;;
+              relance-simulation)
+                $DC exec -T api python scripts/envoyer_mail_anniversaire.py --derniere-chance
+                ;;
+              relance-test)
+                $DC exec -T api python scripts/envoyer_mail_anniversaire.py --derniere-chance --test
+                ;;
+              relance-envoyer)
+                $DC exec -T api python scripts/envoyer_mail_anniversaire.py --derniere-chance --envoyer
                 ;;
               *)
                 echo "::error::Étape inconnue : $ETAPE"; exit 1

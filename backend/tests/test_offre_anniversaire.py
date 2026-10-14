@@ -237,3 +237,53 @@ async def test_relance_jamais_un_abonnement_en_cours(db):
                             periode_debut=AVANT, periode_fin=AVANT + timedelta(days=30)))
         await db.commit()
         assert "sans abonnement en cours" in await _VRAIE_RAISON(user, db, PENDANT)
+
+
+@pytest.mark.asyncio
+async def test_relance_envoi_complet(db, monkeypatch):
+    """Bout en bout : bons destinataires, bon texte selon le premier mail, jamais deux fois."""
+    import argparse
+    from contextlib import asynccontextmanager
+    from types import SimpleNamespace
+    from db.models import EmailLivraison
+    from scripts import envoyer_mail_anniversaire as mail
+    import services.alerts as alerts
+
+    @asynccontextmanager
+    async def _session():
+        yield db
+    envoyes = []
+
+    async def _send(to, subject, html, text, **kw):
+        envoyes.append((to, subject, text))
+        return SimpleNamespace(id="msg", __bool__=lambda self: True)
+    monkeypatch.setattr(mail, "AsyncSessionLocal", _session)
+    monkeypatch.setattr(mail, "jour_relance", lambda now: False)
+    monkeypatch.setattr(mail, "PAUSE_S", 0)
+    monkeypatch.setattr(alerts, "send_email", _send)
+    monkeypatch.setattr(alerts, "_log_alerte", lambda *a, **k: _rien(), raising=False)
+
+    ancien_inscrit = await _user(db)
+    nouvel_inscrit = await _user(db, created_at=datetime(2026, 10, 12, tzinfo=timezone.utc))
+    abonne = await _user(db)
+    db.add(Subscription(sub_id=str(uuid.uuid4()), user_id=abonne.user_id, stripe_subscription_id="sub_live",
+                        plan="expert", periodicite="monthly", statut="active",
+                        periode_debut=AVANT, periode_fin=AVANT + timedelta(days=30)))
+    db.add(EmailLivraison(cle="k1", campagne=mail.CAMPAGNE, email=ancien_inscrit.email, statut="sent",
+                          created_at=AVANT, requete={}))
+    await db.commit()
+
+    args = argparse.Namespace(test=None, envoyer=True)
+    await mail.relance(args, CODE)
+    await mail.relance(args, CODE)  # relancé par erreur : personne ne le reçoit deux fois
+
+    par_adresse = {to: (sujet, texte) for to, sujet, texte in envoyes}
+    assert len(envoyes) == 2 and set(par_adresse) == {ancien_inscrit.email, nouvel_inscrit.email}
+    assert "Dernière chance" in par_adresse[ancien_inscrit.email][0]
+    assert "nous vous avons envoyé" in par_adresse[ancien_inscrit.email][1]
+    assert "créé depuis" in par_adresse[nouvel_inscrit.email][1]
+    assert all(CODE in texte and "exceptionnelle" in texte for _, texte in par_adresse.values())
+
+
+async def _rien():
+    return None
