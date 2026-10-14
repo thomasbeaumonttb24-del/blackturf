@@ -52,7 +52,7 @@ LICENCE_KO = re.compile(r"\b(nc|nd)\b", re.I)
 
 
 def api(params):
-    params = {**params, "format": "json", "formatversion": "2"}
+    params = {"action": "query", **params, "format": "json", "formatversion": "2"}
     req = urllib.request.Request(API + "?" + urllib.parse.urlencode(params),
                                  headers={"User-Agent": UA, "Accept": "application/json"})
     for essai in range(4):
@@ -67,8 +67,8 @@ def api(params):
                 continue
             raise
         except json.JSONDecodeError:
-            print(f"  réponse non JSON : {corps[:300]!r}")
-            time.sleep(5 * (essai + 1))
+            print(f"  réponse non JSON : {corps[:200]!r}")
+            break
     raise RuntimeError("API Commons injoignable")
 
 
