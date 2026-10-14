@@ -4,12 +4,12 @@ import { Ticket } from "lucide-react";
 import { SeoHero, Container, Section, DefCard, Callout, Chip } from "@/components/seo/kit";
 
 export const metadata: Metadata = {
-  title: "Tous les types de paris PMU expliqués",
+  title: "Types de paris PMU : Quinté+, Tiercé, Couplé, 2sur4 expliqués",
   description:
     "Tous les paris PMU : Simple, Couplé, Trio, Tiercé, Quarté+, Quinté+, 2sur4, Multi, Pick5. Conditions de gain et places payées selon le nombre de partants.",
   alternates: { canonical: "/guides/types-de-paris-pmu" },
   openGraph: {
-    title: "Tous les types de paris PMU expliqués",
+    title: "Types de paris PMU : Quinté+, Tiercé, Couplé, 2sur4 expliqués",
     description: "Conditions de gain et places payées de chaque pari PMU.",
     url: "https://blackturf.fr/guides/types-de-paris-pmu",
     type: "article",

@@ -210,6 +210,12 @@ export function nomCourt(h: Hippodrome): string {
   return /^(de la |de l'|des |du |de |d')/i.test(reste) ? reste : `de ${reste}`;
 }
 
+/** « Hippodrome de Vincennes » → « Vincennes », « Hippodrome d'Auteuil » → « Auteuil » :
+ *  le nom tel qu'on le tape dans une recherche (« pronostic Vincennes »). */
+export function nomLieu(h: Hippodrome): string {
+  return h.name.replace(/^Hippodrome\s+/i, "").replace(/^(de la |de l'|des |du |de |d')/i, "").trim() || h.name;
+}
+
 export function matchHippodrome(hippodromeNom: string | undefined, h: Hippodrome): boolean {
   if (!hippodromeNom) return false;
   const up = hippodromeNom.toUpperCase();

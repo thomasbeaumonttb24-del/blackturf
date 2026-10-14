@@ -33,6 +33,9 @@ import { NewsletterForm } from "@/components/newsletter/NewsletterForm";
 // Le canonical n'est plus hérité de la racine (il y désignait "/" pour TOUTES les pages) :
 // l'accueil déclare donc le sien explicitement.
 export const metadata: Metadata = {
+  // « pronostic PMU » et « Quinté+ » : les deux requêtes les plus tapées sur ce créneau,
+  // absentes jusqu'ici du titre de l'accueil (hérité du titre par défaut).
+  title: "BlackTurf — pronostic PMU et Quinté+ du jour par IA",
   alternates: { canonical: "/" },
 };
 

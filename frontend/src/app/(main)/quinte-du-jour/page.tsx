@@ -5,6 +5,7 @@ import {
   fetchProgramme,
   fetchCourseDetail,
   fetchResultats,
+  fetchApercuCourse,
   jourParis,
   jourLong,
   jourCourt,
@@ -22,6 +23,7 @@ import { rapportsTries, libellePari, formatRapport } from "@/lib/rapports";
 import { SeoHero, Container, Section, Callout } from "@/components/seo/kit";
 import { NewsletterForm } from "@/components/newsletter/NewsletterForm";
 import { PreuvesRecentesCard } from "@/components/courses/insights";
+import { AnalyseIA } from "@/components/seo/AnalyseIA";
 
 export const revalidate = 300;
 
@@ -38,17 +40,17 @@ export async function generateMetadata(): Promise<Metadata> {
   const jour = jourParis();
   const c = await quinteDuJour(jour);
 
-  // « pronostic IA » est ici la formulation exacte de ce que la page propose, et l'une
-  // des requêtes les plus tapées sur ce créneau.
+  // « Pronostic Quinté » en tête : c'est la requête tapée (« pronostic quinté du jour »),
+  // et Google pèse davantage les premiers mots du titre.
   const title = c
-    ? `Quinté+ du ${jourCourt(jour)} à ${titleCase(c.hippodrome_nom)} — pronostic IA`
-    : `Quinté+ du ${jourCourt(jour)} — pronostic IA, partants et arrivée`;
+    ? `Pronostic Quinté+ du ${jourCourt(jour)} à ${titleCase(c.hippodrome_nom)} — analyse IA`
+    : `Pronostic Quinté+ du ${jourCourt(jour)} — IA, partants et arrivée`;
   // Extrait tronqué par Google vers 155-160 caractères : date, lieu et heure d'abord.
   const description = c
-    ? `Quinté+ du ${jourLong(jour)} à ${titleCase(c.hippodrome_nom)} : ${
+    ? `Pronostic du Quinté+ du ${jourLong(jour)} à ${titleCase(c.hippodrome_nom)} : ${
         c.nb_partants
-      } partants, départ à ${heureParis(c.date_heure)}. Probabilité par cheval, arrivée et rapports.`
-    : `Le Quinté+ du ${jourLong(jour)} analysé par l'IA : partants, probabilité par cheval, puis l'arrivée officielle et les rapports PMU.`;
+      } partants, départ à ${heureParis(c.date_heure)}. Classement IA, probabilité par cheval, arrivée et rapports.`
+    : `Le pronostic du Quinté+ du ${jourLong(jour)} par l'IA : partants, probabilité par cheval, puis l'arrivée officielle et les rapports PMU.`;
 
   return {
     title,
@@ -64,8 +66,13 @@ export default async function QuinteDuJourPage() {
   const resume = await quinteDuJour(jour);
   const detail = resume ? await fetchCourseDetail(resume.course_id) : null;
   const course = detail?.status === "ok" ? detail.course : null;
-  const resultats =
-    course?.statut === "termine" ? await fetchResultats(course.course_id) : null;
+  // Arrivée et analyse IA en parallèle : deux appels indépendants.
+  const [resultats, apercu] = course
+    ? await Promise.all([
+        course.statut === "termine" ? fetchResultats(course.course_id) : Promise.resolve(null),
+        fetchApercuCourse(course.course_id),
+      ])
+    : [null, null];
 
   const rapports = rapportsTries(resultats?.rapports);
   const quinteDetail = resultats?.rapports_detail?.e_quinte_plus ?? [];
@@ -142,7 +149,7 @@ export default async function QuinteDuJourPage() {
           { label: "Courses du jour", href: "/programme" },
           { label: "Quinté+ du jour" },
         ]}
-        title={`Quinté+ du ${jourCourt(jour)}`}
+        title={`Pronostic Quinté+ du ${jourCourt(jour)}`}
         accent={course ? `— ${titleCase(course.hippodrome_nom)}` : undefined}
         lead={
           course
@@ -182,6 +189,14 @@ export default async function QuinteDuJourPage() {
                 </p>
               )}
             </Section>
+
+            {/* Le pronostic lui-même, dans le HTML servi : c'est ce que cherche
+                « pronostic quinté du jour », et la page ne montrait que les partants. */}
+            {apercu && (
+              <Section title="Le pronostic IA du Quinté+">
+                <AnalyseIA apercu={apercu} titre="Classement de l'IA" />
+              </Section>
+            )}
 
             <Section title={`Les ${course.nb_partants} partants du Quinté+`}>
               <div className="overflow-x-auto">

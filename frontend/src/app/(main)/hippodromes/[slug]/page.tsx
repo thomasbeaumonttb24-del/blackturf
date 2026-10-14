@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { MapPin, Trophy, ChevronRight, CalendarDays } from "lucide-react";
-import { HIPPODROMES, getHippodrome, matchHippodrome, nomCourt } from "@/lib/hippodromes";
+import { HIPPODROMES, getHippodrome, matchHippodrome, nomCourt, nomLieu } from "@/lib/hippodromes";
 import {
   fetchProgramme,
   fetchProfilLieux,
@@ -10,7 +10,8 @@ import {
   decalerJours,
   jourCourtAnnee,
   disciplineLabel,
-  OG_IMAGE,
+  ogBase,
+  twitterBase,
   filAriane,
   jsonLd,
 } from "@/lib/seo";
@@ -28,9 +29,9 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
   const { slug } = await params;
   const h = getHippodrome(slug);
   if (!h) return { title: "Hippodrome" };
-  // Le titre annonce les trois choses que la page porte vraiment, et tient sous la
-  // limite d'affichage de Google (~60 caractères) pour les seize fiches.
-  const title = `${h.name} — programme et résultats`;
+  // « Pronostic <lieu> » en tête : c'est ce que tapent les turfistes (« pronostic
+  // Vincennes »). Sous la limite d'affichage de Google (~60 caractères) pour les seize fiches.
+  const title = `Pronostic ${nomLieu(h)} : programme et résultats PMU`;
   // La description dit ce que la page contient RÉELLEMENT depuis qu'elle porte le profil
   // chiffré : pas seulement le programme du jour, mais des statistiques de lieu qu'on ne
   // trouve pas ailleurs. La région est tombée : elle coûtait la limite des 160 caractères
@@ -46,7 +47,8 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
     title,
     description,
     alternates: { canonical: `/hippodromes/${h.slug}` },
-    openGraph: { title, description, url: `https://blackturf.fr/hippodromes/${h.slug}`, images: [OG_IMAGE] },
+    openGraph: ogBase({ title, description, url: `/hippodromes/${h.slug}` }),
+    twitter: twitterBase({ title, description }),
   };
 }
 

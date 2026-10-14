@@ -6,6 +6,8 @@ import {
   jourCourtAnnee,
   ogBase,
   twitterBase,
+  fetchQuinte,
+  titleCase,
   PREMIER_JOUR_ARCHIVE,
 } from "@/lib/seo";
 import { ResultatsJour } from "@/components/seo/ResultatsJour";
@@ -51,10 +53,17 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   if (!jourValide(jour)) return { title: "Résultats PMU" };
   // L'année figure dans le titre : sans elle, le 20 août 2026 et le 20 août 2027
   // portaient le même `<title>`, et Google n'en garde qu'un.
-  const title = `Résultats PMU du ${jourCourtAnnee(jour)} — arrivées et rapports`;
-  const description = `Arrivées officielles et rapports PMU du ${jourLong(
-    jour,
-  )} : Quinté+, Quarté+, Tiercé, Couplé, Simple et 2 sur 4.`;
+  // Le Quinté+ nommé dans le titre : « arrivée quinté 12 octobre » est la requête
+  // la plus tapée sur une journée de résultats.
+  const quinte = await fetchQuinte(jour);
+  const title = quinte
+    ? `Résultats PMU du ${jourCourtAnnee(jour)} — arrivée du Quinté+ à ${titleCase(quinte.hippodrome_nom)}`
+    : `Résultats PMU du ${jourCourtAnnee(jour)} — arrivées et rapports`;
+  const description = quinte
+    ? `Arrivée du Quinté+ du ${jourLong(jour)} à ${titleCase(quinte.hippodrome_nom)}, toutes les arrivées officielles et les rapports PMU : Quarté+, Tiercé, Couplé, Simple.`
+    : `Arrivées officielles et rapports PMU du ${jourLong(
+        jour,
+      )} : Quinté+, Quarté+, Tiercé, Couplé, Simple et 2 sur 4.`;
   return {
     title,
     description,

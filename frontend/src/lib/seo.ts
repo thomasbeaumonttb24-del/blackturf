@@ -133,6 +133,15 @@ export async function fetchProgramme(jour?: string): Promise<SeoProgramme | null
   }
 }
 
+/** Course support du Quinté+ d'une journée (une seule par journée PMU), ou null. */
+export async function fetchQuinte(jour: string): Promise<SeoCourse | null> {
+  const prog = await fetchProgramme(jour);
+  for (const r of prog?.reunions ?? []) {
+    for (const c of r.courses ?? []) if (c.est_quinte) return c;
+  }
+  return null;
+}
+
 export async function fetchCourse(id: string): Promise<SeoCourse | null> {
   try {
     const res = await fetch(`${API}/courses/${encodeURIComponent(id)}`, initServeur({
