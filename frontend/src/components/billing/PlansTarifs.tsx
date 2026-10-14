@@ -6,6 +6,7 @@ import { Cake, Check, Crown, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { CheckoutButton } from "@/components/billing/CheckoutButton";
 import { MentionPaiement } from "@/components/billing/MentionPaiement";
+import { AidePaiementInternational } from "@/components/billing/AidePaiementInternational";
 import { useAuth } from "@/hooks/useAuth";
 import { euros, memoriserCodeDuLien, useOffreAnniversaire } from "@/lib/offreAnniversaire";
 
@@ -223,6 +224,8 @@ export function PlansTarifs() {
           </div>
         </div>
       </div>
+
+      <AidePaiementInternational />
 
       {annuel && (
         <p className="mx-auto mt-6 max-w-xl text-center text-[11px] leading-snug text-muted-foreground">

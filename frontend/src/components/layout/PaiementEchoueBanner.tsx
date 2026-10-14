@@ -5,6 +5,7 @@ import { AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
+import { AidePaiementInternational } from "@/components/billing/AidePaiementInternational";
 
 /**
  * Prélèvement refusé par la banque, accès coupé, carte à remplacer.
@@ -62,6 +63,7 @@ export function PaiementEchoueBanner() {
         >
           {ouverture ? "Ouverture…" : "Mettre ma carte à jour"}
         </button>
+        <AidePaiementInternational compact className="basis-full pl-7 text-xs text-red-800" />
       </div>
     </div>
   );

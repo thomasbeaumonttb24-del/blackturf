@@ -7,6 +7,7 @@ import { CalendarDays, CalendarRange, Check, CreditCard, Crown, Loader2, ShieldC
 import { toast } from "sonner";
 import { Tilt } from "@/components/track-record/effets";
 import { CheckoutButton } from "@/components/billing/CheckoutButton";
+import { AidePaiementInternational } from "@/components/billing/AidePaiementInternational";
 import { useAuth } from "@/hooks/useAuth";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -196,6 +197,8 @@ export function PassesTarifs() {
           <Link href="/cgv#passes" className="underline">Conditions</Link>
         </p>
       )}
+
+      {!expertAbonne && <AidePaiementInternational />}
 
       {/* Comment ça marche */}
       <ol className="mt-8 grid gap-3 sm:grid-cols-3">
