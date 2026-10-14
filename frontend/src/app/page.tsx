@@ -21,7 +21,7 @@ import { DefiBandeau } from "@/components/defi/DefiBandeau";
 import { DefiClassementLive } from "@/components/defi/DefiClassementLive";
 import { DefiConcept } from "@/components/defi/DefiConcept";
 import { HeroStats } from "@/components/home/HeroStats";
-import { fetchPalmaresPublic } from "@/lib/seo";
+import { fetchPalmaresPublic, ogBase, twitterBase } from "@/lib/seo";
 import {
   apiServeurOrigine,
   initServeur,
@@ -32,11 +32,18 @@ import { NewsletterForm } from "@/components/newsletter/NewsletterForm";
 
 // Le canonical n'est plus hérité de la racine (il y désignait "/" pour TOUTES les pages) :
 // l'accueil déclare donc le sien explicitement.
+const TITRE_ACCUEIL = "BlackTurf — pronostic PMU et Quinté+ du jour par IA";
+const DESCRIPTION_ACCUEIL =
+  "Programme PMU analysé par IA : une probabilité par cheval et un plan de mise ajusté à votre budget. Pronostics notés aux rapports réels du PMU.";
+
 export const metadata: Metadata = {
   // « pronostic PMU » et « Quinté+ » : les deux requêtes les plus tapées sur ce créneau,
   // absentes jusqu'ici du titre de l'accueil (hérité du titre par défaut).
-  title: "BlackTurf — pronostic PMU et Quinté+ du jour par IA",
+  title: TITRE_ACCUEIL,
   alternates: { canonical: "/" },
+  // Le titre partagé suit celui de la page (le gabarit du layout en portait un autre).
+  openGraph: ogBase({ title: TITRE_ACCUEIL, description: DESCRIPTION_ACCUEIL, url: "/" }),
+  twitter: twitterBase({ title: TITRE_ACCUEIL, description: DESCRIPTION_ACCUEIL }),
 };
 
 // ─── Exemple de course (illustratif, tagué « Exemple » partout) ──────────────

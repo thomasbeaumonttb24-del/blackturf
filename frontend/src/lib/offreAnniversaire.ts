@@ -67,6 +67,11 @@ export function useOffreAnniversaire(user: AuthUser | null, code: string | null 
     };
   }, [user, code]);
   if (!rep) return { offre: null, raison: null };
+  // Page restée ouverte au-delà de la fin : la réponse mise en cache disait « éligible »,
+  // mais le paiement refuserait le code. L'offre disparaît sans attendre un rechargement.
+  if (rep.eligible && Date.now() > Date.parse(rep.fin)) {
+    return { offre: null, raison: "Cette offre exceptionnelle a pris fin le 15 octobre." };
+  }
   return rep.eligible ? { offre: rep, raison: null } : { offre: null, raison: rep.raison ?? null };
 }
 

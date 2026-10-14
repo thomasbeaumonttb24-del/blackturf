@@ -270,7 +270,7 @@ export const HIPPODROMES: Hippodrome[] = [
     disciplines: ["Plat", "Obstacle"],
     intro:
       "Niché dans le parc de l'Isle-Briand, l'hippodrome du Lion-d'Angers accueille une douzaine de réunions par an, en plat et en obstacle. Il est réputé pour son parcours de cross-country.",
-    match: ["LION D"],
+    match: ["LION D", "LION-D"],
   },
 ];
 
@@ -295,7 +295,16 @@ export function getHippodrome(slug: string): Hippodrome | undefined {
  */
 export function slugHippodrome(hippodromeNom: string | undefined): string | null {
   if (!hippodromeNom) return null;
-  return HIPPODROMES.find((h) => matchHippodrome(hippodromeNom, h))?.slug ?? null;
+  // La correspondance la plus précise l'emporte : « DEAUVILLE-CLAIREFONTAINE » contient
+  // aussi « DEAUVILLE », mais désigne Clairefontaine.
+  const up = hippodromeNom.toUpperCase();
+  let meilleur: { slug: string; longueur: number } | null = null;
+  for (const h of HIPPODROMES) {
+    for (const m of h.match) {
+      if (up.includes(m) && (!meilleur || m.length > meilleur.longueur)) meilleur = { slug: h.slug, longueur: m.length };
+    }
+  }
+  return meilleur?.slug ?? null;
 }
 
 export function nomCourt(h: Hippodrome): string {

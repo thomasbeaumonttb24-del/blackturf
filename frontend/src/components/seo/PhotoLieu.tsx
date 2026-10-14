@@ -24,7 +24,7 @@ export function photoHippodrome(slug: string): CreditPhoto | null {
  */
 export function PhotoLieu({ photo, alt }: { photo: CreditPhoto; alt: string }) {
   return (
-    <figure className="mt-8">
+    <div className="mt-8">
       <div className="relative overflow-hidden rounded-3xl border border-white/60 shadow-[0_24px_60px_-20px_rgba(28,25,23,0.45)]">
         <Image
           src={photo.fichier}
@@ -37,7 +37,7 @@ export function PhotoLieu({ photo, alt }: { photo: CreditPhoto; alt: string }) {
           className="aspect-[16/9] h-auto w-full object-cover sm:aspect-[21/9]"
         />
         <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-stone-950/35 via-transparent to-transparent" />
-        <figcaption className="absolute right-2 top-2 max-w-[85%] rounded-full bg-stone-950/55 px-2.5 py-1 text-right text-[10.5px] leading-tight text-white/90 backdrop-blur-sm">
+        <p className="absolute right-2 top-2 max-w-[85%] rounded-full bg-stone-950/80 px-2.5 py-1 text-right text-[10.5px] leading-tight text-white/90 backdrop-blur-sm">
           Photo :{" "}
           <a href={photo.source} target="_blank" rel="noopener" className="underline-offset-2 hover:underline">
             {photo.auteur}
@@ -55,8 +55,8 @@ export function PhotoLieu({ photo, alt }: { photo: CreditPhoto; alt: string }) {
             </>
           )}
           {" "}· Wikimedia Commons
-        </figcaption>
+        </p>
       </div>
-    </figure>
+    </div>
   );
 }

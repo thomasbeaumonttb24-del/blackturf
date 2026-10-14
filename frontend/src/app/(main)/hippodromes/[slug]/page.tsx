@@ -252,7 +252,7 @@ export default async function HippodromePage({ params }: { params: Promise<{ slu
         )}
 
         {grandsPrixDuLieu(h.slug).length > 0 && (
-          <Section title={`Les Grands Prix de ${nomLieu(h)}`}>
+          <Section title={`Les Grands Prix ${nomCourt(h)}`}>
             <div className="grid gap-3 sm:grid-cols-2">
               {grandsPrixDuLieu(h.slug).map((g) => (
                 <Link key={g.slug} href={`/grands-prix/${g.slug}`} className="glass-card group flex items-center gap-3 rounded-2xl p-4">

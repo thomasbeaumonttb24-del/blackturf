@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import {
   fetchQuinte,
   jourParis,
+  decalerJours,
   jourLong,
   jourCourt,
   heureParis,
@@ -16,7 +17,7 @@ export const revalidate = 300;
 /** « pronostic quinté demain » : la recherche se fait la veille au soir, quand le PMU
  *  vient de désigner la course support. L'URL est fixe ; le contenu suit le calendrier. */
 export async function generateMetadata(): Promise<Metadata> {
-  const jour = jourParis(1);
+  const jour = decalerJours(jourParis(), 1);
   const c = await fetchQuinte(jour);
   const title = c
     ? `Pronostic Quinté+ de demain (${jourCourt(jour)}) à ${titleCase(c.hippodrome_nom)} — IA`
@@ -36,5 +37,5 @@ export async function generateMetadata(): Promise<Metadata> {
 }
 
 export default async function QuinteDeDemainPage() {
-  return <QuintePronostic jour={jourParis(1)} demain />;
+  return <QuintePronostic jour={decalerJours(jourParis(), 1)} demain />;
 }

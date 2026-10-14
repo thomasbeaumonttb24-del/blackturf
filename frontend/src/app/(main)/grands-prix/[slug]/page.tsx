@@ -3,10 +3,12 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { CalendarDays, Trophy } from "lucide-react";
 import { GRANDS_PRIX, getGrandPrix, estCeGrandPrix, type GrandPrix, type Edition } from "@/lib/grandsPrix";
+import { getHippodrome, matchHippodrome } from "@/lib/hippodromes";
 import {
   fetchProgramme,
   fetchResultats,
   jourParis,
+  decalerJours,
   jourLong,
   heureParis,
   filAriane,
@@ -61,10 +63,13 @@ type Trouvee = { edition: Edition; course: SeoCourse; resultats: SeoResultats | 
  *  de la base (avant la mise en service, ou pas encore publiée) ne renvoie rien. */
 async function chercher(g: GrandPrix, edition: Edition): Promise<Trouvee | null> {
   if (edition.date < PREMIER_JOUR_ARCHIVE) return null;
+  const lieu = getHippodrome(g.hippodromeSlug);
   const prog = await fetchProgramme(edition.date);
   const course = (prog?.reunions ?? [])
     .flatMap((r) => r.courses ?? [])
-    .find((c) => estCeGrandPrix(c.nom, g));
+    // Le nom ET le lieu : un « Prix Diane » couru ailleurs le même jour ne doit pas
+    // passer pour le Prix de Diane.
+    .find((c) => estCeGrandPrix(c.nom, g) && (!lieu || matchHippodrome(c.hippodrome_nom, lieu)));
   if (!course) return null;
   const resultats = course.statut === "termine" ? await fetchResultats(course.course_id) : null;
   return { edition, course, resultats };
@@ -76,9 +81,8 @@ export default async function GrandPrixPage({ params }: { params: Promise<{ slug
   if (!g) notFound();
 
   const aujourdhui = jourParis();
-  const prochaineEdition = prochaine(g, aujourdhui);
   // Les éditions publiées (passées, ou la prochaine si son programme est déjà sorti).
-  const candidates = g.editions.filter((e) => e.date <= jourParis(1));
+  const candidates = g.editions.filter((e) => e.date <= decalerJours(aujourdhui, 1));
   const trouvees = (await Promise.all(candidates.map((e) => chercher(g, e)))).filter(
     (t): t is Trouvee => t !== null,
   );
@@ -86,6 +90,12 @@ export default async function GrandPrixPage({ params }: { params: Promise<{ slug
     .filter((t) => t.resultats?.classement?.length)
     .sort((a, b) => b.edition.date.localeCompare(a.edition.date));
   const aVenir = trouvees.find((t) => t.edition.date >= aujourdhui && !t.resultats?.classement?.length) ?? null;
+  // Le jour même, une fois l'arrivée publiée, l'édition du jour n'est plus « à venir » :
+  // la carte et le balisage passent à la suivante.
+  const prochaineEdition =
+    g.editions.find((e) => e.date >= aujourdhui && !passees.some((t) => t.edition.date === e.date)) ?? null;
+  const lieu = getHippodrome(g.hippodromeSlug);
+  const nomLieu = lieu?.name ?? `Hippodrome ${g.hippodrome}`;
 
   const photo = photoHippodrome(g.hippodromeSlug);
 
@@ -100,8 +110,12 @@ export default async function GrandPrixPage({ params }: { params: Promise<{ slug
         sport: `Course hippique — ${g.discipline}`,
         location: {
           "@type": "Place",
-          name: `Hippodrome ${g.hippodrome}`,
-          address: { "@type": "PostalAddress", addressCountry: "FR" },
+          name: nomLieu,
+          address: {
+            "@type": "PostalAddress",
+            ...(lieu ? { addressLocality: lieu.city, addressRegion: lieu.region } : {}),
+            addressCountry: "FR",
+          },
         },
         description: `${g.discipline}, ${g.distance}. ${g.conditions}`,
         url: `https://blackturf.fr/grands-prix/${g.slug}`,
@@ -130,7 +144,7 @@ export default async function GrandPrixPage({ params }: { params: Promise<{ slug
           </>
         }
       >
-        {photo && <PhotoLieu photo={photo} alt={`Hippodrome ${g.hippodrome}, où se court ${g.court}`} />}
+        {photo && <PhotoLieu photo={photo} alt={`${nomLieu}, où se court ${g.court}`} />}
         <Carte3D
           className={photo ? "-mt-6 sm:-mt-28 sm:ml-8" : "mt-8"}
           surtitre={`${g.categorie} · ${g.discipline}`}

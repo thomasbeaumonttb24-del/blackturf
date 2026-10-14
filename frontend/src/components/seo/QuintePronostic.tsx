@@ -48,7 +48,9 @@ export async function QuintePronostic({ jour, demain = false }: { jour: string; 
   const [resultats, apercu] = course
     ? await Promise.all([
         course.statut === "termine" ? fetchResultats(course.course_id) : Promise.resolve(null),
-        fetchApercuCourse(course.course_id),
+        // L'analyse est un complément : une API qui refuse cet appel (429, panne) ne
+        // doit pas faire tomber la page du Quinté+, qui vit très bien sans.
+        fetchApercuCourse(course.course_id).catch(() => null),
       ])
     : [null, null];
 
@@ -165,7 +167,7 @@ export async function QuintePronostic({ jour, demain = false }: { jour: string; 
           <>
             <Section title={`${titleCase(course.nom ?? "")} — ${titleCase(course.hippodrome_nom)}`}>
               <p className="text-sm leading-relaxed text-brand-charcoal">
-                Le Quinté+ {demain ? "de demain, " : "du "}{jourLong(jour)}, se dispute à {titleCase(course.hippodrome_nom)} sur{" "}
+                Le Quinté+ {demain ? <>de demain, {jourLong(jour)},</> : <>du {jourLong(jour)}</>} se dispute à {titleCase(course.hippodrome_nom)} sur{" "}
                 {course.distance} mètres ({disciplineLabel(course.discipline)}), avec{" "}
                 {course.nb_partants} partants au départ de {heureParis(course.date_heure)}.
                 {course.allocation
