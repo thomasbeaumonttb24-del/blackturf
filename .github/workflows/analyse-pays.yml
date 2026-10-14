@@ -1,0 +1,39 @@
+name: Analyse pays visiteurs
+
+# LECTURE SEULE : géolocalise les visiteurs (journaux nginx) et les payeurs
+# (Stripe). Le script est extrait de la branche sans toucher au dépôt de prod
+# (`git show`, pas de checkout), le résultat part dans le journal du run.
+
+# Lancement MANUEL uniquement (onglet Actions → Analyse pays visiteurs).
+on:
+  workflow_dispatch:
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Analyse sur le VPS
+        # Même action, même SHA épinglé que deploy.yml.
+        uses: appleboy/ssh-action@55dabf81b49d4120609345970c91507e2d734799 # v1.0.0
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          command_timeout: 20m
+          script: |
+            set -e
+            cd /opt/blackturf
+            git fetch -q origin ${{ github.ref_name }}
+            git show FETCH_HEAD:backend/scripts/analyse_pays_visiteurs.py > /tmp/analyse_pays.py
+            ls -la nginx/logs/ | head -40
+
+            if command -v python3 >/dev/null; then
+              python3 /tmp/analyse_pays.py --logs nginx/logs --top 40
+            else
+              docker run --rm -v "$PWD/nginx/logs:/logs:ro" -v /tmp/analyse_pays.py:/a.py:ro \
+                python:3.12-slim python /a.py --logs /logs --top 40
+            fi
+
+            docker exec -i blackturf_api python - --stripe --top 40 < /tmp/analyse_pays.py
