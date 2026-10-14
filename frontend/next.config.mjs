@@ -92,9 +92,7 @@ const nextConfig = {
       // pouvoir changer la page d'arrivée sans toucher à la bio.
       { source: "/tiktok", destination: "/decouvrir?utm_source=tiktok&utm_medium=bio", permanent: false },
       { source: "/d%C3%A9couvrir", destination: "/decouvrir", permanent: true },
-      { source: "/D%C3%A9couvrir", destination: "/decouvrir", permanent: true },
       { source: "/découvrir", destination: "/decouvrir", permanent: true },
-      { source: "/Decouvrir", destination: "/decouvrir", permanent: true },
     ];
   },
   async rewrites() {
