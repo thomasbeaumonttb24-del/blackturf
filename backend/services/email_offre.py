@@ -139,7 +139,7 @@ def anniversaire(prenom: Optional[str], mois: int, code: str, desinscription: st
 def derniere_chance(prenom: Optional[str], code: str, desinscription: str, deja_recu: bool,
                     ce_soir: bool = False) -> tuple[str, str]:
     """Relance de l'offre la veille (ou le jour) de sa fin. `deja_recu` : le compte
-    a eu le premier mail ; sinon il s'est inscrit depuis et découvre l'offre."""
+    a eu le premier mail ; sinon il découvre l'offre (inscrit depuis, ou pas reçu)."""
     bonjour = f"Bonjour {e(prenom.strip())}," if prenom and prenom.strip() else "Bonjour,"
     quand = "ce soir" if ce_soir else "demain soir"
     echeance ="ce soir à minuit" if ce_soir else f"demain, {FIN_TEXTE}"
@@ -156,11 +156,11 @@ def derniere_chance(prenom: Optional[str], code: str, desinscription: str, deja_
         rappel = (
             "La semaine dernière, pour l’anniversaire de BlackTurf, nous avons envoyé à nos membres un "
             f"{D.fort('code de réduction')} : {D.fort(f'−{POURCENT} % sur le premier mois')} d’abonnement mensuel. "
-            "Votre compte a été créé depuis&nbsp;: bonne nouvelle, l’offre vaut aussi pour vous."
+            "Bonne nouvelle&nbsp;: l’offre vaut aussi pour vous, et voici votre code."
         )
         rappel_txt = ("La semaine dernière, pour l'anniversaire de BlackTurf, nous avons envoyé à nos membres un "
-                      f"code de réduction : −{POURCENT} % sur le premier mois d'abonnement mensuel. Votre compte "
-                      "a été créé depuis : bonne nouvelle, l'offre vaut aussi pour vous.")
+                      f"code de réduction : −{POURCENT} % sur le premier mois d'abonnement mensuel. "
+                      "Bonne nouvelle : l'offre vaut aussi pour vous, et voici votre code.")
     exceptionnel = ("C’est une remise " + D.fort("exceptionnelle") + ", accordée uniquement pour "
                     "l’anniversaire du site&nbsp;: elle prend fin " + D.fort(echeance) + ". Passé ce délai, "
                     "le code ne fonctionnera plus.")
