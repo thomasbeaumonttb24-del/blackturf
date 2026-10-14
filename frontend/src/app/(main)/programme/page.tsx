@@ -40,8 +40,8 @@ export async function generateMetadata(): Promise<Metadata> {
     // « pronostics IA » plutôt que « courses analysées par l'IA » : même sens, six
     // caractères de moins, et le titre repasse sous la limite d'affichage de Google
     // (61 caractères mesurés le 2026-09-21, tronqué vers 60).
-    ? `Programme PMU du ${jourCourt(jour)} — ${nbCourses} courses, pronostics IA`
-    : `Programme PMU du ${jourCourt(jour)} — courses et pronostics IA`;
+    ? `Pronostic et programme PMU du ${jourCourt(jour)} — ${nbCourses} courses`
+    : `Pronostic et programme PMU du ${jourCourt(jour)} — courses du jour`;
   // Google tronque l'extrait autour de 155-160 caractères : l'information la plus
   // spécifique (date, volume, hippodromes) passe devant, la promesse produit derrière.
   const description = nbCourses

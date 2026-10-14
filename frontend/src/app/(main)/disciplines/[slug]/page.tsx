@@ -10,7 +10,8 @@ import {
   titleCase,
   resumeCourt,
   filAriane,
-  OG_IMAGE,
+  ogBase,
+  twitterBase,
   jsonLd,
 } from "@/lib/seo";
 import { ProfilChiffreDiscipline } from "@/components/seo/ProfilChiffre";
@@ -23,18 +24,28 @@ export function generateStaticParams() {
   return DISCIPLINES.map((d) => ({ slug: d.slug }));
 }
 
+const TITRES_SEO: Record<string, string> = {
+  trot: "Pronostic trot attelé et monté : courses PMU du jour",
+  plat: "Pronostic plat (galop) : courses PMU du jour",
+  obstacle: "Pronostic obstacle : haies, steeple-chase et cross",
+};
+
 export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }): Promise<Metadata> {
   const { slug } = await params;
   const d = getDiscipline(slug);
   if (!d) return { title: "Discipline" };
+  // « Pronostic <discipline> » : la requête réelle (« pronostic trot du jour »), là où
+  // le nom de la discipline seul ne correspondait à aucune recherche.
+  const title = TITRES_SEO[d.slug] ?? d.name;
   return {
-    title: d.name,
+    title,
     // Google tronque vers 155-160 caractères : l'intro de la discipline suffit, on
     // n'ajoute plus de queue promotionnelle qui serait coupée de toute façon. La coupe
     // respecte les mots — `slice(0, 155)` s'arrêtait sur « avec Vincenne ».
     description: resumeCourt(d.intro),
     alternates: { canonical: `/disciplines/${d.slug}` },
-    openGraph: { title: `${d.name}`, description: d.intro, url: `https://blackturf.fr/disciplines/${d.slug}`, images: [OG_IMAGE] },
+    openGraph: ogBase({ title, description: resumeCourt(d.intro), url: `/disciplines/${d.slug}` }),
+    twitter: twitterBase({ title, description: resumeCourt(d.intro) }),
   };
 }
 
