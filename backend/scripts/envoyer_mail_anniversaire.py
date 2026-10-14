@@ -17,6 +17,9 @@ le nombre de mois. Trois étapes, dans l'ordre :
 Relance « dernière chance » (la veille ou le jour de la fin) : même chose avec
 --derniere-chance. Elle vise tous les comptes éligibles, inscrits depuis le
 premier mail compris ; ceux qui ne l'ont pas reçu ont un texte adapté.
+Cible (décision de l'exploitant) : comptes gratuits, détenteurs d'un pass,
+anciens abonnés. Jamais un abonnement Standard/Expert en cours, un accès
+offert à la main ni un admin.
 
     python scripts/envoyer_mail_anniversaire.py --derniere-chance --test
     python scripts/envoyer_mail_anniversaire.py --derniere-chance --envoyer
@@ -37,7 +40,7 @@ import db.models  # noqa: E402,F401
 from sqlalchemy import func, select  # noqa: E402
 
 from db.database import AsyncSessionLocal  # noqa: E402
-from db.models import EmailLivraison, User  # noqa: E402
+from db.models import EmailLivraison, Subscription, User  # noqa: E402
 from services import offre_anniversaire as oa  # noqa: E402
 from services.email_offre import anniversaire, derniere_chance  # noqa: E402
 from services.email_verification import clause_email_utilisable  # noqa: E402
@@ -73,6 +76,21 @@ def jour_relance(maintenant: datetime) -> bool:
     if (fin - jour).days == 1:
         return False
     sys.exit(f"La relance parle de « demain » ou « ce soir » : elle ne part que le {fin.day - 1} ou le {fin.day}.")
+
+
+async def profil_relance(session, user: User) -> str | None:
+    """« pass », « ancien abonné » ou « gratuit » ; None = hors cible. L'abonnement
+    en cours est déjà écarté par oa.raison_refus."""
+    from services.passes import pass_actif
+    if user.is_admin:
+        return None
+    if await pass_actif(session, user.user_id):
+        return "pass"
+    if await session.scalar(select(Subscription.sub_id).where(
+            Subscription.user_id == user.user_id, Subscription.statut != "incomplete_expired").limit(1)):
+        return "ancien abonné"
+    # Plan payant sans pass ni abonnement : accès accordé à la main.
+    return "gratuit" if (user.plan or "free") == "free" else None
 
 
 async def deja_recu_premier_mail(session) -> set[str]:
@@ -171,11 +189,17 @@ async def relance(args, code: str) -> None:
                       "OK" if ok else f"ÉCHEC ({getattr(ok, 'erreur', '?')})")
             return
 
-        cibles = await destinataires(session, oa.COMPTES_AVANT)
+        cibles, profils = [], {}
+        for user in await destinataires(session, oa.COMPTES_AVANT):
+            profil = await profil_relance(session, user)
+            if profil:
+                cibles.append(user)
+                profils[profil] = profils.get(profil, 0) + 1
         recus = await deja_recu_premier_mail(session)
         nouveaux = sum(1 for u in cibles if u.email.strip().lower() not in recus)
         print(f"Destinataires : {len(cibles)} dont {nouveaux} sans le premier mail "
               f"(offre valable jusqu'au {oa.FIN_TEXTE})")
+        print("  " + " · ".join(f"{n} {p}" for p, n in sorted(profils.items())))
         if not args.envoyer:
             print("Simulation : rien n'est envoyé. Ajoutez --envoyer pour l'envoi réel.")
             return

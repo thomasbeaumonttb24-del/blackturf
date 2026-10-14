@@ -196,5 +196,44 @@ def test_mail_derniere_chance_deux_versions():
     html, texte = derniere_chance("Léa", CODE, "https://blackturf.fr/x", deja_recu=True)
     assert CODE in html and CODE in texte
     assert "nous vous avons envoyé" in texte and "demain, jeudi 15 octobre" in texte
+    assert "exceptionnelle" in texte
     _, texte = derniere_chance(None, CODE, "https://blackturf.fr/x", deja_recu=False, ce_soir=True)
     assert "créé depuis" in texte and "ce soir à minuit" in texte
+
+
+@pytest.mark.asyncio
+async def test_relance_cible_gratuits_pass_et_anciens_abonnes(db, monkeypatch):
+    from scripts import envoyer_mail_anniversaire as mail
+    pass_en_cours = set()
+
+    async def _pass_actif(session, user_id):
+        return {"plan": "expert"} if user_id in pass_en_cours else None
+    monkeypatch.setattr("services.passes.pass_actif", _pass_actif)
+
+    gratuit = await _user(db)
+    porteur_pass = await _user(db, plan="expert")
+    pass_en_cours.add(porteur_pass.user_id)
+    ancien = await _user(db)
+    db.add(Subscription(sub_id=str(uuid.uuid4()), user_id=ancien.user_id, stripe_subscription_id="sub_old",
+                        plan="expert", periodicite="monthly", statut="canceled",
+                        periode_debut=AVANT, periode_fin=AVANT + timedelta(days=30)))
+    offert = await _user(db, plan="expert")
+    admin = await _user(db, is_admin=True)
+    await db.commit()
+
+    assert await mail.profil_relance(db, gratuit) == "gratuit"
+    assert await mail.profil_relance(db, porteur_pass) == "pass"
+    assert await mail.profil_relance(db, ancien) == "ancien abonné"
+    assert await mail.profil_relance(db, offert) is None
+    assert await mail.profil_relance(db, admin) is None
+
+
+@pytest.mark.asyncio
+async def test_relance_jamais_un_abonnement_en_cours(db):
+    for statut in ("active", "cancel_at_period_end", "past_due", "trialing"):
+        user = await _user(db)
+        db.add(Subscription(sub_id=str(uuid.uuid4()), user_id=user.user_id, stripe_subscription_id=f"sub_{statut}",
+                            plan="standard", periodicite="monthly", statut=statut,
+                            periode_debut=AVANT, periode_fin=AVANT + timedelta(days=30)))
+        await db.commit()
+        assert "sans abonnement en cours" in await _VRAIE_RAISON(user, db, PENDANT)

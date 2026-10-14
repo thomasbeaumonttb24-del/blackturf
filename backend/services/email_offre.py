@@ -161,10 +161,12 @@ def derniere_chance(prenom: Optional[str], code: str, desinscription: str, deja_
         rappel_txt = ("La semaine dernière, pour l'anniversaire de BlackTurf, nous avons envoyé à nos membres un "
                       f"code de réduction : −{POURCENT} % sur le premier mois d'abonnement mensuel. Votre compte "
                       "a été créé depuis : bonne nouvelle, l'offre vaut aussi pour vous.")
-    intro = (
-        f"{bonjour}<br><br>{rappel}<br><br>"
-        f"Petit rappel : la réduction prend fin {D.fort(echeance)}. Passé ce délai, le code ne fonctionnera plus."
-    )
+    exceptionnel = ("C’est une remise " + D.fort("exceptionnelle") + ", accordée uniquement pour "
+                    "l’anniversaire du site&nbsp;: elle prend fin " + D.fort(echeance) + ". Passé ce délai, "
+                    "le code ne fonctionnera plus.")
+    exceptionnel_txt = ("C'est une remise exceptionnelle, accordée uniquement pour l'anniversaire du site : "
+                        f"elle prend fin {echeance}. Passé ce délai, le code ne fonctionnera plus.")
+    intro = f"{bonjour}<br><br>{rappel}<br><br>{exceptionnel}"
     carte_offre = (
         _ticket(code)
         + f'<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;margin-top:18px"><tr>'
@@ -184,7 +186,8 @@ def derniere_chance(prenom: Optional[str], code: str, desinscription: str, deja_
         D.barre_logo("Dernière chance")
         + D.entete("galop", f"Fin de l’offre {quand}", f"Votre −{POURCENT}&nbsp;% expire {quand}", intro, lien=lien)
         + D.rangee_nuit(carte_offre, padding="0 20px 24px")
-        + D.appel("Il est encore temps", f"Votre remise vous attend jusqu’à {quand}, minuit.",
+        + D.appel("Il est encore temps", f"Une offre exceptionnelle qui ne sera pas reconduite : "
+                  f"elle vous attend jusqu’à {quand}, minuit.",
                   f"Profiter de −{POURCENT} %", lien,
                   note=f"Le bouton ne s’affiche pas ? Rendez-vous sur blackturf.fr/tarifs et saisissez le code {e(code)}.")
         + D.rangee_nuit(D.carte(D.surtitre("Ce que vous débloquez") + _avantages(), "22px 22px"), padding="0 20px 24px")
@@ -196,7 +199,7 @@ def derniere_chance(prenom: Optional[str], code: str, desinscription: str, deja_
     )
     texte = (
         f"{bonjour.replace('&#x27;', chr(39))}\n\n{rappel_txt}\n\n"
-        f"Petit rappel : la réduction prend fin {echeance}. Passé ce délai, le code ne fonctionnera plus.\n\n"
+        f"{exceptionnel_txt}\n\n"
         f"VOTRE CODE : {code}\n\n"
         f"Standard : {_euros(PRIX['standard'][1])} le 1er mois au lieu de {_euros(PRIX['standard'][0])}\n"
         f"Expert : {_euros(PRIX['expert'][1])} le 1er mois au lieu de {_euros(PRIX['expert'][0])}\n\n"
