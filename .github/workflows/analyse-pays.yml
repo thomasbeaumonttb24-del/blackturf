@@ -4,9 +4,11 @@ name: Analyse pays visiteurs
 # (Stripe). Le script est extrait de la branche sans toucher au dépôt de prod
 # (`git show`, pas de checkout), le résultat part dans le journal du run.
 
-# Lancement MANUEL uniquement (onglet Actions → Analyse pays visiteurs).
 on:
   workflow_dispatch:
+  push:
+    branches: [claude/stoic-hypatia-vovnlx]
+    paths: [".github/workflows/analyse-pays.yml"]
 
 jobs:
   run:
