@@ -1,0 +1,200 @@
+{
+  "auteuil": {
+    "fichier": "/img/hippodromes/auteuil.webp",
+    "auteur": "Perline",
+    "licence": "CC BY-SA 3.0",
+    "licence_url": "http://creativecommons.org/licenses/by-sa/3.0/",
+    "source": "https://commons.wikimedia.org/wiki/File:ChevauxHippodromeAuteuil001.jpg",
+    "largeur": 1600,
+    "hauteur": 990
+  },
+  "bordeaux-le-bouscat": {
+    "fichier": "/img/hippodromes/bordeaux-le-bouscat.webp",
+    "auteur": "Dark Attsios",
+    "licence": "CC BY-SA 3.0",
+    "licence_url": "https://creativecommons.org/licenses/by-sa/3.0",
+    "source": "https://commons.wikimedia.org/wiki/File:Hippodrome_Bouscat.jpg",
+    "largeur": 1600,
+    "hauteur": 1092
+  },
+  "caen": {
+    "fichier": "/img/hippodromes/caen.webp",
+    "auteur": "Benoit-caen",
+    "licence": "CC BY-SA 4.0",
+    "licence_url": "https://creativecommons.org/licenses/by-sa/4.0",
+    "source": "https://commons.wikimedia.org/wiki/File:Tribune_de_la_Prairie_pour_les_Jeux_Equestres_mondiaux_2014.JPG",
+    "largeur": 1600,
+    "hauteur": 1062
+  },
+  "cagnes-sur-mer": {
+    "fichier": "/img/hippodromes/cagnes-sur-mer.webp",
+    "auteur": "historicair",
+    "licence": "CC BY-SA 3.0",
+    "licence_url": "http://creativecommons.org/licenses/by-sa/3.0/",
+    "source": "https://commons.wikimedia.org/wiki/File:Hippodrome_de_la_C%C3%B4te_d%27Azur_-_Cagnes-sur-mer.JPG",
+    "largeur": 1600,
+    "hauteur": 900
+  },
+  "chantilly": {
+    "fichier": "/img/hippodromes/chantilly.webp",
+    "auteur": "JeanFran",
+    "licence": "CC BY-SA 2.5",
+    "licence_url": "https://creativecommons.org/licenses/by-sa/2.5",
+    "source": "https://commons.wikimedia.org/wiki/File:IMG_0933.JPG",
+    "largeur": 1600,
+    "hauteur": 1200
+  },
+  "clairefontaine": {
+    "fichier": "/img/hippodromes/clairefontaine.webp",
+    "auteur": "Андрей Бобровский",
+    "licence": "CC BY 3.0",
+    "licence_url": "https://creativecommons.org/licenses/by/3.0",
+    "source": "https://commons.wikimedia.org/wiki/File:%D0%A4%D1%80%D0%B0%D0%BD%D1%86%D0%B8%D1%8F_-_panoramio_(48).jpg",
+    "largeur": 1600,
+    "hauteur": 1062
+  },
+  "compiegne": {
+    "fichier": "/img/hippodromes/compiegne.webp",
+    "auteur": "Mel22",
+    "licence": "CC BY-SA 4.0",
+    "licence_url": "https://creativecommons.org/licenses/by-sa/4.0",
+    "source": "https://commons.wikimedia.org/wiki/File:Hippodrome_de_Compi%C3%A8gne_-_les_tribunes_vue_de_devant.jpg",
+    "largeur": 1600,
+    "hauteur": 900
+  },
+  "deauville": {
+    "fichier": "/img/hippodromes/deauville.webp",
+    "auteur": "Guillaume Paumier",
+    "licence": "CC BY 3.0",
+    "licence_url": "https://creativecommons.org/licenses/by/3.0",
+    "source": "https://commons.wikimedia.org/wiki/File:Deauville-La_Touques_racecourse_001.jpg",
+    "largeur": 1600,
+    "hauteur": 1065
+  },
+  "enghien": {
+    "fichier": "/img/hippodromes/enghien.webp",
+    "auteur": "Clicsouris",
+    "licence": "CC BY-SA 3.0",
+    "licence_url": "https://creativecommons.org/licenses/by-sa/3.0",
+    "source": "https://commons.wikimedia.org/wiki/File:Hippodrome_d%27Enghien-Soisy_02.jpg",
+    "largeur": 1365,
+    "hauteur": 1024
+  },
+  "laval": {
+    "fichier": "/img/hippodromes/laval.webp",
+    "auteur": "Fab5669",
+    "licence": "CC BY-SA 4.0",
+    "licence_url": "https://creativecommons.org/licenses/by-sa/4.0",
+    "source": "https://commons.wikimedia.org/wiki/File:L%27Huisserie_-_hippodrome_de_Bellevue-la-For%C3%AAt_02.jpg",
+    "largeur": 1600,
+    "hauteur": 1067
+  },
+  "le-croise-laroche": {
+    "fichier": "/img/hippodromes/le-croise-laroche.webp",
+    "auteur": "Chabe01",
+    "licence": "CC BY-SA 4.0",
+    "licence_url": "https://creativecommons.org/licenses/by-sa/4.0",
+    "source": "https://commons.wikimedia.org/wiki/File:Hippodrome_Serge_Charles_-_Marcq-en-Bar%C5%93ul_(FR59)_-_2024-02-24_-_4.jpg",
+    "largeur": 1600,
+    "hauteur": 1200
+  },
+  "le-lion-d-angers": {
+    "fichier": "/img/hippodromes/le-lion-d-angers.webp",
+    "auteur": "Pymouss",
+    "licence": "CC BY-SA 3.0",
+    "licence_url": "https://creativecommons.org/licenses/by-sa/3.0",
+    "source": "https://commons.wikimedia.org/wiki/File:Le_Lion-d%27Angers_-_Hippodrome_01.JPG",
+    "largeur": 1600,
+    "hauteur": 1067
+  },
+  "lyon-parilly": {
+    "fichier": "/img/hippodromes/lyon-parilly.webp",
+    "auteur": "Sebleouf",
+    "licence": "CC BY-SA 4.0",
+    "licence_url": "https://creativecommons.org/licenses/by-sa/4.0",
+    "source": "https://commons.wikimedia.org/wiki/File:Bron_-_Hippodrome_de_Parilly_(f%C3%A9v_2014).jpg",
+    "largeur": 1600,
+    "hauteur": 1200
+  },
+  "maisons-laffitte": {
+    "fichier": "/img/hippodromes/maisons-laffitte.webp",
+    "auteur": "Moonik",
+    "licence": "CC BY-SA 3.0",
+    "licence_url": "https://creativecommons.org/licenses/by-sa/3.0",
+    "source": "https://commons.wikimedia.org/wiki/File:Hippodrome_de_Maisons-Laffitte_004.JPG",
+    "largeur": 1600,
+    "hauteur": 1062
+  },
+  "marseille-borely": {
+    "fichier": "/img/hippodromes/marseille-borely.webp",
+    "auteur": "Arnaud 25",
+    "licence": "CC BY-SA 4.0",
+    "licence_url": "https://creativecommons.org/licenses/by-sa/4.0",
+    "source": "https://commons.wikimedia.org/wiki/File:Parc_Bor%C3%A9ly_029.jpg",
+    "largeur": 1600,
+    "hauteur": 1200
+  },
+  "marseille-vivaux": {
+    "fichier": "/img/hippodromes/marseille-vivaux.webp",
+    "auteur": "XDurang",
+    "licence": "CC BY-SA 4.0",
+    "licence_url": "https://creativecommons.org/licenses/by-sa/4.0",
+    "source": "https://commons.wikimedia.org/wiki/File:Hippo-ptdevivaux.jpg",
+    "largeur": 1600,
+    "hauteur": 1200
+  },
+  "paris-longchamp": {
+    "fichier": "/img/hippodromes/paris-longchamp.webp",
+    "auteur": "Copyleft",
+    "licence": "CC BY-SA 3.0",
+    "licence_url": "https://creativecommons.org/licenses/by-sa/3.0",
+    "source": "https://commons.wikimedia.org/wiki/File:2012_Hippodrome_de_Longchamp_Juddmonte_After_race1.JPG",
+    "largeur": 1600,
+    "hauteur": 1200
+  },
+  "pau": {
+    "fichier": "/img/hippodromes/pau.webp",
+    "auteur": "Benoît Prieur",
+    "licence": "CC0",
+    "licence_url": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
+    "source": "https://commons.wikimedia.org/wiki/File:Image_de_Pau_en_d%C3%A9cembre_2016_(1).JPG",
+    "largeur": 1600,
+    "hauteur": 1148
+  },
+  "saint-cloud": {
+    "fichier": "/img/hippodromes/saint-cloud.webp",
+    "auteur": "Remi Jouan",
+    "licence": "CC BY-SA 3.0",
+    "licence_url": "https://creativecommons.org/licenses/by-sa/3.0",
+    "source": "https://commons.wikimedia.org/wiki/File:Saint-Cloud_-_Hippodrome_(1).JPG",
+    "largeur": 1600,
+    "hauteur": 1067
+  },
+  "toulouse": {
+    "fichier": "/img/hippodromes/toulouse.webp",
+    "auteur": "Clément Gruin",
+    "licence": "CC BY-SA 4.0",
+    "licence_url": "https://creativecommons.org/licenses/by-sa/4.0",
+    "source": "https://commons.wikimedia.org/wiki/File:Prix_du_Comit%C3%A9_R%C3%A9gional_du_Sud-Ouest_-_Toulouse_La_C%C3%A9pi%C3%A8re,_trot_attel%C3%A9_9041.jpg",
+    "largeur": 1600,
+    "hauteur": 1060
+  },
+  "vichy": {
+    "fichier": "/img/hippodromes/vichy.webp",
+    "auteur": "Tej",
+    "licence": "CC BY-SA 3.0",
+    "licence_url": "http://creativecommons.org/licenses/by-sa/3.0/",
+    "source": "https://commons.wikimedia.org/wiki/File:Hippodrome_vichy.jpg",
+    "largeur": 1450,
+    "hauteur": 708
+  },
+  "vincennes": {
+    "fichier": "/img/hippodromes/vincennes.webp",
+    "auteur": "David.Monniaux",
+    "licence": "CC BY-SA 3.0",
+    "licence_url": "http://creativecommons.org/licenses/by-sa/3.0/",
+    "source": "https://commons.wikimedia.org/wiki/File:Hippodrome_de_Vincennes_DSC03756.JPG",
+    "largeur": 1600,
+    "hauteur": 1200
+  }
+}

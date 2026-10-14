@@ -14,14 +14,17 @@ export function Carte3D({
   titre,
   faits,
   pied,
+  className = "mt-8",
 }: {
   surtitre: string;
   titre: ReactNode;
   faits: FaitCarte[];
   pied?: ReactNode;
+  /** Marges du bloc : par défaut sous le texte, en chevauchement quand il suit une photo. */
+  className?: string;
 }) {
   return (
-    <div className="carte-3d-scene mt-8 max-w-xl">
+    <div className={`carte-3d-scene relative z-10 max-w-xl ${className}`}>
       <div className="carte-3d rounded-3xl p-5 text-white sm:p-6">
         <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-amber-300">{surtitre}</div>
         <div className="mt-1.5 font-display text-xl font-bold leading-snug sm:text-2xl">{titre}</div>
