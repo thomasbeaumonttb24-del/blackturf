@@ -19,6 +19,7 @@ import {
 import { SeoHero, Container, Section, Chip } from "@/components/seo/kit";
 import { ProfilChiffreLieu } from "@/components/seo/ProfilChiffre";
 import { Carte3D } from "@/components/seo/Carte3D";
+import { PhotoLieu, photoHippodrome } from "@/components/seo/PhotoLieu";
 
 export const dynamicParams = false;
 export const revalidate = 300;
@@ -116,6 +117,8 @@ export default async function HippodromePage({ params }: { params: Promise<{ slu
     }, null as null | (typeof parts)[0][1]);
   })();
 
+  const photo = photoHippodrome(h.slug);
+
   const placeLd = {
     "@context": "https://schema.org",
     "@type": "SportsActivityLocation",
@@ -123,6 +126,7 @@ export default async function HippodromePage({ params }: { params: Promise<{ slu
     address: { "@type": "PostalAddress", addressLocality: h.city, addressRegion: h.region, addressCountry: "FR" },
     url: `https://blackturf.fr/hippodromes/${h.slug}`,
     description: h.intro,
+    ...(photo ? { image: `https://blackturf.fr${photo.fichier}` } : {}),
   };
   // Le fil balisé partait de « Hippodromes » alors que le fil AFFICHÉ commence par
   // « Accueil » : les deux disent maintenant la même chose.
@@ -151,8 +155,10 @@ export default async function HippodromePage({ params }: { params: Promise<{ slu
       >
         {/* Carte des faits chiffrés du lieu, tirés de l'historique réel du site. Sans
             profil (API muette), l'en-tête reste celui d'avant : rien d'inventé. */}
+        {photo && <PhotoLieu photo={photo} alt={`${h.name}, ${h.city}`} />}
         {profil && profil.nb_courses > 0 && (
           <Carte3D
+            className={photo ? "-mt-6 sm:-mt-28 sm:ml-8" : "mt-8"}
             surtitre="Mesuré sur la base BlackTurf"
             titre={`${nomLieu(h)} en chiffres`}
             faits={[

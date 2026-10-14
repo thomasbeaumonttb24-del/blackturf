@@ -19,6 +19,7 @@ import {
 } from "@/lib/seo";
 import { SeoHero, Container, Section, Callout, Chip } from "@/components/seo/kit";
 import { Carte3D } from "@/components/seo/Carte3D";
+import { PhotoLieu, photoHippodrome } from "@/components/seo/PhotoLieu";
 import { Podium } from "@/components/seo/Podium";
 import { NewsletterForm } from "@/components/newsletter/NewsletterForm";
 
@@ -86,6 +87,8 @@ export default async function GrandPrixPage({ params }: { params: Promise<{ slug
     .sort((a, b) => b.edition.date.localeCompare(a.edition.date));
   const aVenir = trouvees.find((t) => t.edition.date >= aujourdhui && !t.resultats?.classement?.length) ?? null;
 
+  const photo = photoHippodrome(g.hippodromeSlug);
+
   const evenement = prochaineEdition
     ? {
         "@context": "https://schema.org",
@@ -127,7 +130,9 @@ export default async function GrandPrixPage({ params }: { params: Promise<{ slug
           </>
         }
       >
+        {photo && <PhotoLieu photo={photo} alt={`Hippodrome ${g.hippodrome}, où se court ${g.court}`} />}
         <Carte3D
+          className={photo ? "-mt-6 sm:-mt-28 sm:ml-8" : "mt-8"}
           surtitre={`${g.categorie} · ${g.discipline}`}
           titre={
             prochaineEdition

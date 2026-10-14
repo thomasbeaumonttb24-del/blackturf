@@ -1,12 +1,11 @@
 name: Photos des hippodromes
 
 # Cherche sur Wikimedia Commons des photos sous licence libre (CC0, domaine public,
-# CC BY, CC BY-SA) pour chaque fiche d'hippodrome, et les dépose dans la branche pour
-# être choisies à la main. Ne tourne que sur un commit marqué « [photos] » : l'environnement
-# de développement n'a pas accès à Commons, les runners GitHub si.
+# CC BY, CC BY-SA) pour chaque fiche d'hippodrome, et les dépose dans la branche lancée. L'environnement
+# de développement n'a pas accès à Commons, les runners GitHub si. Lancement manuel :
+# sans scripts/photos/selection.json, dépose des candidates à choisir ; avec, télécharge
+# la sélection en 1920 px et met à jour les crédits.
 on:
-  push:
-    branches: [claude/eloquent-planck-ornk0y]
   workflow_dispatch:
 
 permissions:
@@ -14,7 +13,6 @@ permissions:
 
 jobs:
   chercher:
-    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[photos]')
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
