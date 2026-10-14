@@ -12,7 +12,7 @@ export interface Edition {
   annee: number;
   /** AAAA-MM-JJ, heure de Paris. */
   date: string;
-  /** false : date annoncée mais pas encore au programme officiel. */
+  /** false : date prévue (règle du calendrier ou annonce), pas encore au programme officiel. */
   officielle?: boolean;
 }
 
@@ -40,6 +40,31 @@ export interface GrandPrix {
 
 export const GRANDS_PRIX: GrandPrix[] = [
   {
+    slug: "prix-de-cornulier",
+    nom: "Prix de Cornulier",
+    court: "le Prix de Cornulier",
+    hippodromeSlug: "vincennes",
+    hippodrome: "Vincennes",
+    discipline: "Trot monté",
+    distance: "2 700 m",
+    periode: "Janvier, une semaine avant le Prix d'Amérique",
+    categorie: "Groupe I",
+    conditions: "Trotteurs de 4 ans et plus, hongres exclus.",
+    creation: 1931,
+    intro:
+      "Le Prix de Cornulier est la plus grande course de trot monté au monde. Courue en janvier à Vincennes, sur 2 700 mètres, elle sacre le meilleur trotteur monté de l'hiver, une semaine avant le Prix d'Amérique.",
+    reperes: [
+      "Créé en 1931, il est la référence absolue du trot monté.",
+      "Le trot monté est une spécialité presque exclusivement française.",
+      "Plusieurs champions se sont illustrés au monté comme à l'attelé, dans les deux grandes courses de janvier.",
+    ],
+    match: ["CORNULIER"],
+    editions: [
+      { annee: 2026, date: "2026-01-18" },
+      { annee: 2027, date: "2027-01-24", officielle: false },
+    ],
+  },
+  {
     slug: "prix-d-amerique",
     nom: "Prix d'Amérique",
     court: "le Prix d'Amérique",
@@ -53,7 +78,7 @@ export const GRANDS_PRIX: GrandPrix[] = [
     creation: 1920,
     allocation: "1 000 000 €",
     intro:
-      "Couru chaque fin janvier sur la grande piste de Vincennes, le Prix d'Amérique est la course la plus prestigieuse du trot mondial. Disputé à l'attelé sur 2 700 mètres, il réunit l'élite des trotteurs européens et clôt le meeting d'hiver.",
+      "Couru chaque fin janvier sur la grande piste de Vincennes, le Prix d'Amérique est la course la plus prestigieuse du trot mondial. Disputé à l'attelé sur 2 700 mètres, il réunit l'élite des trotteurs européens et constitue le point d'orgue du meeting d'hiver.",
     reperes: [
       "Créé en 1920, il est devenu le championnat du monde officieux du trot attelé.",
       "Ourasi est le seul cheval à l'avoir remporté quatre fois.",
@@ -67,45 +92,23 @@ export const GRANDS_PRIX: GrandPrix[] = [
     ],
   },
   {
-    slug: "prix-de-cornulier",
-    nom: "Prix de Cornulier",
-    court: "le Prix de Cornulier",
-    hippodromeSlug: "vincennes",
-    hippodrome: "Vincennes",
-    discipline: "Trot monté",
-    distance: "2 700 m",
-    periode: "Janvier, une semaine avant le Prix d'Amérique",
-    categorie: "Groupe I",
-    conditions: "Trotteurs de 4 ans et plus, hongres exclus.",
-    creation: 1931,
-    intro:
-      "Le Prix de Cornulier est la plus grande course de trot monté au monde. Courue en janvier à Vincennes, sur 2 700 mètres, elle sacre le meilleur trotteur sous la selle de l'hiver, une semaine avant le Prix d'Amérique.",
-    reperes: [
-      "Créé en 1931, il est la référence absolue du trot monté.",
-      "Le trot monté est une spécialité presque exclusivement française.",
-      "Plusieurs champions se sont illustrés au monté comme à l'attelé, dans les deux grandes courses de janvier.",
-    ],
-    match: ["CORNULIER"],
-    editions: [{ annee: 2026, date: "2026-01-18" }],
-  },
-  {
     slug: "grand-steeple-chase-de-paris",
     nom: "Grand Steeple-Chase de Paris",
     court: "le Grand Steeple-Chase de Paris",
     hippodromeSlug: "auteuil",
     hippodrome: "Auteuil",
     discipline: "Steeple-chase",
-    distance: "Environ 6 000 m",
+    distance: "6 000 m",
     periode: "Un dimanche de mai",
     categorie: "Groupe 1",
     conditions: "Chevaux de 5 ans et plus.",
     creation: 1874,
     intro:
-      "Le Grand Steeple-Chase de Paris est la plus grande course d'obstacles de France. Couru chaque printemps à Auteuil, sur près de six kilomètres et une vingtaine d'obstacles, il demande autant d'endurance que de sauts.",
+      "Le Grand Steeple-Chase de Paris est la plus grande course d'obstacles de France. Couru chaque printemps à Auteuil, sur 6 000 mètres et 23 obstacles, il exige autant d'endurance que de qualités de sauteur.",
     reperes: [
       "Couru pour la première fois en 1874, il est l'un des plus anciens grands prix français.",
-      "C'est la course la plus longue et la plus sélective du calendrier français de l'obstacle.",
-      "Plusieurs chevaux l'ont remporté trois fois, signe d'une course de spécialistes.",
+      "C'est la course la plus prestigieuse et l'une des plus sélectives de l'obstacle français.",
+      "Il se dispute sur 6 000 mètres et 23 obstacles, au printemps, à Auteuil.",
     ],
     match: ["STEEPLE-CHASE DE PARIS", "STEEPLE CHASE DE PARIS"],
     editions: [{ annee: 2026, date: "2026-05-17" }],
@@ -123,7 +126,7 @@ export const GRANDS_PRIX: GrandPrix[] = [
     conditions: "Poulains et pouliches de 3 ans.",
     creation: 1836,
     intro:
-      "Surnommé le « Derby français », le Prix du Jockey Club se court à Chantilly au début de l'été. Réservé aux chevaux de 3 ans, il désigne le meilleur poulain de sa génération sur 2 100 mètres.",
+      "Surnommé le « Derby français », le Prix du Jockey Club se court à Chantilly fin mai ou début juin. Réservé aux chevaux de 3 ans, il désigne le meilleur poulain de sa génération sur 2 100 mètres.",
     reperes: [
       "Couru pour la première fois en 1836, sur le modèle du Derby d'Epsom.",
       "Longtemps disputé sur 2 400 mètres, il se court sur 2 100 mètres depuis 2005.",
@@ -148,7 +151,7 @@ export const GRANDS_PRIX: GrandPrix[] = [
       "Le Prix de Diane est la grande course des pouliches de 3 ans, l'équivalent français des Oaks anglaises. Couru en juin sur 2 100 mètres à Chantilly, il est aussi l'un des rendez-vous mondains de l'été.",
     reperes: [
       "Créé en 1843, il est l'une des plus anciennes courses de plat françaises.",
-      "Il est réservé aux pouliches de 3 ans.",
+      "Il sert souvent de référence pour désigner la meilleure pouliche d'Europe de sa génération.",
       "Trêve l'a gagné en 2013 avant de remporter deux fois le Prix de l'Arc de Triomphe.",
     ],
     match: ["DIANE"],
@@ -174,7 +177,10 @@ export const GRANDS_PRIX: GrandPrix[] = [
       "Il se court sur 2 400 mètres depuis 2005.",
     ],
     match: ["GRAND PRIX DE PARIS"],
-    editions: [{ annee: 2026, date: "2026-07-14" }],
+    editions: [
+      { annee: 2026, date: "2026-07-14" },
+      { annee: 2027, date: "2027-07-14", officielle: false },
+    ],
   },
   {
     slug: "prix-de-l-arc-de-triomphe",
@@ -195,12 +201,13 @@ export const GRANDS_PRIX: GrandPrix[] = [
       "Première édition le 3 octobre 1920, remportée par Comrade.",
       "André Fabre détient le record de victoires chez les entraîneurs, avec huit succès.",
       "Frankie Dettori l'a remporté six fois, un record chez les jockeys.",
-      "Danedream détient le record de l'épreuve à ParisLongchamp, établi en 2011.",
+      "Danedream détient le record de l'épreuve (2 min 24 s 49), établi en 2011 à Longchamp.",
     ],
     match: ["ARC DE TRIOMPHE"],
     editions: [
       { annee: 2025, date: "2025-10-05" },
       { annee: 2026, date: "2026-10-04" },
+      { annee: 2027, date: "2027-10-03", officielle: false },
     ],
   },
 ];

@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { MapPin, Trophy, ChevronRight, CalendarDays } from "lucide-react";
 import { HIPPODROMES, getHippodrome, matchHippodrome, nomCourt, nomLieu } from "@/lib/hippodromes";
 import { grandsPrixDuLieu } from "@/lib/grandsPrix";
+import { aLieu, deLieu } from "@/lib/lieux";
 import {
   fetchProgramme,
   fetchProfilLieux,
@@ -178,7 +179,7 @@ export default async function HippodromePage({ params }: { params: Promise<{ slu
       </SeoHero>
 
       <Container>
-        <Section title={`Courses du jour à ${h.city}`}>
+        <Section title={`Courses du jour ${aLieu(h.city)}`}>
           {todayCourses.length > 0 ? (
             <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white">
               {todayCourses.map((c, i) => (
@@ -212,13 +213,13 @@ export default async function HippodromePage({ params }: { params: Promise<{ slu
         </Section>
 
         {profil && (
-          <Section title={`Ce qui se court à ${h.city}`}>
+          <Section title={`Ce qui se court ${aLieu(h.city)}`}>
             <ProfilChiffreLieu nom={h.name} court={nomCourt(h)} p={profil} />
           </Section>
         )}
 
         {dernieresReunions.length > 0 && (
-          <Section title={`Dernières réunions à ${h.city}`}>
+          <Section title={`Dernières réunions ${aLieu(h.city)}`}>
             <p className="text-sm leading-relaxed text-brand-charcoal">
               Les arrivées et les rapports PMU des journées récemment courues sur cet
               hippodrome. Une arrivée publiée ne change plus : ces pages restent exactes.
@@ -252,7 +253,7 @@ export default async function HippodromePage({ params }: { params: Promise<{ slu
         )}
 
         {grandsPrixDuLieu(h.slug).length > 0 && (
-          <Section title={`Les Grands Prix de ${nomLieu(h)}`}>
+          <Section title={`Les Grands Prix ${nomCourt(h)}`}>
             <div className="grid gap-3 sm:grid-cols-2">
               {grandsPrixDuLieu(h.slug).map((g) => (
                 <Link key={g.slug} href={`/grands-prix/${g.slug}`} className="glass-card group flex items-center gap-3 rounded-2xl p-4">
@@ -269,7 +270,7 @@ export default async function HippodromePage({ params }: { params: Promise<{ slu
           </Section>
         )}
 
-        <Section title={`Mieux parier sur les courses de ${h.city}`}>
+        <Section title={`Mieux parier sur les courses ${deLieu(h.city)}`}>
           <p className="text-sm leading-relaxed text-brand-charcoal">
             Quel que soit l&apos;hippodrome, la clé reste la même : trouver les{" "}
             <Link href="/guides/pari-de-valeur" className="font-medium text-brand-gold-dark underline">paris de valeur</Link>.

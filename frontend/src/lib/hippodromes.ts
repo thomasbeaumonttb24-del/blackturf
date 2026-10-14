@@ -189,7 +189,7 @@ export const HIPPODROMES: Hippodrome[] = [
     region: "Normandie",
     disciplines: ["Trot"],
     intro:
-      "Installé dans la prairie caennaise, l'hippodrome de Caen est consacré au trot, attelé et monté, sur une piste en sable. Il accueille régulièrement des réunions PMU, dont des supports du Quinté+.",
+      "Installé sur la Prairie, au cœur de Caen, l'hippodrome est consacré au trot, attelé et monté, sur une piste en sable. Il accueille régulièrement des réunions PMU, dont des supports du Quinté+.",
     match: ["CAEN"],
   },
   {
@@ -219,7 +219,7 @@ export const HIPPODROMES: Hippodrome[] = [
     region: "Pays de la Loire",
     disciplines: ["Plat", "Obstacle", "Trot"],
     intro:
-      "Implanté dans le quartier du Petit Port depuis 1875, l'hippodrome de Nantes accueille le plat et l'obstacle sur herbe, et le trot sur une piste en pouzzolane.",
+      "Implanté dans le quartier du Petit-Port depuis 1875, l'hippodrome de Nantes accueille le plat et l'obstacle sur herbe, et le trot sur une piste en pouzzolane.",
     match: ["NANTES"],
   },
   {
@@ -269,8 +269,8 @@ export const HIPPODROMES: Hippodrome[] = [
     region: "Pays de la Loire",
     disciplines: ["Plat", "Obstacle"],
     intro:
-      "Niché dans le parc de l'Isle-Briand, l'hippodrome du Lion-d'Angers accueille une douzaine de réunions par an, en plat et en obstacle. Il est réputé pour son parcours de cross-country.",
-    match: ["LION D"],
+      "Niché dans le parc de l'Isle-Briand, l'hippodrome du Lion-d'Angers accueille chaque année des réunions de plat et d'obstacle. Il est réputé pour son parcours de cross-country.",
+    match: ["LION D", "LION-D"],
   },
 ];
 
@@ -295,7 +295,16 @@ export function getHippodrome(slug: string): Hippodrome | undefined {
  */
 export function slugHippodrome(hippodromeNom: string | undefined): string | null {
   if (!hippodromeNom) return null;
-  return HIPPODROMES.find((h) => matchHippodrome(hippodromeNom, h))?.slug ?? null;
+  // La correspondance la plus précise l'emporte : « DEAUVILLE-CLAIREFONTAINE » contient
+  // aussi « DEAUVILLE », mais désigne Clairefontaine.
+  const up = hippodromeNom.toUpperCase();
+  let meilleur: { slug: string; longueur: number } | null = null;
+  for (const h of HIPPODROMES) {
+    for (const m of h.match) {
+      if (up.includes(m) && (!meilleur || m.length > meilleur.longueur)) meilleur = { slug: h.slug, longueur: m.length };
+    }
+  }
+  return meilleur?.slug ?? null;
 }
 
 export function nomCourt(h: Hippodrome): string {

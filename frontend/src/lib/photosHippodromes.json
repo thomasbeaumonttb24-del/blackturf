@@ -17,15 +17,6 @@
     "largeur": 1600,
     "hauteur": 1092
   },
-  "caen": {
-    "fichier": "/img/hippodromes/caen.webp",
-    "auteur": "Benoit-caen",
-    "licence": "CC BY-SA 4.0",
-    "licence_url": "https://creativecommons.org/licenses/by-sa/4.0",
-    "source": "https://commons.wikimedia.org/wiki/File:Tribune_de_la_Prairie_pour_les_Jeux_Equestres_mondiaux_2014.JPG",
-    "largeur": 1600,
-    "hauteur": 1062
-  },
   "cagnes-sur-mer": {
     "fichier": "/img/hippodromes/cagnes-sur-mer.webp",
     "auteur": "historicair",

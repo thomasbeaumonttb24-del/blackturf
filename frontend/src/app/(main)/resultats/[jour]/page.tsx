@@ -7,9 +7,9 @@ import {
   ogBase,
   twitterBase,
   fetchQuinte,
-  titleCase,
   PREMIER_JOUR_ARCHIVE,
 } from "@/lib/seo";
+import { lieuCourse } from "@/lib/lieux";
 import { ResultatsJour } from "@/components/seo/ResultatsJour";
 
 /**
@@ -57,10 +57,10 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   // la plus tapée sur une journée de résultats.
   const quinte = await fetchQuinte(jour);
   const title = quinte
-    ? `Résultats PMU du ${jourCourtAnnee(jour)} — arrivée du Quinté+ à ${titleCase(quinte.hippodrome_nom)}`
+    ? `Arrivée Quinté+ et résultats PMU du ${jourCourtAnnee(jour)}`
     : `Résultats PMU du ${jourCourtAnnee(jour)} — arrivées et rapports`;
   const description = quinte
-    ? `Arrivée du Quinté+ du ${jourLong(jour)} à ${titleCase(quinte.hippodrome_nom)}, toutes les arrivées officielles et les rapports PMU : Quarté+, Tiercé, Couplé, Simple.`
+    ? `Arrivée du Quinté+ du ${jourLong(jour)} ${lieuCourse(quinte.hippodrome_nom).a}, puis toutes les arrivées officielles et les rapports PMU : Quarté+, Tiercé, Couplé.`
     : `Arrivées officielles et rapports PMU du ${jourLong(
         jour,
       )} : Quinté+, Quarté+, Tiercé, Couplé, Simple et 2 sur 4.`;
