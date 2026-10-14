@@ -105,6 +105,19 @@ def nom(cc: str) -> str:
 CACHE = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "blackturf"
 
 
+# DB-IP refuse l'User-Agent par défaut de urllib (403) : on se présente en navigateur.
+UA = {"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) analyse-pays-blackturf"}
+# Repli : la même base DB-IP lite, republiée en CSV clair (v4 + v6) sur jsDelivr.
+MIROIR = "https://cdn.jsdelivr.net/npm/@ip-location-db/dbip-country/dbip-country-ipv{}.csv"
+
+
+def _get(url: str) -> bytes:
+    print(f"Téléchargement de la base IP→pays : {url}", file=sys.stderr)
+    req = urllib.request.Request(url, headers=UA)
+    with urllib.request.urlopen(req, timeout=120) as r:
+        return r.read()
+
+
 def _telecharger_base() -> Path:
     CACHE.mkdir(parents=True, exist_ok=True)
     auj = datetime.now().date()
@@ -114,14 +127,20 @@ def _telecharger_base() -> Path:
         cible = CACHE / f"dbip-country-lite-{a}-{m:02d}.csv.gz"
         if cible.exists() and cible.stat().st_size > 1_000_000:
             return cible
-        url = f"https://download.db-ip.com/free/dbip-country-lite-{a}-{m:02d}.csv.gz"
         try:
-            print(f"Téléchargement de la base IP→pays : {url}", file=sys.stderr)
-            with urllib.request.urlopen(url, timeout=60) as r:
-                cible.write_bytes(r.read())
+            cible.write_bytes(_get(
+                f"https://download.db-ip.com/free/dbip-country-lite-{a}-{m:02d}.csv.gz"))
             return cible
         except OSError as e:  # mois pas encore publié → mois précédent
             print(f"  indisponible ({e})", file=sys.stderr)
+    cible = CACHE / f"dbip-country-miroir-{auj:%Y-%m}.csv.gz"
+    if cible.exists() and cible.stat().st_size > 1_000_000:
+        return cible
+    try:
+        cible.write_bytes(gzip.compress(_get(MIROIR.format(4)) + _get(MIROIR.format(6))))
+        return cible
+    except OSError as e:
+        print(f"  indisponible ({e})", file=sys.stderr)
     sys.exit("Impossible de récupérer la base DB-IP (réseau ?).")
 
 
@@ -132,7 +151,10 @@ class Geo:
         self.fins: dict[int, list[int]] = {4: [], 6: []}
         self.pays: dict[int, list[str]] = {4: [], 6: []}
         with gzip.open(chemin, "rt", newline="") as f:
-            for debut, fin, cc in csv.reader(f):
+            for ligne in csv.reader(f):
+                if len(ligne) < 3:
+                    continue
+                debut, fin, cc = ligne[:3]
                 d = ipaddress.ip_address(debut)
                 v = d.version
                 self.debuts[v].append(int(d))

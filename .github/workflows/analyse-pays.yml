@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
   push:
     branches: [claude/stoic-hypatia-vovnlx]
-    paths: [".github/workflows/analyse-pays.yml"]
+    paths: [".github/workflows/analyse-pays.yml", "backend/scripts/analyse_pays_visiteurs.py"]
 
 jobs:
   run:
@@ -26,16 +26,17 @@ jobs:
           command_timeout: 20m
           script: |
             set -e
+            echo "Script : $(git -C /opt/blackturf rev-parse --short HEAD) (prod), run ${{ github.sha }}"
             cd /opt/blackturf
             git fetch -q origin ${{ github.ref_name }}
             git show FETCH_HEAD:backend/scripts/analyse_pays_visiteurs.py > /tmp/analyse_pays.py
             ls -la nginx/logs/ | head -40
 
             if command -v python3 >/dev/null; then
-              python3 /tmp/analyse_pays.py --logs nginx/logs --top 40
+              python3 /tmp/analyse_pays.py --logs nginx/logs --top 40 || echo "::warning::analyse visiteurs en échec"
             else
               docker run --rm -v "$PWD/nginx/logs:/logs:ro" -v /tmp/analyse_pays.py:/a.py:ro \
-                python:3.12-slim python /a.py --logs /logs --top 40
+                python:3.12-slim python /a.py --logs /logs --top 40 || echo "::warning::analyse visiteurs en échec"
             fi
 
             docker exec -i blackturf_api python - --stripe --top 40 < /tmp/analyse_pays.py
