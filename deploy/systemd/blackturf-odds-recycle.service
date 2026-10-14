@@ -6,4 +6,11 @@ Type=oneshot
 # `try-restart` et NON `restart` : il ne redemarre QUE les unites deja actives.
 # Un `restart` demarrerait les daemons pendant la fenetre de pause nocturne
 # 01:40-03:10 UTC et volerait au retrain les ~2,1 Go que cette pause lui rend.
-ExecStart=/bin/systemctl try-restart zeturf-odds.service oddschecker-odds.service
+#
+# genybet-odds ajoute le 14/10/2026 : son Chrome (real_chrome) n'etait recycle
+# que par la pause de 01:40, soit ~17 h sans redemarrage. Chaque jour il finit
+# colle a MemoryHigh=700M avec ses 512M de swap pleins : cycles de 114-124 s au
+# lieu de 11-19 s, puis le 14/10 une page bloquee 15 min en thrash (charge 33,
+# 7 200 defauts majeurs/s) jusqu'a ce que son watchdog le tue. Alertes de
+# saturation du 10, 11 et 14/10 : chrome toujours en tete.
+ExecStart=/bin/systemctl try-restart zeturf-odds.service oddschecker-odds.service genybet-odds.service
