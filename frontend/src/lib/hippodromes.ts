@@ -178,6 +178,100 @@ export const HIPPODROMES: Hippodrome[] = [
       "Près de Lille, Le Croisé-Laroche est un hippodrome de trot très actif du Nord, support de nombreuses réunions tout au long de l'année.",
     match: ["CROISE-LAROCHE", "CROISÉ-LAROCHE", "CROISE LAROCHE"],
   },
+  /* Ajoutés le 2026-10-14 : supports réguliers du Quinté+ qui n'avaient pas de fiche, si
+   * bien que leurs courses ne pouvaient lier vers aucune page de lieu. Faits recoupés
+   * sur plusieurs sources (offices de tourisme, LeTrot, presse hippique) ; ce qui ne
+   * l'était pas (dotations, courses « phares ») a été laissé de côté. */
+  {
+    slug: "caen",
+    name: "Hippodrome de Caen",
+    city: "Caen",
+    region: "Normandie",
+    disciplines: ["Trot"],
+    intro:
+      "Installé dans la prairie caennaise, l'hippodrome de Caen est consacré au trot, attelé et monté, sur une piste en sable. Il accueille régulièrement des réunions PMU, dont des supports du Quinté+.",
+    match: ["CAEN"],
+  },
+  {
+    slug: "lyon-parilly",
+    name: "Hippodrome de Lyon-Parilly",
+    city: "Bron",
+    region: "Auvergne-Rhône-Alpes",
+    disciplines: ["Plat", "Obstacle", "Trot"],
+    intro:
+      "Ouvert en 1965 dans le parc de Parilly, à Bron, l'hippodrome de Lyon-Parilly accueille les trois disciplines : le plat et l'obstacle sur herbe, le trot sur une piste en pouzzolane. Ses réunions se concentrent au printemps et à l'automne.",
+    match: ["PARILLY"],
+  },
+  {
+    slug: "clairefontaine",
+    name: "Hippodrome de Deauville-Clairefontaine",
+    city: "Tourgéville",
+    region: "Normandie",
+    disciplines: ["Plat", "Obstacle", "Trot"],
+    intro:
+      "Aux portes de Deauville, l'hippodrome de Clairefontaine accueille plat, obstacle et trot. Sa saison, de l'été à l'automne, en fait l'un des rendez-vous de la côte normande.",
+    match: ["CLAIREFONTAINE"],
+  },
+  {
+    slug: "nantes",
+    name: "Hippodrome de Nantes",
+    city: "Nantes",
+    region: "Pays de la Loire",
+    disciplines: ["Plat", "Obstacle", "Trot"],
+    intro:
+      "Implanté dans le quartier du Petit Port depuis 1875, l'hippodrome de Nantes accueille le plat et l'obstacle sur herbe, et le trot sur une piste en pouzzolane.",
+    match: ["NANTES"],
+  },
+  {
+    slug: "bordeaux-le-bouscat",
+    name: "Hippodrome de Bordeaux-Le Bouscat",
+    city: "Le Bouscat",
+    region: "Nouvelle-Aquitaine",
+    disciplines: ["Plat", "Obstacle", "Trot"],
+    intro:
+      "Aux portes de Bordeaux, l'hippodrome du Bouscat réunit les trois disciplines : une piste de plat en herbe, des parcours de haies et de steeple-chase, et une piste de trot en sable.",
+    match: ["BOUSCAT"],
+  },
+  {
+    slug: "strasbourg",
+    name: "Hippodrome de Strasbourg-Hoerdt",
+    city: "Hoerdt",
+    region: "Grand Est",
+    disciplines: ["Trot", "Plat", "Obstacle"],
+    intro:
+      "Au nord de Strasbourg, l'hippodrome de Hoerdt accueille le trot, le plat et l'obstacle, cross-country compris, sur des pistes distinctes pour chaque discipline.",
+    match: ["STRASBOURG", "HOERDT"],
+  },
+  {
+    slug: "laval",
+    name: "Hippodrome de Laval",
+    city: "Laval",
+    region: "Pays de la Loire",
+    disciplines: ["Trot"],
+    intro:
+      "Ouvert en 1985 à Bellevue-la-Forêt, à quelques minutes du centre de Laval, l'hippodrome est entièrement consacré au trot. Il accueille chaque année une étape du Grand National du Trot.",
+    match: ["LAVAL"],
+  },
+  {
+    slug: "marseille-vivaux",
+    name: "Hippodrome de Marseille-Vivaux",
+    city: "Marseille",
+    region: "Provence-Alpes-Côte d'Azur",
+    disciplines: ["Trot", "Plat"],
+    intro:
+      "Dans le 10e arrondissement de Marseille, l'hippodrome de Pont-de-Vivaux accueille des réunions de trot et de plat tout au long de l'année, dont des réunions estivales en soirée.",
+    match: ["VIVAUX"],
+  },
+  {
+    slug: "le-lion-d-angers",
+    name: "Hippodrome du Lion-d'Angers",
+    city: "Le Lion-d'Angers",
+    region: "Pays de la Loire",
+    disciplines: ["Plat", "Obstacle"],
+    intro:
+      "Niché dans le parc de l'Isle-Briand, l'hippodrome du Lion-d'Angers accueille une douzaine de réunions par an, en plat et en obstacle. Il est réputé pour son parcours de cross-country.",
+    match: ["LION D"],
+  },
 ];
 
 export function getHippodrome(slug: string): Hippodrome | undefined {

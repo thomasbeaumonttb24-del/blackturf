@@ -94,6 +94,7 @@ def urls_du_jour(course_ids: Iterable[str], jour_iso: str) -> list[str]:
     urls = [
         f"{base}/programme",
         f"{base}/quinte-du-jour",
+        f"{base}/quinte-de-demain",
         f"{base}/resultats",
         f"{base}/resultats/{jour_iso}",
     ]

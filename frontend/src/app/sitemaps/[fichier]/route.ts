@@ -7,6 +7,7 @@ import {
 import { ApiServeurIndisponible } from "@/lib/apiServeur";
 import { ARTICLES } from "@/lib/blog";
 import { HIPPODROMES } from "@/lib/hippodromes";
+import { GRANDS_PRIX } from "@/lib/grandsPrix";
 import { DISCIPLINES } from "@/lib/disciplines";
 
 /**
@@ -139,6 +140,7 @@ async function sitemapPages(): Promise<Response> {
   const entrees: Entree[] = [
     { loc: `${BASE}/programme`, lastmod: majDuJour },
     { loc: `${BASE}/quinte-du-jour`, lastmod: majDuJour },
+    { loc: `${BASE}/quinte-de-demain`, lastmod: majDuJour },
     { loc: `${BASE}/outsiders`, lastmod: majDuJour },
     { loc: `${BASE}/resultats`, lastmod: majDuJour },
 
@@ -168,6 +170,8 @@ async function sitemapPages(): Promise<Response> {
     ...ARTICLES.map((a) => ({ loc: `${BASE}/blog/${a.slug}`, lastmod: iso(a.updated) })),
     ...HIPPODROMES.map((h) => ({ loc: `${BASE}/hippodromes/${h.slug}`, lastmod: debutDeJournee })),
     ...DISCIPLINES.map((d) => ({ loc: `${BASE}/disciplines/${d.slug}`, lastmod: debutDeJournee })),
+    { loc: `${BASE}/grands-prix`, lastmod: debutDeJournee },
+    ...GRANDS_PRIX.map((g) => ({ loc: `${BASE}/grands-prix/${g.slug}`, lastmod: debutDeJournee })),
   ];
 
   return rendre(entrees);

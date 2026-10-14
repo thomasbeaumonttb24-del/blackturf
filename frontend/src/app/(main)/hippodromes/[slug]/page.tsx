@@ -3,6 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { MapPin, Trophy, ChevronRight, CalendarDays } from "lucide-react";
 import { HIPPODROMES, getHippodrome, matchHippodrome, nomCourt, nomLieu } from "@/lib/hippodromes";
+import { grandsPrixDuLieu } from "@/lib/grandsPrix";
 import {
   fetchProgramme,
   fetchProfilLieux,
@@ -17,6 +18,7 @@ import {
 } from "@/lib/seo";
 import { SeoHero, Container, Section, Chip } from "@/components/seo/kit";
 import { ProfilChiffreLieu } from "@/components/seo/ProfilChiffre";
+import { Carte3D } from "@/components/seo/Carte3D";
 
 export const dynamicParams = false;
 export const revalidate = 300;
@@ -30,7 +32,7 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
   const h = getHippodrome(slug);
   if (!h) return { title: "Hippodrome" };
   // « Pronostic <lieu> » en tête : c'est ce que tapent les turfistes (« pronostic
-  // Vincennes »). Sous la limite d'affichage de Google (~60 caractères) pour les seize fiches.
+  // Vincennes »). Sous la limite d'affichage de Google (~60 caractères) pour toutes les fiches.
   const title = `Pronostic ${nomLieu(h)} : programme et résultats PMU`;
   // La description dit ce que la page contient RÉELLEMENT depuis qu'elle porte le profil
   // chiffré : pas seulement le programme du jour, mais des statistiques de lieu qu'on ne
@@ -146,7 +148,28 @@ export default async function HippodromePage({ params }: { params: Promise<{ slu
             {h.signature && <Chip tone="gold"><Trophy className="h-3 w-3" /> {h.signature}</Chip>}
           </>
         }
-      />
+      >
+        {/* Carte des faits chiffrés du lieu, tirés de l'historique réel du site. Sans
+            profil (API muette), l'en-tête reste celui d'avant : rien d'inventé. */}
+        {profil && profil.nb_courses > 0 && (
+          <Carte3D
+            surtitre="Mesuré sur la base BlackTurf"
+            titre={`${nomLieu(h)} en chiffres`}
+            faits={[
+              { label: "Disciplines", valeur: h.disciplines.join(" · ") },
+              { label: "Courses analysées", valeur: profil.nb_courses.toLocaleString("fr-FR") },
+              { label: "Journées", valeur: profil.nb_journees.toLocaleString("fr-FR") },
+              ...(profil.nb_quintes_12m
+                ? [{ label: "Quintés (12 mois)", valeur: profil.nb_quintes_12m.toLocaleString("fr-FR") }]
+                : []),
+              ...(todayCourses.length > 0
+                ? [{ label: "Aujourd'hui", valeur: `${todayCourses.length} course${todayCourses.length > 1 ? "s" : ""}` }]
+                : []),
+            ]}
+            pied={h.signature ? `Course phare : ${h.signature}.` : undefined}
+          />
+        )}
+      </SeoHero>
 
       <Container>
         <Section title={`Courses du jour à ${h.city}`}>
@@ -219,6 +242,24 @@ export default async function HippodromePage({ params }: { params: Promise<{ slu
                 </Link>
               </li>
             </ul>
+          </Section>
+        )}
+
+        {grandsPrixDuLieu(h.slug).length > 0 && (
+          <Section title={`Les Grands Prix de ${nomLieu(h)}`}>
+            <div className="grid gap-3 sm:grid-cols-2">
+              {grandsPrixDuLieu(h.slug).map((g) => (
+                <Link key={g.slug} href={`/grands-prix/${g.slug}`} className="glass-card group flex items-center gap-3 rounded-2xl p-4">
+                  <span className="icon-box flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-gold-soft text-brand-gold-dark">
+                    <Trophy className="h-5 w-5" />
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block font-display font-semibold text-brand-dark group-hover:text-brand-gold-dark">{g.nom}</span>
+                    <span className="block text-xs text-brand-charcoal">{g.discipline} · {g.distance} · {g.periode}</span>
+                  </span>
+                </Link>
+              ))}
+            </div>
           </Section>
         )}
 
