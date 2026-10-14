@@ -3,7 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { CalendarDays, Trophy } from "lucide-react";
 import { GRANDS_PRIX, getGrandPrix, estCeGrandPrix, type GrandPrix, type Edition } from "@/lib/grandsPrix";
-import { getHippodrome, matchHippodrome } from "@/lib/hippodromes";
+import { getHippodrome, matchHippodrome, nomCourt } from "@/lib/hippodromes";
 import {
   fetchProgramme,
   fetchResultats,
@@ -46,8 +46,8 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
   // de l'année, la page répond à « <course> » (histoire, conditions, dernières arrivées).
   const title = p
     ? `${g.nom} ${p.annee} : pronostic, partants et date`
-    : `${g.nom} : pronostic, histoire et derniers résultats`;
-  const description = `${g.nom} à ${g.hippodrome} : ${g.discipline.toLowerCase()}, ${g.distance}, ${g.periode.toLowerCase()}. Conditions, repères historiques, dernières arrivées et pronostic IA.`;
+    : `${g.nom} : pronostic, histoire et résultats`;
+  const description = `${g.nom} à ${g.hippodrome} : ${g.discipline.toLowerCase()}, ${g.distance}, ${g.periode.charAt(0).toLowerCase()}${g.periode.slice(1)}. Conditions, repères historiques, dernières arrivées et pronostic IA.`;
   return {
     title,
     description,
@@ -150,7 +150,7 @@ export default async function GrandPrixPage({ params }: { params: Promise<{ slug
           surtitre={`${g.categorie} · ${g.discipline}`}
           titre={
             prochaineEdition
-              ? `Prochaine édition : ${jourLong(prochaineEdition.date)}${prochaineEdition.officielle === false ? " (annoncée)" : ""}`
+              ? `Prochaine édition : ${jourLong(prochaineEdition.date)}${prochaineEdition.officielle === false ? " (date prévue)" : ""}`
               : `Chaque année : ${g.periode.charAt(0).toLowerCase()}${g.periode.slice(1)}`
           }
           faits={[
@@ -217,7 +217,7 @@ export default async function GrandPrixPage({ params }: { params: Promise<{ slug
             </Link>{" "}
             ·{" "}
             <Link href={`/hippodromes/${g.hippodromeSlug}`} className="font-medium text-brand-gold-dark hover:underline">
-              L&apos;hippodrome {g.hippodrome}
+              L&apos;hippodrome {lieu ? nomCourt(lieu) : g.hippodrome}
             </Link>{" "}
             ·{" "}
             <Link href="/grands-prix" className="font-medium text-brand-gold-dark hover:underline">

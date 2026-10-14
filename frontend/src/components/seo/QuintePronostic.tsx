@@ -13,6 +13,7 @@ import {
   codeReunionCourse,
   jsonLd,
 } from "@/lib/seo";
+import { lieuCourse } from "@/lib/lieux";
 import { rapportsTries, libellePari, formatRapport } from "@/lib/rapports";
 import { SeoHero, Container, Section, Callout } from "@/components/seo/kit";
 import { Carte3D } from "@/components/seo/Carte3D";
@@ -28,12 +29,12 @@ const PAGE_JOUR = {
   eyebrow: "Mis à jour chaque jour",
   autreUrl: "/quinte-de-demain",
   autreCta: "Quinté+ de demain",
-  autreTexte: "Le support du Quinté+ de demain est publié la veille au soir : partants, analyse de l'IA et cotes, à préparer dès ce soir.",
+  autreTexte: "Le Quinté+ de demain est en ligne dès la publication des partants, la veille : analyse de l'IA et cotes, à préparer dès ce soir.",
 };
 const PAGE_DEMAIN = {
   nom: "Quinté+ de demain",
   url: "/quinte-de-demain",
-  eyebrow: "Publié la veille au soir",
+  eyebrow: "Publié la veille",
   autreUrl: "/quinte-du-jour",
   autreCta: "Quinté+ du jour",
   autreTexte: "Le Quinté+ d'aujourd'hui : partants, analyse de l'IA, puis l'arrivée officielle et les rapports PMU.",
@@ -62,7 +63,8 @@ export async function QuintePronostic({ jour, demain = false }: { jour: string; 
    * aucun balisage propre : ni fil d'Ariane, ni événement, alors que la fiche course de
    * cette même épreuve en portait un complet. Le `SportsEvent` est ici la même épreuve,
    * décrite depuis son adresse permanente. */
-  const hippo = course ? titleCase(course.hippodrome_nom) : null;
+  const lieu = course ? lieuCourse(course.hippodrome_nom) : null;
+  const hippo = lieu?.nom ?? null;
   const gagnant = resultats?.classement?.find((l) => l.position === 1);
 
   const eventJsonLd = course
@@ -129,24 +131,24 @@ export async function QuintePronostic({ jour, demain = false }: { jour: string; 
           { label: "Courses du jour", href: "/programme" },
           { label: page.nom },
         ]}
-        title={`Pronostic Quinté+ du ${jourCourt(jour)}`}
-        accent={course ? `— ${titleCase(course.hippodrome_nom)}` : undefined}
+        title={demain ? `Pronostic Quinté+ de demain, ${jourCourt(jour)}` : `Pronostic Quinté+ du ${jourCourt(jour)}`}
+        accent={lieu ? `— ${lieu.nom}` : undefined}
         lead={
           course
             ? `${codeReunionCourse(course.course_id)} · ${disciplineLabel(course.discipline)} · ${
                 course.distance
               } m · ${course.nb_partants} partants · départ à ${heureParis(course.date_heure)}.`
             : demain
-              ? "Le support du Quinté+ de demain n'est pas encore publié. Le PMU le désigne la veille au soir : la page se remplit dès qu'il est connu."
-              : "Le support du Quinté+ n'est pas encore publié pour aujourd'hui. Le PMU le désigne la veille au soir."
+              ? "Le Quinté+ de demain n'est pas encore au programme. Les partants sont publiés la veille de la course : la page se remplit dès qu'ils sont connus."
+              : "Le Quinté+ du jour n'est pas encore au programme. Les partants sont publiés la veille de la course."
         }
       >
         {course && (
           <Carte3D
             surtitre={`Quinté+ · ${jourLong(jour)}`}
-            titre={titleCase(course.nom ?? "") || `Quinté+ à ${titleCase(course.hippodrome_nom)}`}
+            titre={titleCase(course.nom ?? "") || `Quinté+ ${lieu?.a}`}
             faits={[
-              { label: "Hippodrome", valeur: titleCase(course.hippodrome_nom) },
+              { label: "Hippodrome", valeur: lieu?.nom },
               { label: "Départ", valeur: heureParis(course.date_heure) },
               { label: "Course", valeur: codeReunionCourse(course.course_id) },
               { label: "Discipline", valeur: disciplineLabel(course.discipline) },
@@ -165,9 +167,9 @@ export async function QuintePronostic({ jour, demain = false }: { jour: string; 
       <Container>
         {course ? (
           <>
-            <Section title={`${titleCase(course.nom ?? "")} — ${titleCase(course.hippodrome_nom)}`}>
+            <Section title={`${titleCase(course.nom ?? "")} — ${lieu?.nom}`}>
               <p className="text-sm leading-relaxed text-brand-charcoal">
-                Le Quinté+ {demain ? <>de demain, {jourLong(jour)},</> : <>du {jourLong(jour)}</>} se dispute à {titleCase(course.hippodrome_nom)} sur{" "}
+                Le Quinté+ {demain ? <>de demain, {jourLong(jour)},</> : <>du {jourLong(jour)}</>} se dispute {lieu?.a} sur{" "}
                 {course.distance} mètres ({disciplineLabel(course.discipline)}), avec{" "}
                 {course.nb_partants} partants au départ de {heureParis(course.date_heure)}.
                 {course.allocation
@@ -249,7 +251,7 @@ export async function QuintePronostic({ jour, demain = false }: { jour: string; 
             {resultats?.classement?.length ? (
               <Section title="Arrivée officielle du Quinté+">
                 <p className="text-sm text-brand-charcoal">
-                  Arrivée du Quinté+ du {jourLong(jour)} à {titleCase(course.hippodrome_nom)} :{" "}
+                  Arrivée du Quinté+ du {jourLong(jour)} {lieu?.a} :{" "}
                   <strong className="tabular-nums">
                     {resultats.classement
                       .slice(0, 5)
@@ -315,7 +317,7 @@ export async function QuintePronostic({ jour, demain = false }: { jour: string; 
         ) : (
           <Section title="Pas encore de Quinté+ publié">
             <p className="text-sm text-brand-charcoal">
-              Le PMU désigne la course support du Quinté+ la veille au soir.{" "}
+              Les partants du Quinté+ sont publiés la veille de la course.{" "}
               {demain ? (
                 <>
                   En attendant, retrouvez le{" "}

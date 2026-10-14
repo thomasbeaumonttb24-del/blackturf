@@ -7,9 +7,9 @@ import { SeoHero, Container, Section } from "@/components/seo/kit";
 
 export const revalidate = 3600;
 
-const TITLE = "Grands Prix hippiques : Arc, Prix d'Amérique, Diane… pronostics et dates";
+const TITLE = "Grands Prix hippiques : dates, pronostics et résultats";
 const DESCRIPTION =
-  "Les grandes courses françaises de l'année : Prix d'Amérique, Grand Steeple-Chase de Paris, Prix de Diane, Arc de Triomphe… Dates, conditions, dernières arrivées et pronostic IA.";
+  "Prix d'Amérique, Grand Steeple, Jockey Club, Diane, Arc : dates, conditions, dernières arrivées et pronostic IA des grandes courses françaises.";
 
 export const metadata: Metadata = {
   title: TITLE,
@@ -70,7 +70,7 @@ export default function GrandsPrixPage() {
                     <div className="mt-4 flex items-center justify-between text-xs">
                       <span className="font-medium text-brand-dark">
                         {suivante
-                          ? `Prochaine : ${jourCourtAnnee(suivante.date)}${suivante.officielle === false ? " (annoncée)" : ""}`
+                          ? `Prochaine : ${jourCourtAnnee(suivante.date)}${suivante.officielle === false ? " (date prévue)" : ""}`
                           : `Depuis ${g.creation}`}
                       </span>
                       <ArrowRight className="h-4 w-4 text-brand-gold-dark/50 transition-all group-hover:translate-x-0.5 group-hover:text-brand-gold-dark" />

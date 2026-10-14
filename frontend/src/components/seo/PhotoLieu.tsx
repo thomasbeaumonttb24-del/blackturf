@@ -54,7 +54,7 @@ export function PhotoLieu({ photo, alt }: { photo: CreditPhoto; alt: string }) {
               )}
             </>
           )}
-          {" "}· Wikimedia Commons
+          {" "}· Wikimedia Commons · recadrée
         </p>
       </div>
     </div>

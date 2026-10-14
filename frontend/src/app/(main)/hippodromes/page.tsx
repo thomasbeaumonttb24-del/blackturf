@@ -27,7 +27,7 @@ export default async function HippodromesIndex() {
   /* Une ligne de chiffres par carte.
    *
    * Seize liens accompagnés du même gabarit — ville, disciplines, course phare — ne disent
-   * pas au lecteur laquelle des seize pages il veut ouvrir, et ne disent rien de plus à un
+   * pas au lecteur laquelle des pages il veut ouvrir, et ne disent rien de plus à un
    * robot. Le volume de courses et la réussite du favori sur douze mois distinguent les
    * fiches les unes des autres dès l'index, et annoncent ce que la fiche contient.
    *

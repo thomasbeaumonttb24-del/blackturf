@@ -169,7 +169,7 @@ export function ProfilChiffreLieu({
   nom: string;
   /** Le nom sans son préfixe — « Vincennes » plutôt que « Hippodrome de Vincennes ». Les
    *  phrases l'emploient derrière « la piste de », qui évite les pièges d'accord de
-   *  « à / au / aux » sur les seize fiches. */
+   *  « à / au / aux » sur toutes les fiches. */
   court?: string;
   p: ProfilLieu;
 }) {
