@@ -61,6 +61,13 @@ def _brancher(monkeypatch, rows, predits, *, echoue=False):
 
     import ml.pipeline as pipeline_mod
     monkeypatch.setattr(pipeline_mod, "predict_course", _predict)
+
+    # Le re-gel relève la cote PMU juste avant de prédire : pas de réseau en test.
+    async def _rafraichir(_factory, cid, client=None):
+        return 0, 0
+
+    import scraper.cotes_rapides as cotes_mod
+    monkeypatch.setattr(cotes_mod, "rafraichir_course", _rafraichir)
     return vu
 
 

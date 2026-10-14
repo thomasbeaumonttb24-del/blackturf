@@ -1470,6 +1470,10 @@ class BlackTurfOrchestrator:
         # Re-gel du prono avant le verrou T-10 : tâche parallèle, jamais dans le
         # cycle (qui dure plusieurs minutes et peut être annulé par le watchdog).
         _regel_task = asyncio.create_task(self._boucle_regel())
+        # Cote PMU rafraîchie chaque minute pour les courses qui partent bientôt
+        # (scraper/cotes_rapides.py) : le cycle complet n'y repasse que toutes les
+        # 7 à 11 min.
+        _cotes_task = asyncio.create_task(self._boucle_cotes_rapides())
         try:
             while True:
                 _cycle_started_at = time.monotonic()
@@ -1489,9 +1493,11 @@ class BlackTurfOrchestrator:
         finally:
             # Le daemon s'arrête (arrêt du conteneur, annulation) : la boucle de
             # re-gel doit mourir avec lui, sinon elle survit à sa boucle asyncio.
-            _regel_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await _regel_task
+            for _t in (_regel_task, _cotes_task):
+                _t.cancel()
+            for _t in (_regel_task, _cotes_task):
+                with contextlib.suppress(asyncio.CancelledError):
+                    await _t
 
     async def run_regel_pronos(self) -> None:
         """Dernier recalcul du prono avant le verrou T-10, sur les cotes les plus fraîches.
@@ -1536,6 +1542,16 @@ class BlackTurfOrchestrator:
             if cid in self._regel_faits:
                 continue
             self._regel_faits.add(cid)
+            # Dernière cote PMU juste avant le gel, quelle que soit la phase de la
+            # boucle rapide. `perimees` = partants dont la cote en base différait du
+            # PMU à cet instant : c'est la mesure de fraîcheur au moment qui compte.
+            try:
+                from scraper.cotes_rapides import rafraichir_course
+                suivis, perimees = await rafraichir_course(AsyncSessionLocal, cid)
+                log.info("orchestrator.regel_cotes", course_id=cid,
+                         partants=suivis, perimees=perimees)
+            except Exception as e:
+                log.error("orchestrator.regel_cotes_error", course_id=cid, error=str(e)[:200])
             try:
                 async with self._predict_lock:
                     ok = await predict_course(cid)
@@ -1559,6 +1575,17 @@ class BlackTurfOrchestrator:
             except Exception as e:
                 log.error("orchestrator.regel_loop_error", error=str(e)[:200])
             await asyncio.sleep(REGEL_TICK_S)
+
+    async def _boucle_cotes_rapides(self) -> None:
+        """Boucle du relevé rapide des cotes PMU — à côté du cycle, jamais dedans."""
+        from scraper.cotes_rapides import FENETRE_MIN, TICK_S, run_cotes_rapides
+        log.info("orchestrator.cotes_rapides_start", fenetre_min=FENETRE_MIN, tick_s=TICK_S)
+        while True:
+            try:
+                await run_cotes_rapides(AsyncSessionLocal)
+            except Exception as e:
+                log.error("orchestrator.cotes_rapides_error", error=str(e)[:200])
+            await asyncio.sleep(TICK_S)
 
     async def run_predictions_cycle(self) -> None:
         """(Re)calcule prédictions + value bets + recommandations pour les courses
