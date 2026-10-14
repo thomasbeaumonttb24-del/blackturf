@@ -29,6 +29,7 @@ export const RUBRIQUES = {
   monEspace: r("/dashboard", "Mon espace", "Votre tableau de bord"),
   coursesDuJour: r("/programme", "Courses du jour", "Réunions, horaires et partants", "Courses"),
   quinte: r("/quinte-du-jour", "Quinté+ du jour", "La course du jour en détail", "Quinté+"),
+  quinteDemain: r("/quinte-de-demain", "Quinté+ de demain", "Publié la veille au soir", "Quinté+ demain"),
   outsiders: r("/outsiders", "Outsiders du jour", "Les grosses cotes capables de se placer", "Outsiders"),
   resultats: r("/resultats", "Résultats", "Arrivées et rapports officiels"),
   parisDeValeur: r("/value-bets", "Paris de valeur", "Chevaux mieux cotés que leur chance réelle"),

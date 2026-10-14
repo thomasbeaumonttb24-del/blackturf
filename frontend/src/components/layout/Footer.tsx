@@ -24,6 +24,7 @@ const COLUMNS: Array<{
     links: [
       R.coursesDuJour,
       R.quinte,
+      R.quinteDemain,
       R.outsiders,
       R.resultats,
       { ...R.parisDeValeur, prive: true },
@@ -52,6 +53,7 @@ const COLUMNS: Array<{
       { href: "/resultats/archives", label: "Archives des arrivées" },
       { href: "/blog", label: "Blog" },
       { href: "/hippodromes", label: "Hippodromes" },
+      { href: "/grands-prix", label: "Grands Prix" },
       { href: "/disciplines", label: "Disciplines" },
       { href: "/guides", label: "Guides paris PMU" },
       { href: "/guides/types-de-paris-pmu", label: "Types de paris" },
