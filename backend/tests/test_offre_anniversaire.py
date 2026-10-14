@@ -198,7 +198,7 @@ def test_mail_derniere_chance_deux_versions():
     assert "nous vous avons envoyé" in texte and "demain, jeudi 15 octobre" in texte
     assert "exceptionnelle" in texte
     _, texte = derniere_chance(None, CODE, "https://blackturf.fr/x", deja_recu=False, ce_soir=True)
-    assert "créé depuis" in texte and "ce soir à minuit" in texte
+    assert "vaut aussi pour vous" in texte and "ce soir à minuit" in texte
 
 
 @pytest.mark.asyncio
@@ -281,7 +281,7 @@ async def test_relance_envoi_complet(db, monkeypatch):
     assert len(envoyes) == 2 and set(par_adresse) == {ancien_inscrit.email, nouvel_inscrit.email}
     assert "Dernière chance" in par_adresse[ancien_inscrit.email][0]
     assert "nous vous avons envoyé" in par_adresse[ancien_inscrit.email][1]
-    assert "créé depuis" in par_adresse[nouvel_inscrit.email][1]
+    assert "vaut aussi pour vous" in par_adresse[nouvel_inscrit.email][1]
     assert all(CODE in texte and "exceptionnelle" in texte for _, texte in par_adresse.values())
 
 
