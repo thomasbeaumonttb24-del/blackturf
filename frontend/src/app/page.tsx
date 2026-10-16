@@ -306,16 +306,17 @@ export default async function HomePage() {
 
       <div className="section-divider" />
 
-      {/* ═══════════ PERFORMANCES (chiffres clés, grille bento sombre) ═══════════ */}
-      <section id="preuves" className="relative scroll-mt-20 overflow-hidden bg-[#0B0A08] py-20 sm:py-28">
-        <span aria-hidden className="pointer-events-none absolute left-1/2 top-0 h-[420px] w-[820px] -translate-x-1/2 rounded-full bg-amber-500/[0.08] blur-3xl" />
+      {/* ═══════════ PERFORMANCES (chiffres clés en visuels 3D, fond clair) ═══════════ */}
+      <section id="preuves" className="relative scroll-mt-20 overflow-hidden bg-gradient-to-b from-[#FBF7EF] via-[#F7F0E2] to-[#FBF7EF] py-20 sm:py-28">
+        <span aria-hidden className="pointer-events-none absolute -left-40 top-10 h-[480px] w-[480px] rounded-full bg-amber-200/50 blur-3xl" />
+        <span aria-hidden className="pointer-events-none absolute -right-32 bottom-0 h-[420px] w-[420px] rounded-full bg-orange-200/40 blur-3xl" />
         <div className="relative mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
           <div className="mb-12 max-w-2xl">
-            <p className="text-sm font-medium text-amber-300/90">Performances vérifiables</p>
-            <h2 className="mt-3 font-display text-3xl font-semibold tracking-[-0.03em] text-white sm:text-5xl">
+            <p className="text-sm font-medium text-brand-gold-dark">Performances vérifiables</p>
+            <h2 className="mt-3 font-display text-3xl font-semibold tracking-[-0.03em] text-stone-950 sm:text-5xl">
               Des résultats mesurés.<br className="hidden sm:block" /> Pas des promesses.
             </h2>
-            <p className="mt-4 text-base leading-relaxed text-white/55">
+            <p className="mt-4 text-base leading-relaxed text-stone-600">
               Chaque pronostic est figé avant le départ, puis comparé à l&apos;arrivée officielle PMU et à ce que
               ferait un tirage au sort sur la même course. Rien n&apos;est réécrit après coup.
             </p>
@@ -324,10 +325,10 @@ export default async function HomePage() {
           {tr && <PerformancesBento m={tr} />}
 
           <div className="mt-10 flex flex-col items-start gap-4 sm:flex-row sm:items-center sm:justify-between">
-            <Link href="/track-record" className="press inline-flex min-h-12 items-center gap-1.5 rounded-full bg-white px-6 text-sm font-semibold text-stone-950 transition-transform hover:-translate-y-0.5">
+            <Link href="/track-record" className="press inline-flex min-h-12 items-center gap-1.5 rounded-full bg-stone-950 px-6 text-sm font-semibold text-white shadow-lg shadow-stone-900/20 transition-transform hover:-translate-y-0.5">
               Voir toutes nos performances <ArrowRight className="h-4 w-4" aria-hidden="true" />
             </Link>
-            <p className="max-w-md text-[11px] leading-relaxed text-white/35">
+            <p className="max-w-md text-[11px] leading-relaxed text-stone-500">
               La précision mesure la qualité du classement des chevaux : ce n&apos;est ni un taux de gain, ni une garantie de profit.
               Les performances passées ne préjugent pas des performances futures.
             </p>
