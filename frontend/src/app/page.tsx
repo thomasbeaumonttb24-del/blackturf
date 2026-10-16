@@ -1,10 +1,9 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import {
-  ArrowRight, TrendingUp, Shield, Trophy, ChevronRight, AlertTriangle, BarChart3, ChevronDown,
+  ArrowRight, Shield, Trophy, ChevronRight, AlertTriangle, ChevronDown,
 } from "lucide-react";
-import { Reveal, Tilt } from "@/components/track-record/effets";
-import { PreuvesCockpit } from "@/components/home/PreuvesCockpit";
+import { PerformancesBento } from "@/components/home/PerformancesBento";
 import { EtapesFonctionnement } from "@/components/home/EtapesFonctionnement";
 import { Button } from "@/components/ui/button";
 import { Navbar } from "@/components/layout/Navbar";
@@ -43,11 +42,6 @@ export const metadata: Metadata = {
   // Le titre partagé suit celui de la page (le gabarit du layout en portait un autre).
   openGraph: ogBase({ title: TITRE_ACCUEIL, description: DESCRIPTION_ACCUEIL, url: "/" }),
   twitter: twitterBase({ title: TITRE_ACCUEIL, description: DESCRIPTION_ACCUEIL }),
-};
-
-const DISC_LABEL: Record<string, string> = {
-  plat: "Plat", "attelé": "Trot attelé", attele: "Trot attelé",
-  "monté": "Trot monté", monte: "Trot monté", obstacle: "Obstacle", autre: "Autre",
 };
 
 const numOf = (x: unknown): number | null =>
@@ -312,125 +306,32 @@ export default async function HomePage() {
 
       <div className="section-divider" />
 
-      {/* ═══════════ PREUVES RÉELLES (track-record) ═══════════ */}
-      <section id="preuves" className="py-24 bg-brand-warm scroll-mt-20">
-        <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
-          <ScrollReveal>
-            <div className="mb-12 text-center">
-              <p className="mb-4 text-sm text-stone-500">Performances vérifiables</p>
-              <h2 className="font-display text-[1.65rem] leading-tight sm:text-4xl font-medium tracking-tight text-stone-900">
-                Des résultats vérifiables.<br className="hidden sm:block" /> Pas des promesses.
-              </h2>
-              <p className="text-stone-500 text-base mt-4 max-w-2xl mx-auto">
-                Aucun pronostic n'est réécrit après la course. Voici la précision réelle de BlackTurf sur les
-                courses déjà réglées, mise en regard de ce que ferait un tirage au sort sur les mêmes courses.
-              </p>
-            </div>
-          </ScrollReveal>
-
-          {/* Mesures + duel face au hasard : les règles (repère hasard calculé course
-              par course sur le champ réel, état servi = état final) sont dans le
-              composant. Rien n'est rendu sans palmarès. */}
-          {tr && (
-            <Reveal>
-              <PreuvesCockpit m={tr} />
-            </Reveal>
-          )}
-
-          <div className="mt-8 grid gap-4 lg:grid-cols-2">
-            {tr && tr.by_discipline.length > 0 && (
-              <Reveal>
-                <Tilt max={4} className="h-full rounded-3xl bg-white p-5 ring-1 ring-stone-200/80 shadow-[0_30px_60px_-44px_rgba(17,24,39,.5)] sm:p-6">
-                  <div className="mb-5 flex items-center gap-2">
-                    <span className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-amber-300 to-amber-600 text-slate-950 shadow-[inset_0_1px_0_rgba(255,255,255,.35)]">
-                      <BarChart3 className="h-4 w-4" aria-hidden="true" />
-                    </span>
-                    <h3 className="font-display text-base font-bold text-gray-900">Gagnant dans le Top-3, par discipline</h3>
-                  </div>
-                  <div className="space-y-4">
-                    {tr.by_discipline.map((d) => (
-                      <div key={d.discipline}>
-                        <div className="mb-1.5 flex items-center justify-between text-xs">
-                          <span className="font-semibold text-gray-800">{DISC_LABEL[d.discipline] ?? d.discipline}</span>
-                          <span className="font-display text-sm font-black tabular-nums text-gray-900">{d.accuracy_top3.toFixed(1).replace(".", ",")} %
-                            <span className="ml-1.5 font-sans text-xs font-normal text-gray-600">· {d.nb_courses} courses</span>
-                          </span>
-                        </div>
-                        <div className="relative h-3.5 overflow-hidden rounded-full bg-stone-100 shadow-[inset_0_1px_2px_rgba(0,0,0,.08)]">
-                          <div className="bar-grow absolute inset-y-0 left-0 rounded-full bg-gradient-to-r from-amber-300 via-amber-500 to-amber-700 shadow-[inset_0_1px_0_rgba(255,255,255,.5)]" style={{ ["--bar-pct" as string]: `${Math.min(d.accuracy_top3, 100)}%` }} />
-                          {tr.hasard_top3 != null && (
-                            <div className="absolute bottom-0 top-0 w-0.5 bg-slate-700/70" style={{ left: `${Math.min(tr.hasard_top3, 100)}%` }} />
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                  <div className="mt-5 flex items-center gap-1.5 text-[11px] text-gray-600">
-                    <span className="inline-block h-3 w-0.5 bg-slate-700/70" />
-                    {tr.hasard_top3 != null
-                      ? `Repère « hasard » à ${tr.hasard_top3.toFixed(0)} % — l'espérance d'un tirage au sort sur ces mêmes courses.`
-                      : "Le trait vertical marque ce qu'obtiendrait un tirage au sort sur ces mêmes courses."}
-                  </div>
-                </Tilt>
-              </Reveal>
-            )}
-
-            {tr && tr.by_day.length > 0 && (() => {
-              const avg = tr.by_day.reduce((s, d) => s + d.accuracy_top3, 0) / tr.by_day.length;
-              return (
-              <Reveal delay={80}>
-                <Tilt max={4} className="flex h-full flex-col rounded-3xl bg-white p-5 ring-1 ring-stone-200/80 shadow-[0_30px_60px_-44px_rgba(17,24,39,.5)] sm:p-6">
-                  <div className="mb-5 flex items-center justify-between gap-3">
-                    <div className="flex items-center gap-2">
-                      <span className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-400 to-emerald-700 text-white shadow-[inset_0_1px_0_rgba(255,255,255,.35)]">
-                        <TrendingUp className="h-4 w-4" aria-hidden="true" />
-                      </span>
-                      <h3 className="font-display text-base font-bold text-gray-900">Top-3 · 7 derniers jours</h3>
-                    </div>
-                    <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] text-emerald-800 ring-1 ring-emerald-200">moy. <span className="font-bold tabular-nums">{avg.toFixed(0)} %</span></span>
-                  </div>
-
-                  {/* Aire de chart à hauteur FIXE → barres % fiables */}
-                  <div className="relative h-44">
-                    {[25, 50, 75].map((g) => (
-                      <div key={g} className="absolute left-0 right-0 border-t border-dashed border-gray-100" style={{ bottom: `${g}%` }} />
-                    ))}
-                    {/* Ligne de moyenne : sa valeur est dans la pastille « moy. » de
-                        l'en-tête — un libellé posé ici chevauchait le chiffre d'une barre. */}
-                    <div className="absolute left-0 right-0 z-10 border-t-2 border-dashed border-emerald-400" style={{ bottom: `${Math.min(avg, 100)}%` }} aria-hidden="true" />
-                    <div className="absolute inset-0 flex items-end justify-between gap-2.5">
-                      {tr.by_day.map((d, i) => (
-                        <div key={d.jour} className="group relative flex h-full flex-1 flex-col items-center justify-end">
-                          <span className="mb-1 font-display text-[10px] font-bold tabular-nums text-gray-800">{Math.round(d.accuracy_top3)}%</span>
-                          <div className="tr-rise w-full max-w-[40px] rounded-t-xl bg-gradient-to-t from-amber-600 via-amber-400 to-amber-200 shadow-[inset_0_1px_0_rgba(255,255,255,.6),0_10px_18px_-10px_rgba(180,83,9,.7)] transition-transform duration-300 group-hover:-translate-y-1"
-                            style={{ height: `${Math.max(4, Math.min(d.accuracy_top3, 100))}%`, animationDelay: `${i * 70}ms` }}
-                            title={`${d.jour} · ${d.accuracy_top3.toFixed(1)}% · ${d.nb_predictions} pronostics`} />
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                  <div className="mt-2 flex justify-between gap-2.5">
-                    {tr.by_day.map((d) => (
-                      <span key={d.jour} className="flex-1 text-center text-[9px] text-gray-600">{d.jour}</span>
-                    ))}
-                  </div>
-                  <p className="mt-4 text-[11px] text-gray-600">Jour par jour, sur les pronostics réglés aux arrivées PMU officielles.</p>
-                </Tilt>
-              </Reveal>
-              );
-            })()}
+      {/* ═══════════ PERFORMANCES (chiffres clés, grille bento sombre) ═══════════ */}
+      <section id="preuves" className="relative scroll-mt-20 overflow-hidden bg-[#0B0A08] py-20 sm:py-28">
+        <span aria-hidden className="pointer-events-none absolute left-1/2 top-0 h-[420px] w-[820px] -translate-x-1/2 rounded-full bg-amber-500/[0.08] blur-3xl" />
+        <div className="relative mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
+          <div className="mb-12 max-w-2xl">
+            <p className="text-sm font-medium text-amber-300/90">Performances vérifiables</p>
+            <h2 className="mt-3 font-display text-3xl font-semibold tracking-[-0.03em] text-white sm:text-5xl">
+              Des résultats mesurés.<br className="hidden sm:block" /> Pas des promesses.
+            </h2>
+            <p className="mt-4 text-base leading-relaxed text-white/55">
+              Chaque pronostic est figé avant le départ, puis comparé à l&apos;arrivée officielle PMU et à ce que
+              ferait un tirage au sort sur la même course. Rien n&apos;est réécrit après coup.
+            </p>
           </div>
 
-          <div className="mt-8 text-center">
-            <Link href="/track-record" className="press inline-flex min-h-12 items-center gap-1.5 rounded-full bg-slate-950 px-6 text-sm font-semibold text-white shadow-lg shadow-slate-900/20 transition-transform hover:-translate-y-0.5">
+          {tr && <PerformancesBento m={tr} />}
+
+          <div className="mt-10 flex flex-col items-start gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <Link href="/track-record" className="press inline-flex min-h-12 items-center gap-1.5 rounded-full bg-white px-6 text-sm font-semibold text-stone-950 transition-transform hover:-translate-y-0.5">
               Voir toutes nos performances <ArrowRight className="h-4 w-4" aria-hidden="true" />
             </Link>
+            <p className="max-w-md text-[11px] leading-relaxed text-white/35">
+              La précision mesure la qualité du classement des chevaux : ce n&apos;est ni un taux de gain, ni une garantie de profit.
+              Les performances passées ne préjugent pas des performances futures.
+            </p>
           </div>
-
-          <p className="mt-6 text-center text-[11px] text-gray-600 max-w-2xl mx-auto leading-relaxed">
-            La précision d'analyse mesure la qualité du classement des chevaux. Ce n'est ni un taux de
-            gain, ni une garantie de profit. Les performances passées ne préjugent pas des performances futures.
-          </p>
         </div>
       </section>
 

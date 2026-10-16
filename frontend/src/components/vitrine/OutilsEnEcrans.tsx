@@ -29,16 +29,16 @@ export const FONCTIONS = [
     alt: "Marché des cotes en direct : courbe et variation de chaque cheval depuis l'ouverture",
   },
   {
-    src: "/img/decouvrir/f-comparaison.webp", w: 760, h: 1046, large: false,
+    src: "/img/decouvrir/f-comparaison-v2.webp", w: 1180, h: 1308, large: false,
     acces: "Compte gratuit", t: "Cotes de 5 sites comparées",
-    d: "PMU, Geny, Unibet, Bet365, Ladbrokes côte à côte. La meilleure cote ressort en vert.",
-    alt: "Tableau de comparaison des cotes PMU, Geny, Unibet et Bet365 pour chaque cheval, meilleure cote en vert",
+    d: "PMU, Geny, Unibet, Bet365 et Ladbrokes côte à côte, avec le mouvement de chaque cote. La meilleure ressort en vert.",
+    alt: "Tableau de comparaison des cotes PMU, Geny, Unibet, Bet365 et Ladbrokes pour les 12 partants, meilleure cote en vert et mouvement de cote",
   },
   {
-    src: "/img/decouvrir/f-duel.webp", w: 760, h: 918, large: false,
+    src: "/img/decouvrir/f-duel-v2.webp", w: 1180, h: 1262, large: false,
     acces: "Compte gratuit", t: "Duel de deux chevaux",
     d: "Cote, ELO, forme, victoires, repos : deux partants face à face, critère par critère. Plus les confrontations déjà courues.",
-    alt: "Comparateur : Horus de Val contre Kassya, cote, ELO, forme, victoires, nombre de courses",
+    alt: "Comparateur : That's It contre Jonquillete Crepin, cote, ELO, forme, victoires, nombre de courses, repos et musique",
   },
   {
     src: "/img/decouvrir/f-argent.webp", w: 1365, h: 714, large: true,
@@ -72,7 +72,7 @@ export function OutilsEnEcrans({ tutoiement = false, id }: { tutoiement?: boolea
           {FONCTIONS.map((f) => (
             <article
               key={f.src}
-              className={`flex flex-col overflow-hidden rounded-3xl bg-white ring-1 ring-stone-200 ${f.large ? "md:col-span-2" : ""}`}
+              className={`flex flex-col overflow-hidden rounded-3xl bg-white ring-1 ring-stone-200/80 shadow-[0_24px_60px_-40px_rgba(17,24,39,.35)] ${f.large ? "md:col-span-2" : ""}`}
             >
               <div className="p-6 sm:p-8">
                 <span
@@ -85,7 +85,9 @@ export function OutilsEnEcrans({ tutoiement = false, id }: { tutoiement?: boolea
                 <h3 className="mt-4 font-display text-2xl font-semibold tracking-[-0.02em] text-stone-950">{f.t}</h3>
                 <p className="mt-2 max-w-xl text-[15px] leading-relaxed text-stone-600">{f.d}</p>
               </div>
-              <div className="mt-auto bg-[#f5f0e6] px-4 pt-6 sm:px-8 sm:pt-8">
+              {/* Zone d'écran de hauteur fixe, image calée en haut et fondue en bas :
+                  des cartes voisines gardent la même hauteur, sans vide au-dessus. */}
+              <div className={`relative mt-auto overflow-hidden bg-[#f5f0e6] px-4 pt-6 sm:px-8 sm:pt-8 ${f.large ? "" : "h-[360px] sm:h-[440px]"}`}>
                 <Image
                   src={f.src}
                   alt={f.alt}
@@ -94,6 +96,7 @@ export function OutilsEnEcrans({ tutoiement = false, id }: { tutoiement?: boolea
                   sizes={f.large ? "(min-width: 1024px) 1000px, 94vw" : "(min-width: 768px) 460px, 90vw"}
                   className={`mx-auto h-auto w-full rounded-t-2xl shadow-[0_-8px_40px_-20px_rgba(17,24,39,0.35)] ${f.large ? "max-w-[1000px]" : "max-w-[440px]"}`}
                 />
+                {!f.large && <div aria-hidden className="pointer-events-none absolute inset-x-0 bottom-0 h-20 bg-gradient-to-t from-[#f5f0e6] to-transparent" />}
               </div>
             </article>
           ))}
