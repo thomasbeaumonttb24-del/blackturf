@@ -38,10 +38,18 @@ const AuthContext = createContext<AuthContextValue | null>(null);
  * d'avance s'il y en a une. On demande à /auth/me, qui fait autorité ; le profil
  * gardé en localStorage ne sert qu'à afficher la navbar sans attendre la réponse.
  */
+// Ce navigateur a déjà servi à un compte (connexion ou inscription). Survit à la
+// déconnexion : sert à ne plus montrer l'accueil « nouveau visiteur » à un client.
+const CLE_COMPTE = "bt.a_un_compte";
+const noterCompte = () => { try { window.localStorage.setItem(CLE_COMPTE, "1"); } catch { /* stockage refusé */ } };
+export const aDejaUnCompte = () => { try { return window.localStorage.getItem(CLE_COMPTE) === "1"; } catch { return false; } };
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [loading, setLoading] = useState(true);
   const router = useRouter();
+
+  useEffect(() => { if (user) noterCompte(); }, [user]);
 
   useEffect(() => {
     let annule = false;
@@ -122,6 +130,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const register = useCallback(
     async (data: { email: string; password: string; pseudo: string; nom?: string; prenom?: string; code_parrain?: string }) => {
       const res = await authApi.register(data);
+      noterCompte();
       return res.data;
     },
     []

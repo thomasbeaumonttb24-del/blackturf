@@ -30,7 +30,7 @@ import { CompteGratuitCta } from "@/components/billing/CompteGratuitCta";
 import { peutDebloquer } from "@/lib/auth";
 import useSWR from "swr";
 import { coursesApi, predictionsApi } from "@/lib/api";
-import { useAuth } from "@/hooks/useAuth";
+import { aDejaUnCompte, useAuth } from "@/hooks/useAuth";
 import { formatTime, cn } from "@/lib/utils";
 import { jourParis } from "@/lib/seo";
 import { BandeauOnglet, IconeTuile, Pastille, PastilleDirect, SG } from "@/components/courses/course-ui";
@@ -788,6 +788,10 @@ export default function ProgrammeClient({
   initialCompteurVB?: { count: number; niveau_min: number } | null;
 } ) {
   const { user, loading: authLoading } = useAuth();
+  // Lu après le montage (localStorage) : le HTML servi ne montre jamais l'encart.
+  const [dejaClient, setDejaClient] = useState(true);
+  useEffect(() => setDejaClient(aDejaUnCompte()), [user]);
+  const nouveauVisiteur = !authLoading && !user && !dejaClient;
   const maintenant = useHorloge(15000);
   /* Jour de Paris VIVANT. Il part de `initialJour` — la valeur exacte contenue dans le
      HTML servi, donc zéro mismatch d'hydratation — puis se corrige au premier battement
@@ -1247,28 +1251,18 @@ export default function ProgrammeClient({
               <span className="text-stone-100">{isToday ? " — " : " du "}{dayName.toLowerCase()} {restDate}</span>
             </h1>
 
-            {/* Visiteur (souvent arrivé d'une publication ou d'une publicité) : ce
-                que fait le site et quoi faire ici, avant la liste des courses. */}
-            {!authLoading && !user && (
-              <div className="mt-3.5 rounded-2xl bg-white/[0.06] p-3.5 ring-1 ring-inset ring-white/10">
-                <p className="m-0 text-[13.5px] leading-snug text-stone-200">
-                  <b className="font-semibold text-white">L&apos;algorithme BlackTurf analyse chaque course PMU</b> avant le départ :
-                  chances de chaque cheval, cote juste, outsiders, écarts de cotes et plan de mise.
-                </p>
-                <p className="m-0 mt-1.5 text-[13px] font-semibold text-amber-300">
-                  👇 Touche une course pour voir son analyse.
-                </p>
-                <div className="mt-2.5 flex flex-wrap items-center gap-x-3 gap-y-2">
-                  <Link
-                    href="/inscription?suite=%2Fprogramme"
-                    className="inline-flex items-center gap-1.5 rounded-xl bg-gradient-to-b from-amber-400 to-amber-600 px-3 py-1.5 text-[13px] font-bold text-stone-900 shadow-[inset_0_1px_0_rgba(255,255,255,.45)]"
-                  >
-                    Créer un compte gratuit
-                  </Link>
-                  <Link href="/decouvrir" className="text-[13px] font-semibold text-stone-300 hover:text-white">
-                    Comment ça marche ›
-                  </Link>
-                </div>
+            {/* Nouveau visiteur (souvent arrivé d'une publication ou d'une pub) : une
+                ligne pour dire quoi faire. Jamais pour qui a déjà un compte, même
+                déconnecté (repère posé par useAuth). */}
+            {nouveauVisiteur && (
+              <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2">
+                <p className="m-0 text-[13.5px] font-semibold text-amber-300">👇 Touche une course pour voir l&apos;analyse</p>
+                <Link
+                  href="/inscription?suite=%2Fprogramme"
+                  className="rounded-xl bg-gradient-to-b from-amber-400 to-amber-600 px-3 py-1.5 text-[12.5px] font-bold text-stone-900 shadow-[inset_0_1px_0_rgba(255,255,255,.45)]"
+                >
+                  Compte gratuit
+                </Link>
               </div>
             )}
 
