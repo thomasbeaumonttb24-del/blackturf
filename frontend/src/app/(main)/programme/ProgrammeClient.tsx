@@ -1247,6 +1247,31 @@ export default function ProgrammeClient({
               <span className="text-stone-100">{isToday ? " — " : " du "}{dayName.toLowerCase()} {restDate}</span>
             </h1>
 
+            {/* Visiteur (souvent arrivé d'une publication ou d'une publicité) : ce
+                que fait le site et quoi faire ici, avant la liste des courses. */}
+            {!authLoading && !user && (
+              <div className="mt-3.5 rounded-2xl bg-white/[0.06] p-3.5 ring-1 ring-inset ring-white/10">
+                <p className="m-0 text-[13.5px] leading-snug text-stone-200">
+                  <b className="font-semibold text-white">L&apos;algorithme BlackTurf analyse chaque course PMU</b> avant le départ :
+                  chances de chaque cheval, cote juste, outsiders, écarts de cotes et plan de mise.
+                </p>
+                <p className="m-0 mt-1.5 text-[13px] font-semibold text-amber-300">
+                  👇 Touche une course pour voir son analyse.
+                </p>
+                <div className="mt-2.5 flex flex-wrap items-center gap-x-3 gap-y-2">
+                  <Link
+                    href="/inscription?suite=%2Fprogramme"
+                    className="inline-flex items-center gap-1.5 rounded-xl bg-gradient-to-b from-amber-400 to-amber-600 px-3 py-1.5 text-[13px] font-bold text-stone-900 shadow-[inset_0_1px_0_rgba(255,255,255,.45)]"
+                  >
+                    Créer un compte gratuit
+                  </Link>
+                  <Link href="/decouvrir" className="text-[13px] font-semibold text-stone-300 hover:text-white">
+                    Comment ça marche ›
+                  </Link>
+                </div>
+              </div>
+            )}
+
             {programme && programme.nb_courses > 0 && (() => {
               const enDirect = allCourses.filter((c) => c.statut === "en_cours").length;
               const aVenir = allCourses.filter((c) => !estPassee(c) && c.statut !== "en_cours").length;

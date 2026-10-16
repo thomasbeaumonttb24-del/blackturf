@@ -90,7 +90,7 @@ const nextConfig = {
       // Lien court de la bio TikTok : l'adresse longue avec utm_ paraissait suspecte et la
       // version tapée avec accent (/découvrir) tombait en 404. Temporaire (307) pour
       // pouvoir changer la page d'arrivée sans toucher à la bio.
-      { source: "/tiktok", destination: "/decouvrir?utm_source=tiktok&utm_medium=bio", permanent: false },
+      { source: "/tiktok", destination: "/programme?utm_source=tiktok&utm_medium=bio", permanent: false },
       { source: "/d%C3%A9couvrir", destination: "/decouvrir", permanent: true },
       { source: "/découvrir", destination: "/decouvrir", permanent: true },
     ];

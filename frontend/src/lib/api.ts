@@ -491,6 +491,8 @@ export const adminApi = {
   dashboard: () => api.get("/dashboard", { baseURL: `${API_URL}/admin/api` }),
   // Suivi du parrainage : qui parraine qui, étape de chaque filleul, coût et rapport.
   parrainages: () => api.get("/parrainages", { baseURL: `${API_URL}/admin/api` }),
+  // Comptes créés par provenance (utm de la première visite) : ce que rapporte chaque publication.
+  provenance: (jours = 90) => api.get("/provenance", { baseURL: `${API_URL}/admin/api`, params: { jours } }),
   enLigne: () => api.get("/en-ligne", { baseURL: `${API_URL}/admin/api` }),
   // Encaissements RÉELS par mois (journal `paiement_recu`) + échéancier des prélèvements.
   revenus: (mois = 12, actualiser = false) =>

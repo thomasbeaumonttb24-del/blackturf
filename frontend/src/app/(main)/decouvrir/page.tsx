@@ -241,7 +241,7 @@ export default async function DecouvrirPage() {
                 Voir les prix
               </Link>
             </div>
-            <p className="mt-3 text-sm text-stone-500">Sans carte bancaire. Réservé aux 18 ans et plus.</p>
+            <p className="mt-3 text-sm text-stone-500">Compte gratuit, sans abonnement ni carte bancaire. Réservé aux 18 ans et plus.</p>
           </div>
 
           <div className="relative mx-auto w-full max-w-[460px] md:w-[460px]">

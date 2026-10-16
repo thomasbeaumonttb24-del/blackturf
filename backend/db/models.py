@@ -896,6 +896,12 @@ class User(Base):
     code_parrain: Mapped[str | None] = mapped_column(String(12), unique=True)
     parraine_par_id: Mapped[str | None] = mapped_column(ForeignKey("users.user_id"), index=True)
 
+    # Provenance de l'inscription : « source:campagne » des paramètres utm de la
+    # PREMIÈRE visite (cookie bt_src posé par le site), ex. « facebook:pub_v6 ».
+    # Mesure ce que rapporte chaque publication ou publicité. `deferred` : un
+    # select(User) ordinaire ne la lit pas, donc sans risque avant la migration 0061.
+    provenance: Mapped[str | None] = mapped_column(String(80), deferred=True)
+
     # Bankroll de référence
     bankroll_initiale: Mapped[float | None] = mapped_column(Float)
 

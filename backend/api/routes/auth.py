@@ -495,6 +495,7 @@ async def _envoyer_lien_reinitialisation(user: User) -> None:
 
 @router.post("/register", response_model=RegisterResponse)
 async def register(body: RegisterRequest,
+                   request: Request,
                    response: Response,
                    background: BackgroundTasks,
                    db: AsyncSession = Depends(get_db),
@@ -584,6 +585,7 @@ async def register(body: RegisterRequest,
         existant.nom = body.nom or existant.nom
         existant.prenom = body.prenom or existant.prenom
         existant.pseudo = pseudo
+        existant.provenance = _provenance(request)
         await _rattacher_parrain(existant, body.code_parrain, db)
         try:
             await db.commit()
@@ -612,6 +614,7 @@ async def register(body: RegisterRequest,
         prenom=body.prenom,
         pseudo=pseudo,
         plan="free",
+        provenance=_provenance(request),
     )
     db.add(user)
     try:
@@ -649,6 +652,17 @@ async def _prevenir_titulaire(user_id: str, email: str, prenom: Optional[str]) -
             log.warning("auth.register.avis_titulaire_echoue", user_id=user_id, error=getattr(envoi, "erreur", None))
     except Exception as e:  # noqa: BLE001
         log.warning("auth.register.avis_titulaire_echoue", user_id=user_id, error=str(e))
+
+
+# Cookie posé par le site à l'arrivée avec des paramètres utm (première visite
+# seulement) : « source:campagne ». Relu à la création du compte, jamais après.
+PROVENANCE_COOKIE = "bt_src"
+_PROVENANCE_RE = re.compile(r"[a-z0-9_.:-]{1,80}")
+
+
+def _provenance(request: Request) -> Optional[str]:
+    brut = (request.cookies.get(PROVENANCE_COOKIE) or "").strip().lower()[:80]
+    return brut if _PROVENANCE_RE.fullmatch(brut) else None
 
 
 async def _rattacher_parrain(user: User, code: Optional[str], db: AsyncSession) -> None:
@@ -907,6 +921,7 @@ async def google_oauth(body: GoogleCallbackRequest, request: Request, response: 
                 nom=g_user.get("family_name"),
                 prenom=g_user.get("given_name"),
                 plan="free",
+                provenance=_provenance(request),
             )
             db.add(user)
             await db.flush()

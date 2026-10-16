@@ -280,6 +280,43 @@ async def _acces_offert_public(db: AsyncSession, user_id: str) -> Optional[dict]
     }
 
 
+@router.get("/provenance")
+async def provenance_inscriptions(
+    jours: int = Query(default=90, ge=1, le=365),
+    db: AsyncSession = Depends(get_db),
+    _=Depends(require_admin),
+):
+    """Ce que rapporte chaque publication ou publicité : comptes créés par
+    provenance (« source:campagne » des utm de la première visite), combien ont
+    confirmé leur adresse, combien ont payé (formule en cours ou pass acheté).
+    `provenance` vide = arrivée directe, ou compte antérieur au suivi (0061)."""
+    from db.models import PassAcces
+    depuis_le = datetime.now(timezone.utc) - timedelta(days=jours)
+    a_paye = or_(
+        User.plan.in_(("standard", "expert")),
+        select(PassAcces.pass_id).where(PassAcces.user_id == User.user_id).exists(),
+    )
+    rows = (await db.execute(
+        select(
+            User.provenance,
+            func.count(),
+            func.count().filter(or_(User.email_verified.is_(True), User.google_id.isnot(None))),
+            func.count().filter(a_paye),
+            func.max(User.created_at),
+        )
+        .where(User.created_at >= depuis_le, User.is_admin.is_(False))
+        .group_by(User.provenance)
+        .order_by(desc(func.count()))
+    )).all()
+    return {
+        "jours": jours,
+        "lignes": [
+            {"provenance": p, "inscrits": n, "confirmes": c, "payants": pay, "dernier": d}
+            for p, n, c, pay, d in rows
+        ],
+    }
+
+
 @router.get("/users/{user_id}")
 async def get_user_detail(
     user_id: str,

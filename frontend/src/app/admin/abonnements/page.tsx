@@ -25,6 +25,7 @@ import {
 import { incidentsPaiement, useAbonnements, useEnLigne } from "@/components/admin/data";
 import SuiviDeparts from "@/components/admin/vues/SuiviDeparts";
 import CompteARebours from "@/components/admin/vues/CompteARebours";
+import ProvenanceInscriptions from "@/components/admin/vues/ProvenanceInscriptions";
 import { Anneau, Fraicheur, useRecuLe } from "@/components/admin/graphes";
 import {
   MOUVEMENT_LABELS, MOUVEMENT_TONS,
@@ -394,6 +395,8 @@ export default function AbonnementsPage() {
           <SuiviDeparts suivi={data.suivi} />
         </div>
       )}
+
+      <ProvenanceInscriptions />
 
       <Panneau titre="Répartition des comptes" actions={<Puce>{num(r.comptes)} comptes</Puce>}>
         <div className="grid gap-6 lg:grid-cols-[auto_1fr] lg:items-center">

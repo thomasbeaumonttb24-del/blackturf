@@ -108,7 +108,10 @@ export default function ConfidentialitePage() {
         <h2 className="text-lg font-semibold">10. Cookies</h2>
         <p className="text-sm text-muted-foreground">
           Cookies strictement nécessaires uniquement (session JWT, préférences interface).
-          Pas de cookies publicitaires ni de trackers tiers.
+          Pas de cookies publicitaires ni de trackers tiers. Si vous arrivez par un lien de
+          campagne (paramètre utm_source, par exemple depuis une publication Facebook ou
+          Instagram), un cookie « bt_src » garde 30 jours le nom de ce lien, sans aucun
+          identifiant : il sert seulement à savoir quelle publication a amené votre inscription.
         </p>
       </section>
 
