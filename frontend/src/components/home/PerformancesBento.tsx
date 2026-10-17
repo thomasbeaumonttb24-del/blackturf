@@ -6,7 +6,7 @@
  * Anneau doré en relief pour le chiffre phare (gagnant dans notre Top-3, avec
  * l'anneau du hasard à l'intérieur), deux anneaux pour le favori, colonnes en
  * relief pour la comparaison au hasard et les 7 derniers jours, tubes brillants
- * par discipline. Règles reprises de l'ancien panneau :
+ * par discipline (cartes claires inclinables). Règles reprises de l'ancien panneau :
  *  - état servi = état FINAL ; compteurs, anneaux et colonnes n'animent que si
  *    le bloc était encore sous la ligne de flottaison (cf. `useReveal`) ;
  *  - le repère « hasard » vient de l'API (`hasard_top3` / `hasard_top1`, calculés
