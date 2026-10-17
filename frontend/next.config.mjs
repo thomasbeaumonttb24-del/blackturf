@@ -91,6 +91,11 @@ const nextConfig = {
       // version tapée avec accent (/découvrir) tombait en 404. Temporaire (307) pour
       // pouvoir changer la page d'arrivée sans toucher à la bio.
       { source: "/tiktok", destination: "/programme?utm_source=tiktok&utm_medium=bio", permanent: false },
+      // Anciens liens de bio (TikTok, Instagram) écrits en dur sur /decouvrir : ces
+      // applis ne laissent changer le lien que depuis le téléphone. Les visiteurs des
+      // réseaux vont au programme (décision du 2026-10-16) ; la query, utm compris,
+      // est transmise telle quelle. /decouvrir sans utm_medium=bio reste accessible.
+      { source: "/decouvrir", has: [{ type: "query", key: "utm_medium", value: "bio" }], destination: "/programme", permanent: false },
       { source: "/d%C3%A9couvrir", destination: "/decouvrir", permanent: true },
       { source: "/découvrir", destination: "/decouvrir", permanent: true },
     ];
